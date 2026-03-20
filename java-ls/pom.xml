@@ -16,6 +16,11 @@
 
   <dependencies>
     <dependency>
+      <groupId>ch.castleridge</groupId>
+      <artifactId>java-indexing</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>org.eclipse.lsp4j</groupId>
       <artifactId>org.eclipse.lsp4j</artifactId>
     </dependency>

@@ -12,6 +12,7 @@
   <url>http://www.example.com</url>
 
   <modules>
+    <module>java-indexing</module>
     <module>java-ls</module>
   </modules>
 
