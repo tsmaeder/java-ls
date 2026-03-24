@@ -1,6 +1,5 @@
 package ch.castleridge.javals.indexing.declaration;
 
-import ch.castleridge.javals.indexing.store.FieldSelector;
 import ch.castleridge.javals.indexing.store.IndexEntry;
 import ch.castleridge.javals.indexing.store.IndexStore;
 
@@ -33,7 +32,7 @@ public final class DeclarationIndex {
 
     /** Removes all declaration rows for the given class file URI. */
     public CompletableFuture<Long> removeForResource(URI resourceUri) {
-        return store.removeMatching(new FieldSelector(DeclarationFields.RESOURCE_URI, resourceUri.toString()));
+        return store.removePartition(resourceUri.toString());
     }
 
     public static IndexEntry typeRow(

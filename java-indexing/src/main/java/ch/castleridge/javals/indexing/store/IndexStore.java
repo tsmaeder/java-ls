@@ -19,6 +19,13 @@ public interface IndexStore {
     CompletableFuture<Long> removeMatching(FieldSelector selector);
 
     /**
+     * Removes all rows in the partition bucket for {@code partitionKey} (exact key, average {@code
+     * O(1)}). Use when the key matches {@link IndexEntry} values for the store's partition field;
+     * use {@link #removeMatching} for substring bulk delete.
+     */
+    CompletableFuture<Long> removePartition(String partitionKey);
+
+    /**
      * Invokes {@code consumer} once per matching entry on {@code executor}. Completes when the scan
      * finishes (or exceptionally if {@code consumer} throws).
      */
