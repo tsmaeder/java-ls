@@ -18,6 +18,8 @@ public final class DeclarationFields {
     public static final String THROWS_TYPES = "throwsJvm";
     public static final String DECLARED_TYPE = "declaredTypeJvm";
     public static final String ANNOTATIONS = "annotations";
+    /** Bitmask string from ASM access flags (see {@link org.objectweb.asm.Opcodes}). */
+    public static final String ACCESS_FLAGS = "accessFlags";
 
     private DeclarationFields() {}
 }

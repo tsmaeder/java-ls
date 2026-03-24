@@ -32,7 +32,7 @@ public final class AsmClassDeclarationExtractor implements ClassDeclarationExtra
 
         out.add(
                 DeclarationIndex.typeRow(
-                        resourceUri, cn.name, typeParams, extendsJvm, implementsJvm, annos));
+                        resourceUri, cn.name, typeParams, extendsJvm, implementsJvm, annos, cn.access));
 
         if (cn.fields != null) {
             for (FieldNode fn : cn.fields) {
@@ -41,7 +41,7 @@ public final class AsmClassDeclarationExtractor implements ClassDeclarationExtra
                 String declared = AsmTypeStrings.jvmForm(Type.getType(fn.desc));
                 out.add(
                         DeclarationIndex.fieldRow(
-                                resourceUri, cn.name, fn.name, fn.desc, declared, fAnn));
+                                resourceUri, cn.name, fn.name, fn.desc, declared, fAnn, fn.access));
             }
         }
 
@@ -64,7 +64,8 @@ public final class AsmClassDeclarationExtractor implements ClassDeclarationExtra
                                 AsmTypeStrings.returnTypeJvm(mn.desc),
                                 AsmTypeStrings.argTypesJoined(mn.desc),
                                 throwsJvm,
-                                mAnn));
+                                mAnn,
+                                mn.access));
             }
         }
 

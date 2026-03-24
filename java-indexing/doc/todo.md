@@ -1,0 +1,2 @@
+- [ ] Clean up storage of index fields: generic signature, type parameters, etc.
+- [ ] Add possibility to index jdk modules

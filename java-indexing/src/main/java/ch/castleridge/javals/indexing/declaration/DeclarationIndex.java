@@ -42,8 +42,9 @@ public final class DeclarationIndex {
             String typeParams,
             String extendsJvm,
             String implementsJvm,
-            String annotations) {
-        Map<String, String> m = baseRow(resourceUri, KIND_TYPE, jvmName);
+            String annotations,
+            int accessFlags) {
+        Map<String, String> m = baseRow(resourceUri, KIND_TYPE, jvmName, accessFlags);
         m.put(DeclarationFields.TYPE_PARAMS, nullToEmpty(typeParams));
         m.put(DeclarationFields.EXTENDS, nullToEmpty(extendsJvm));
         m.put(DeclarationFields.IMPLEMENTS, nullToEmpty(implementsJvm));
@@ -66,8 +67,9 @@ public final class DeclarationIndex {
             String returnTypeJvm,
             String argTypesJvm,
             String throwsJvm,
-            String annotations) {
-        Map<String, String> m = baseRow(resourceUri, KIND_METHOD, ownerJvmName);
+            String annotations,
+            int accessFlags) {
+        Map<String, String> m = baseRow(resourceUri, KIND_METHOD, ownerJvmName, accessFlags);
         m.put(DeclarationFields.MEMBER_NAME, memberName);
         m.put(DeclarationFields.DESCRIPTOR, nullToEmpty(descriptor));
         m.put(DeclarationFields.TYPE_PARAMS, nullToEmpty(typeParams));
@@ -87,8 +89,9 @@ public final class DeclarationIndex {
             String fieldName,
             String descriptor,
             String declaredTypeJvm,
-            String annotations) {
-        Map<String, String> m = baseRow(resourceUri, KIND_FIELD, ownerJvmName);
+            String annotations,
+            int accessFlags) {
+        Map<String, String> m = baseRow(resourceUri, KIND_FIELD, ownerJvmName, accessFlags);
         m.put(DeclarationFields.MEMBER_NAME, fieldName);
         m.put(DeclarationFields.DESCRIPTOR, nullToEmpty(descriptor));
         m.put(DeclarationFields.DECLARED_TYPE, nullToEmpty(declaredTypeJvm));
@@ -102,11 +105,12 @@ public final class DeclarationIndex {
         return new IndexEntry(m);
     }
 
-    private static Map<String, String> baseRow(URI resourceUri, String kind, String jvmName) {
+    private static Map<String, String> baseRow(URI resourceUri, String kind, String jvmName, int accessFlags) {
         Map<String, String> m = new LinkedHashMap<>();
         m.put(DeclarationFields.RESOURCE_URI, resourceUri.toString());
         m.put(DeclarationFields.KIND, kind);
         m.put(DeclarationFields.JVM_NAME, jvmName);
+        m.put(DeclarationFields.ACCESS_FLAGS, Integer.toString(accessFlags));
         return m;
     }
 
