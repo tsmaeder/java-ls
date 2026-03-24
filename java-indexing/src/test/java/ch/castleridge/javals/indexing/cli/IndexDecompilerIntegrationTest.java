@@ -11,6 +11,7 @@ import javax.tools.JavaFileObject;
 import javax.tools.StandardJavaFileManager;
 import javax.tools.ToolProvider;
 import java.net.URI;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -20,7 +21,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class IndexDecompilerIntegrationTest {
 
@@ -75,6 +78,39 @@ class IndexDecompilerIntegrationTest {
         } finally {
             exec.shutdown();
             assertTrue(exec.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void indexesJdkModuleFromJrtImage() throws Exception {
+        assumeTrue(isJrtAvailable(), "jrt:/ file system not available");
+
+        ExecutorService exec = Executors.newSingleThreadExecutor();
+        try {
+            JavaClassIndex index = new JavaClassIndex(exec);
+            boolean err = IndexDecompilerMain.indexJdkModules(index, false, List.of("java.compiler"));
+            assertFalse(err);
+
+            List<IndexEntry> all = new ArrayList<>();
+            index.declarations()
+                    .store()
+                    .search(new SearchPredicate(Collections.emptyList()), all::add, exec)
+                    .join();
+
+            String rendered = IndexedSkeletonRenderer.renderAll(all);
+            assertTrue(rendered.contains("JavaCompiler"), rendered);
+        } finally {
+            exec.shutdown();
+            assertTrue(exec.awaitTermination(120, TimeUnit.SECONDS));
+        }
+    }
+
+    private static boolean isJrtAvailable() {
+        try {
+            FileSystems.getFileSystem(URI.create("jrt:/"));
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
 }
