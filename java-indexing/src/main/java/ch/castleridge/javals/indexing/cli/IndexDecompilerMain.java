@@ -1,5 +1,9 @@
 package ch.castleridge.javals.indexing.cli;
 
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryPoolMXBean;
+import java.lang.management.MemoryType;
+import java.lang.management.MemoryUsage;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -32,20 +36,107 @@ public final class IndexDecompilerMain {
             System.exit(2);
         }
 
+        resetPeakHeap();
+        long baselineBytes = sampleUsedHeapBytes();
+
         Index index = new Index();
         Scanner scanner = new Scanner();
         long t0 = System.nanoTime();
         List<Throwable> failures = scanner.scanAll(sources, index);
         long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
 
-        System.out.println("Indexed types: " + index.size());
+        long retainedBytes = sampleUsedHeapBytes();
+        long peakBytes = peakUsedHeapBytes();
+        long indexBytes = Math.max(0L, retainedBytes - baselineBytes);
+        int types = index.size();
+        int entries = index.entryCount();
+
+        System.out.println("Indexed types: " + types);
+        System.out.println("Indexed entries: " + entries);
         System.out.println("Elapsed: " + elapsedMs + " ms");
+        System.out.println("Memory (heap, JVM delta):");
+        System.out.println("  baseline:  " + formatBytes(baselineBytes));
+        System.out.println("  retained:  " + formatBytes(retainedBytes)
+                + " (index delta: " + formatBytes(indexBytes) + ")");
+        System.out.println("  peak:      " + formatBytes(peakBytes));
+        if (types > 0) {
+            System.out.println("  per type:  " + formatBytes(indexBytes / (long) types));
+        }
+        if (entries > 0) {
+            System.out.println("  per entry: " + formatBytes(indexBytes / (long) entries));
+        }
+
+        HeapSizeEstimator est = new HeapSizeEstimator();
+        long estimatedBytes = est.estimate(index);
+        System.out.println("Memory (shape-based estimate):");
+        System.out.println("  total:     " + formatBytes(estimatedBytes));
+        if (types > 0) {
+            System.out.println("  per type:  " + formatBytes(estimatedBytes / (long) types));
+        }
+        if (entries > 0) {
+            System.out.println("  per entry: " + formatBytes(estimatedBytes / (long) entries));
+        }
+        System.out.println("  top contributors:");
+        for (String row : est.topByBytes(15)) {
+            System.out.println("    " + row);
+        }
+
         if (!failures.isEmpty()) {
             System.out.println("Failures: " + failures.size());
             for (Throwable t : failures) {
                 System.out.println("  " + t.getClass().getSimpleName() + ": " + t.getMessage());
             }
         }
+    }
+
+    /**
+     * Force a GC cycle and return currently used heap bytes. The GC is a hint,
+     * but repeating it stabilises the reading enough for a coarse estimate of
+     * the memory retained by the index.
+     */
+    private static long sampleUsedHeapBytes() {
+        for (int i = 0; i < 3; i++) {
+            System.gc();
+            try {
+                Thread.sleep(20L);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        Runtime rt = Runtime.getRuntime();
+        return rt.totalMemory() - rt.freeMemory();
+    }
+
+    /** Sum the peak-used bytes across all heap memory pools. */
+    private static long peakUsedHeapBytes() {
+        long peak = 0L;
+        for (MemoryPoolMXBean pool : ManagementFactory.getMemoryPoolMXBeans()) {
+            if (pool.getType() != MemoryType.HEAP) continue;
+            MemoryUsage usage = pool.getPeakUsage();
+            if (usage != null) peak += usage.getUsed();
+        }
+        return peak;
+    }
+
+    /** Reset per-pool peak counters so the reported peak reflects indexing only. */
+    private static void resetPeakHeap() {
+        for (MemoryPoolMXBean pool : ManagementFactory.getMemoryPoolMXBeans()) {
+            if (pool.getType() != MemoryType.HEAP) continue;
+            try {
+                pool.resetPeakUsage();
+            } catch (UnsupportedOperationException ignored) {
+            }
+        }
+    }
+
+    private static String formatBytes(long bytes) {
+        if (bytes < 1024L) return bytes + " B";
+        double kb = bytes / 1024.0;
+        if (kb < 1024.0) return String.format("%.1f KiB", kb);
+        double mb = kb / 1024.0;
+        if (mb < 1024.0) return String.format("%.1f MiB", mb);
+        return String.format("%.2f GiB", mb / 1024.0);
     }
 
     private static List<InputSource> parseArgs(String[] args) {
