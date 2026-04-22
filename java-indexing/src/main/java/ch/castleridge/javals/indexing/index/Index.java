@@ -6,7 +6,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
@@ -28,20 +27,39 @@ import ch.castleridge.javals.indexing.model.TypeEntry;
  * <p>Entries representing {@code module-info} or {@code package-info} are
  * filtered at {@link #add(TypeEntry)} time so callers don't have to special
  * case them.
+ *
+ * <p>Bucket storage is optimised for the overwhelmingly common single-entry
+ * case: the map value is {@code Object}, carrying either a bare
+ * {@link TypeEntry} (1 entry) or a {@code TypeEntry[]} (2+). This avoids
+ * ~430k {@link java.util.concurrent.CopyOnWriteArrayList} shells for the
+ * trino workload and is updated atomically via
+ * {@link ConcurrentMap#compute}.
  */
 public final class Index {
 
-    private final ConcurrentMap<String, List<TypeEntry>> byJvmName = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, List<TypeEntry>> byPackage = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Object> byJvmName = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Object> byPackage = new ConcurrentHashMap<>();
 
     public void add(TypeEntry entry) {
         if (entry == null) return;
         String jvm = entry.jvmOwnerName();
         if (isSkippedJvmName(jvm)) return;
 
-        byJvmName.computeIfAbsent(jvm, k -> new CopyOnWriteArrayList<>()).add(entry);
+        byJvmName.compute(jvm, (k, prior) -> appendBucket(prior, entry));
         String pkg = entry.packageJvm();
-        byPackage.computeIfAbsent(pkg, k -> new CopyOnWriteArrayList<>()).add(entry);
+        byPackage.compute(pkg, (k, prior) -> appendBucket(prior, entry));
+    }
+
+    private static Object appendBucket(Object prior, TypeEntry entry) {
+        if (prior == null) return entry;
+        if (prior instanceof TypeEntry only) {
+            return new TypeEntry[] { only, entry };
+        }
+        TypeEntry[] arr = (TypeEntry[]) prior;
+        TypeEntry[] grown = new TypeEntry[arr.length + 1];
+        System.arraycopy(arr, 0, grown, 0, arr.length);
+        grown[arr.length] = entry;
+        return grown;
     }
 
     /**
@@ -51,8 +69,7 @@ public final class Index {
      * ordering via {@link TypeEntry#sourceUri()}.
      */
     public List<TypeEntry> getAll(String jvmName) {
-        List<TypeEntry> bucket = byJvmName.get(jvmName);
-        return bucket == null ? List.of() : List.copyOf(bucket);
+        return toList(byJvmName.get(jvmName));
     }
 
     /**
@@ -62,13 +79,19 @@ public final class Index {
      * explicit classpath ordering for deterministic behaviour.
      */
     public TypeEntry get(String jvmName) {
-        List<TypeEntry> bucket = byJvmName.get(jvmName);
-        return bucket == null || bucket.isEmpty() ? null : bucket.get(0);
+        Object bucket = byJvmName.get(jvmName);
+        if (bucket == null) return null;
+        if (bucket instanceof TypeEntry only) return only;
+        TypeEntry[] arr = (TypeEntry[]) bucket;
+        return arr.length == 0 ? null : arr[0];
     }
 
     public boolean contains(String jvmName) {
-        List<TypeEntry> bucket = byJvmName.get(jvmName);
-        return bucket != null && !bucket.isEmpty();
+        Object bucket = byJvmName.get(jvmName);
+        if (bucket == null) return false;
+        if (bucket instanceof TypeEntry) return true;
+        TypeEntry[] arr = (TypeEntry[]) bucket;
+        return arr.length > 0;
     }
 
     /**
@@ -77,15 +100,14 @@ public final class Index {
      * multiple sources) - consumers apply their own deduplication.
      */
     public List<TypeEntry> listPackage(String packageJvm) {
-        List<TypeEntry> bucket = byPackage.get(packageJvm == null ? "" : packageJvm);
-        return bucket == null ? List.of() : List.copyOf(bucket);
+        return toList(byPackage.get(packageJvm == null ? "" : packageJvm));
     }
 
     /** Every {@link TypeEntry} currently stored, including duplicates. */
     public Collection<TypeEntry> all() {
         List<TypeEntry> out = new ArrayList<>();
-        for (List<TypeEntry> bucket : byJvmName.values()) {
-            out.addAll(bucket);
+        for (Object bucket : byJvmName.values()) {
+            addBucketTo(bucket, out);
         }
         return Collections.unmodifiableCollection(out);
     }
@@ -98,10 +120,28 @@ public final class Index {
     /** Number of indexed entries in total, counting duplicates. */
     public int entryCount() {
         int n = 0;
-        for (List<TypeEntry> bucket : byJvmName.values()) {
-            n += bucket.size();
+        for (Object bucket : byJvmName.values()) {
+            if (bucket instanceof TypeEntry) n += 1;
+            else if (bucket != null) n += ((TypeEntry[]) bucket).length;
         }
         return n;
+    }
+
+    private static List<TypeEntry> toList(Object bucket) {
+        if (bucket == null) return List.of();
+        if (bucket instanceof TypeEntry only) return List.of(only);
+        TypeEntry[] arr = (TypeEntry[]) bucket;
+        return arr.length == 0 ? List.of() : List.of(arr);
+    }
+
+    private static void addBucketTo(Object bucket, List<TypeEntry> out) {
+        if (bucket == null) return;
+        if (bucket instanceof TypeEntry only) {
+            out.add(only);
+            return;
+        }
+        TypeEntry[] arr = (TypeEntry[]) bucket;
+        for (TypeEntry e : arr) out.add(e);
     }
 
     /**

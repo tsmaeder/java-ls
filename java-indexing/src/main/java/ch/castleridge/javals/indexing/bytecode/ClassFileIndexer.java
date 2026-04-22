@@ -16,6 +16,7 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.intern.Interner;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.Descriptors;
 import ch.castleridge.javals.indexing.model.FieldEntry;
@@ -59,13 +60,12 @@ public final class ClassFileIndexer {
     }
 
     private static final class CollectingVisitor extends ClassVisitor {
-        private final URI uri;
-        private final URI sourceUri;
+        private final String uri;
+        private final String sourceUri;
 
         private String jvmName;
         private int access;
         private String superName;
-        private String signature;
         private List<TypeRef> interfaces = List.of();
         private final List<FieldEntry> fields = new ArrayList<>();
         private final List<MethodEntry> methods = new ArrayList<>();
@@ -74,22 +74,26 @@ public final class ClassFileIndexer {
 
         CollectingVisitor(URI uri, URI sourceUri) {
             super(ASM_API);
-            this.uri = uri;
-            this.sourceUri = sourceUri;
+            // resourceUri is unique per class (many methods/fields share it
+            // via the single String reference stored on the visitor).
+            // sourceUri is shared across every entry in the same classpath
+            // input, so we intern it once to collapse the hundreds of
+            // thousands of duplicate copies.
+            this.uri = uri == null ? null : uri.toString();
+            this.sourceUri = sourceUri == null ? null : Interner.intern(sourceUri.toString());
         }
 
         @Override
         public void visit(int version, int access, String name, String signature,
                           String superName, String[] interfaces) {
-            this.jvmName = name;
+            this.jvmName = Interner.intern(name);
             this.access = access;
-            this.superName = superName;
-            this.signature = signature;
+            this.superName = Interner.intern(superName);
             if (interfaces == null || interfaces.length == 0) {
                 this.interfaces = List.of();
             } else {
                 List<TypeRef> refs = new ArrayList<>(interfaces.length);
-                for (String i : interfaces) refs.add(new TypeRef.Resolved(i));
+                for (String i : interfaces) refs.add(TypeRef.resolved(i));
                 this.interfaces = List.copyOf(refs);
             }
         }
@@ -107,9 +111,8 @@ public final class ClassFileIndexer {
                     uri,
                     jvmName,
                     fAccess,
-                    name,
+                    Interner.intern(name),
                     Descriptors.parseField(descriptor),
-                    fSignature,
                     fAnnotations);
             fields.add(fe);
             return new FieldVisitor(ASM_API) {
@@ -130,18 +133,17 @@ public final class ClassFileIndexer {
                 throwsRefs = List.of();
             } else {
                 List<TypeRef> ts = new ArrayList<>(exceptions.length);
-                for (String e : exceptions) ts.add(new TypeRef.Resolved(e));
+                for (String e : exceptions) ts.add(TypeRef.resolved(e));
                 throwsRefs = List.copyOf(ts);
             }
             MethodEntry me = new MethodEntry(
                     uri,
                     jvmName,
                     mAccess,
-                    name,
+                    Interner.intern(name),
                     parts.returnType(),
                     parts.paramTypes(),
                     throwsRefs,
-                    mSignature,
                     mAnnotations);
             methods.add(me);
             return new MethodVisitor(ASM_API) {
@@ -155,20 +157,19 @@ public final class ClassFileIndexer {
         @Override
         public void visitInnerClass(String name, String outerName, String innerName, int access) {
             if (outerName != null && outerName.equals(jvmName)) {
-                innerTypes.add(name);
+                innerTypes.add(Interner.intern(name));
             }
         }
 
         TypeEntry toTypeEntry() {
             if (jvmName == null) return null;
             if (Index.isSkippedJvmName(jvmName)) return null;
-            TypeRef superRef = superName == null ? null : new TypeRef.Resolved(superName);
+            TypeRef superRef = superName == null ? null : TypeRef.resolved(superName);
             return new TypeEntry(
                     uri,
                     sourceUri,
                     jvmName,
                     access,
-                    signature,
                     superRef,
                     interfaces,
                     fields,
@@ -203,7 +204,7 @@ public final class ClassFileIndexer {
         @Override
         public void visitEnd() {
             TypeRef ref = Descriptors.parseField(descriptor);
-            String jvm = ref instanceof TypeRef.Resolved r ? r.jvmBinaryName() : descriptor;
+            String jvm = ref instanceof TypeRef.Resolved r ? r.jvmBinaryName() : Interner.intern(descriptor);
             sink.add(new AnnotationRef(jvm, values));
         }
     }

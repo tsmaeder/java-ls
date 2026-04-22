@@ -1,0 +1,3 @@
+# MBT-JSON
+
+I'd like to use an mbt.json file as used in the ..\..\classpath-extractor project to generate a list roots to index and to generate a ClasspathOrder object from it. Add a flag to IndexDecompilerMain to read a mtb.json file and index the input sources in it. Note that you don't need to use ClasspathOrder in the java-indexing project, since you don't need ClasspathOrder to determine the list of InputSources. However, in java-ls, I'd like infrastructure that can create an ClasspathOrder from a mbt.json file. 

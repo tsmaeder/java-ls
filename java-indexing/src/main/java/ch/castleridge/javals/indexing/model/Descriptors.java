@@ -3,6 +3,8 @@ package ch.castleridge.javals.indexing.model;
 import java.util.ArrayList;
 import java.util.List;
 
+import ch.castleridge.javals.indexing.intern.Interner;
+
 /**
  * Helpers for translating JVM descriptor strings into {@link TypeRef}
  * values. Classfile-sourced entries go through here exclusively; source
@@ -22,11 +24,11 @@ public final class Descriptors {
      */
     public static TypeRef parseField(String descriptor) {
         if (descriptor == null || descriptor.isEmpty()) {
-            return new TypeRef.Resolved("java/lang/Object");
+            return TypeRef.resolved("java/lang/Object");
         }
         int[] pos = {0};
         TypeRef t = parseOne(descriptor, pos);
-        return t == null ? new TypeRef.Resolved("java/lang/Object") : t;
+        return t == null ? TypeRef.resolved("java/lang/Object") : t;
     }
 
     /**
@@ -74,9 +76,9 @@ public final class Descriptors {
             case 'L': {
                 int semi = desc.indexOf(';', pos[0]);
                 if (semi < 0) return null;
-                String name = desc.substring(pos[0] + 1, semi);
+                String name = Interner.intern(desc.substring(pos[0] + 1, semi));
                 pos[0] = semi + 1;
-                return new TypeRef.Resolved(name);
+                return TypeRef.resolved(name);
             }
             default: return null;
         }
@@ -88,7 +90,7 @@ public final class Descriptors {
      */
     public static TypeRef classRef(String jvmInternalName) {
         if (jvmInternalName == null || jvmInternalName.isEmpty()) return null;
-        return new TypeRef.Resolved(jvmInternalName);
+        return TypeRef.resolved(jvmInternalName);
     }
 
     /** Return value of {@link #parseMethod(String)}. */

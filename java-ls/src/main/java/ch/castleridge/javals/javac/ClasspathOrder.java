@@ -1,6 +1,7 @@
 package ch.castleridge.javals.javac;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -20,6 +21,9 @@ import ch.castleridge.javals.indexing.scan.InputSource;
  * with its originating {@link TypeEntry#sourceUri()}. This class - held by
  * the file manager and class reader - is what converts that tag into a
  * deterministic winner for a given compilation.
+ *
+ * <p>Source URIs are matched as their string form so the class matches how
+ * {@link TypeEntry#sourceUri()} is stored on the index.
  */
 public final class ClasspathOrder {
 
@@ -30,14 +34,14 @@ public final class ClasspathOrder {
      */
     public static final ClasspathOrder UNRESTRICTED = new ClasspathOrder(List.of(), true);
 
-    private final List<URI> order;
-    private final Map<URI, Integer> priority;
+    private final List<String> order;
+    private final Map<String, Integer> priority;
     private final boolean unrestricted;
 
-    private ClasspathOrder(List<URI> order, boolean unrestricted) {
+    private ClasspathOrder(List<String> order, boolean unrestricted) {
         this.order = List.copyOf(order);
         this.unrestricted = unrestricted;
-        Map<URI, Integer> map = new HashMap<>();
+        Map<String, Integer> map = new HashMap<>();
         for (int i = 0; i < this.order.size(); i++) {
             map.putIfAbsent(this.order.get(i), i);
         }
@@ -46,23 +50,33 @@ public final class ClasspathOrder {
 
     public static ClasspathOrder of(List<URI> sourceUris) {
         Objects.requireNonNull(sourceUris);
+        List<String> strings = new ArrayList<>(sourceUris.size());
+        for (URI u : sourceUris) strings.add(u == null ? null : u.toString());
+        return new ClasspathOrder(strings, false);
+    }
+
+    public static ClasspathOrder ofStrings(List<String> sourceUris) {
+        Objects.requireNonNull(sourceUris);
         return new ClasspathOrder(sourceUris, false);
     }
 
     public static ClasspathOrder ofSources(List<? extends InputSource> sources) {
         Objects.requireNonNull(sources);
-        List<URI> uris = new java.util.ArrayList<>(sources.size());
-        for (InputSource s : sources) uris.add(s.sourceUri());
-        return of(uris);
+        List<String> uris = new ArrayList<>(sources.size());
+        for (InputSource s : sources) {
+            URI u = s.sourceUri();
+            uris.add(u == null ? null : u.toString());
+        }
+        return ofStrings(uris);
     }
 
-    /** The URIs in priority order. */
-    public List<URI> order() {
+    /** The source URIs (string form) in priority order. */
+    public List<String> order() {
         return order;
     }
 
     /** True if {@code sourceUri} is part of this classpath. */
-    public boolean contains(URI sourceUri) {
+    public boolean contains(String sourceUri) {
         if (unrestricted) return true;
         return priority.containsKey(sourceUri);
     }
@@ -72,7 +86,7 @@ public final class ClasspathOrder {
      * return {@link Integer#MAX_VALUE}. For {@link #UNRESTRICTED} every
      * URI returns 0.
      */
-    public int priorityOf(URI sourceUri) {
+    public int priorityOf(String sourceUri) {
         if (unrestricted) return 0;
         Integer p = priority.get(sourceUri);
         return p == null ? Integer.MAX_VALUE : p;

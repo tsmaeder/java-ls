@@ -26,11 +26,22 @@ final class JarWalker {
                 if (Index.isSkippedFileName(simple)) continue;
 
                 URI uri = jarEntryUri(jar, name);
-                JarEntry ref = e;
-                sink.accept(uri, simple, () -> jf.getInputStream(ref).readAllBytes());
+                // Read bytes eagerly: the sink typically hands the bytes supplier
+                // to an async task, and by the time the task runs the
+                // try-with-resources below would have closed the JarFile.
+                byte[] bytes;
+                try {
+                    bytes = jf.getInputStream(e).readAllBytes();
+                } catch (IOException ioe) {
+                    System.err.println("Skipping unreadable jar entry " + jar + "!/" + name
+                            + ": " + ioe.getClass().getSimpleName() + ": " + ioe.getMessage());
+                    continue;
+                }
+                sink.accept(uri, simple, () -> bytes);
             }
-        } catch (IOException ex) {
-            throw new RuntimeException("Failed walking jar " + jar, ex);
+        } catch (IOException | RuntimeException ex) {
+            System.err.println("Skipping non-readable jar " + jar + ": "
+                    + ex.getClass().getSimpleName() + ": " + ex.getMessage());
         }
     }
 

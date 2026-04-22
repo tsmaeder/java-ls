@@ -1,6 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.net.URI;
 import java.util.List;
 
 /**
@@ -11,14 +10,13 @@ import java.util.List;
  * using the enclosing type's {@link SourceResolutionHints}.
  */
 public record MethodEntry(
-        URI resourceUri,
+        String resourceUri,
         String jvmOwnerName,
         int accessFlags,
         String name,
         TypeRef returnType,
         List<TypeRef> paramTypes,
         List<TypeRef> throwsTypes,
-        String signatureOrNull,
         List<AnnotationRef> annotations) implements IndexEntry {
 
     public MethodEntry {

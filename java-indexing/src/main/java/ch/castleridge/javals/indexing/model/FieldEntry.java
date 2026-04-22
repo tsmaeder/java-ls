@@ -1,6 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.net.URI;
 import java.util.List;
 
 /**
@@ -12,12 +11,11 @@ import java.util.List;
  * enclosing type.
  */
 public record FieldEntry(
-        URI resourceUri,
+        String resourceUri,
         String jvmOwnerName,
         int accessFlags,
         String name,
         TypeRef type,
-        String signatureOrNull,
         List<AnnotationRef> annotations) implements IndexEntry {
 
     public FieldEntry {

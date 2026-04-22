@@ -65,8 +65,14 @@ public final class IndexClassFileObject extends SimpleJavaFileObject {
     }
 
     private static URI toSafeUri(TypeEntry entry) {
-        URI u = entry.resourceUri();
-        if (u != null) return u;
+        String u = entry.resourceUri();
+        if (u != null) {
+            try {
+                return URI.create(u);
+            } catch (IllegalArgumentException ignored) {
+                // fall through to synthetic
+            }
+        }
         return URI.create("index:///" + entry.jvmOwnerName() + ".class");
     }
 }

@@ -37,6 +37,7 @@ import com.sun.source.tree.WildcardTree;
 import com.sun.source.util.JavacTask;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.intern.Interner;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
@@ -71,9 +72,11 @@ public final class SourceIndexer {
         JavaFileObject input = new InMemorySource(uri, content);
         JavacTask task = (JavacTask) compiler.getTask(
                 null, null, d -> {}, List.of(), List.of(), List.of(input));
+        String resourceUriStr = uri == null ? null : uri.toString();
+        String sourceUriStr = sourceUri == null ? null : Interner.intern(sourceUri.toString());
         try {
             for (CompilationUnitTree cu : task.parse()) {
-                indexCompilationUnit(uri, sourceUri, cu, into);
+                indexCompilationUnit(resourceUriStr, sourceUriStr, cu, into);
             }
         } catch (IOException e) {
             // Parsing never actually does I/O beyond our in-memory source; treat
@@ -81,9 +84,9 @@ public final class SourceIndexer {
         }
     }
 
-    private static void indexCompilationUnit(URI uri, URI sourceUri, CompilationUnitTree cu, Index into) {
+    private static void indexCompilationUnit(String uri, String sourceUri, CompilationUnitTree cu, Index into) {
         String packageName = cu.getPackageName() == null ? "" : cu.getPackageName().toString();
-        String packageJvm = packageName.replace('.', '/');
+        String packageJvm = Interner.intern(packageName.replace('.', '/'));
 
         Map<String, String> singleTypeImports = new HashMap<>();
         List<String> onDemandImports = new ArrayList<>();
@@ -123,8 +126,8 @@ public final class SourceIndexer {
         }
     }
 
-    private static void indexType(URI uri,
-                                  URI sourceUri,
+    private static void indexType(String uri,
+                                  String sourceUri,
                                   ClassTree ct,
                                   String packageJvm,
                                   Deque<String> enclosing,
@@ -141,6 +144,7 @@ public final class SourceIndexer {
         } else {
             localName = enclosing.peekLast() + "$" + simple;
         }
+        localName = Interner.intern(localName);
 
         Set<String> classTypeParams = new HashSet<>(outerTypeParams);
         for (TypeParameterTree tp : ct.getTypeParameters()) {
@@ -152,7 +156,7 @@ public final class SourceIndexer {
         if (ct.getExtendsClause() != null) {
             superRef = toTypeRef(ct.getExtendsClause(), classTypeParams);
         } else if ((access & Opcodes.ACC_INTERFACE) == 0) {
-            superRef = new TypeRef.Resolved("java/lang/Object");
+            superRef = TypeRef.resolved("java/lang/Object");
         } else {
             superRef = null;
         }
@@ -173,7 +177,7 @@ public final class SourceIndexer {
                 methods.add(toMethodEntry(uri, localName, mt, classTypeParams));
             } else if (member instanceof ClassTree inner) {
                 nested.add(inner);
-                String innerName = localName + "$" + inner.getSimpleName().toString();
+                String innerName = Interner.intern(localName + "$" + inner.getSimpleName().toString());
                 innerTypes.add(innerName);
             }
         }
@@ -183,7 +187,6 @@ public final class SourceIndexer {
                 sourceUri,
                 localName,
                 access,
-                null,
                 superRef,
                 interfaceRefs,
                 fields,
@@ -203,20 +206,19 @@ public final class SourceIndexer {
         }
     }
 
-    private static FieldEntry toFieldEntry(URI uri, String owner, VariableTree vt,
+    private static FieldEntry toFieldEntry(String uri, String owner, VariableTree vt,
                                            Set<String> typeParams) {
         int access = fieldAccessFlags(vt.getModifiers());
         return new FieldEntry(
                 uri,
                 owner,
                 access,
-                vt.getName().toString(),
+                Interner.intern(vt.getName().toString()),
                 toTypeRef(vt.getType(), typeParams),
-                null,
                 annotationsOf(vt.getModifiers()));
     }
 
-    private static MethodEntry toMethodEntry(URI uri, String owner, MethodTree mt,
+    private static MethodEntry toMethodEntry(String uri, String owner, MethodTree mt,
                                              Set<String> classTypeParams) {
         Set<String> methodTypeParams = new HashSet<>(classTypeParams);
         for (TypeParameterTree tp : mt.getTypeParameters()) {
@@ -238,7 +240,7 @@ public final class SourceIndexer {
         }
 
         int access = methodAccessFlags(mt.getModifiers());
-        String name = mt.getName().toString();
+        String name = Interner.intern(mt.getName().toString());
         return new MethodEntry(
                 uri,
                 owner,
@@ -247,7 +249,6 @@ public final class SourceIndexer {
                 returnRef,
                 paramRefs,
                 throwsRefs,
-                null,
                 annotationsOf(mt.getModifiers()));
     }
 
@@ -274,20 +275,20 @@ public final class SourceIndexer {
             return toTypeRef(pt.getType(), typeParams);
         }
         if (t instanceof WildcardTree) {
-            return new TypeRef.Resolved("java/lang/Object");
+            return TypeRef.resolved("java/lang/Object");
         }
         if (t instanceof IdentifierTree id) {
             String name = id.getName().toString();
             // Type variables erase to java.lang.Object for symbol-population purposes.
             if (typeParams.contains(name)) {
-                return new TypeRef.Resolved("java/lang/Object");
+                return TypeRef.resolved("java/lang/Object");
             }
-            return new TypeRef.Unresolved(name);
+            return TypeRef.unresolved(name);
         }
         if (t instanceof MemberSelectTree ms) {
-            return new TypeRef.Resolved(ms.toString().replace('.', '/'));
+            return TypeRef.resolved(ms.toString().replace('.', '/'));
         }
-        return new TypeRef.Resolved(t.toString().replace('.', '/'));
+        return TypeRef.resolved(t.toString().replace('.', '/'));
     }
 
     private static int classAccessFlags(ClassTree ct) {
@@ -336,7 +337,7 @@ public final class SourceIndexer {
         if (mods == null || mods.getAnnotations().isEmpty()) return List.of();
         List<AnnotationRef> out = new ArrayList<>();
         for (AnnotationTree a : mods.getAnnotations()) {
-            String name = a.getAnnotationType().toString().replace('.', '/');
+            String name = Interner.intern(a.getAnnotationType().toString().replace('.', '/'));
             out.add(new AnnotationRef(name, Map.of()));
         }
         return out;

@@ -30,35 +30,33 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class IndexCompileTest {
 
-    private static final URI SOURCE_URI = URI.create("index:///test-classpath/");
+    private static final String SOURCE_URI = "index:///test-classpath/";
 
     @Test
     void sourceReferencingIndexedClassCompilesCleanly() throws Exception {
         Index index = new Index();
         index.add(new TypeEntry(
-                URI.create("index:///com/example/Hello.class"),
+                "index:///com/example/Hello.class",
                 SOURCE_URI,
                 "com/example/Hello",
                 0x0001 /* ACC_PUBLIC */,
-                null,
                 new TypeRef.Resolved("java/lang/Object"),
                 List.of(),
                 List.of(),
                 List.of(new MethodEntry(
-                        URI.create("index:///com/example/Hello.class"),
+                        "index:///com/example/Hello.class",
                         "com/example/Hello",
                         0x0009 /* ACC_PUBLIC | ACC_STATIC */,
                         "greet",
                         TypeRef.Primitive.VOID,
                         List.of(),
                         List.of(),
-                        null,
                         List.of())),
                 List.of(),
                 List.of(),
                 null));
 
-        ClasspathOrder cp = ClasspathOrder.of(List.of(SOURCE_URI));
+        ClasspathOrder cp = ClasspathOrder.ofStrings(List.of(SOURCE_URI));
 
         JavacTool tool = JavacTool.create();
         Context context = new Context();
@@ -109,27 +107,25 @@ class IndexCompileTest {
     void indexedFieldIsVisibleToSourceReference() throws Exception {
         Index index = new Index();
         index.add(new TypeEntry(
-                URI.create("index:///com/example/Holder.class"),
+                "index:///com/example/Holder.class",
                 SOURCE_URI,
                 "com/example/Holder",
                 0x0001,
-                null,
                 new TypeRef.Resolved("java/lang/Object"),
                 List.of(),
                 List.of(new FieldEntry(
-                        URI.create("index:///com/example/Holder.class"),
+                        "index:///com/example/Holder.class",
                         "com/example/Holder",
                         0x0019 /* ACC_PUBLIC | ACC_STATIC | ACC_FINAL */,
                         "COUNT",
                         TypeRef.Primitive.INT,
-                        null,
                         List.of())),
                 List.of(),
                 List.of(),
                 List.of(),
                 null));
 
-        ClasspathOrder cp = ClasspathOrder.of(List.of(SOURCE_URI));
+        ClasspathOrder cp = ClasspathOrder.ofStrings(List.of(SOURCE_URI));
 
         JavacTool tool = JavacTool.create();
         Context context = new Context();
@@ -162,15 +158,15 @@ class IndexCompileTest {
 
     @Test
     void classpathOrderPicksFirstDuplicate() throws Exception {
-        URI winnerUri = URI.create("index:///primary/");
-        URI loserUri = URI.create("index:///shadowed/");
+        String winnerUri = "index:///primary/";
+        String loserUri = "index:///shadowed/";
 
         Index index = new Index();
         index.add(typeWithMethod(winnerUri, "com/example/Dup", "primary"));
         index.add(typeWithMethod(loserUri, "com/example/Dup", "shadowed"));
 
         // Winner listed first in classpath order.
-        ClasspathOrder cp = ClasspathOrder.of(List.of(winnerUri, loserUri));
+        ClasspathOrder cp = ClasspathOrder.ofStrings(List.of(winnerUri, loserUri));
 
         JavacTool tool = JavacTool.create();
         Context context = new Context();
@@ -203,7 +199,7 @@ class IndexCompileTest {
 
         // Reverse the classpath order - now the shadowed entry wins and
         // primary() is no longer visible: compilation must fail.
-        ClasspathOrder flipped = ClasspathOrder.of(List.of(loserUri, winnerUri));
+        ClasspathOrder flipped = ClasspathOrder.ofStrings(List.of(loserUri, winnerUri));
         JavacTool tool2 = JavacTool.create();
         Context ctx2 = new Context();
         IndexClassReader.preRegister(ctx2, index, flipped);
@@ -229,14 +225,14 @@ class IndexCompileTest {
 
     @Test
     void classpathOrderIgnoresEntriesNotOnClasspath() {
-        URI onCp = URI.create("index:///on/");
-        URI offCp = URI.create("index:///off/");
+        String onCp = "index:///on/";
+        String offCp = "index:///off/";
 
         Index index = new Index();
         index.add(typeWithMethod(onCp, "com/example/On", "yes"));
         index.add(typeWithMethod(offCp, "com/example/Off", "nope"));
 
-        ClasspathOrder cp = ClasspathOrder.of(List.of(onCp));
+        ClasspathOrder cp = ClasspathOrder.ofStrings(List.of(onCp));
 
         // Even though the index contains com/example/Off, an entry whose
         // source isn't on the classpath must not leak through.
@@ -248,25 +244,23 @@ class IndexCompileTest {
         assertTrue(offWinner == null, "Off should be filtered out by the classpath");
     }
 
-    private static TypeEntry typeWithMethod(URI srcUri, String jvmName, String methodName) {
+    private static TypeEntry typeWithMethod(String srcUri, String jvmName, String methodName) {
         return new TypeEntry(
-                URI.create("index:///" + jvmName + "@" + srcUri),
+                "index:///" + jvmName + "@" + srcUri,
                 srcUri,
                 jvmName,
                 0x0001,
-                null,
                 new TypeRef.Resolved("java/lang/Object"),
                 List.of(),
                 List.of(),
                 List.of(new MethodEntry(
-                        URI.create("index:///" + jvmName + "@" + srcUri + "#" + methodName),
+                        "index:///" + jvmName + "@" + srcUri + "#" + methodName,
                         jvmName,
                         0x0009,
                         methodName,
                         TypeRef.Primitive.VOID,
                         List.of(),
                         List.of(),
-                        null,
                         List.of())),
                 List.of(),
                 List.of(),

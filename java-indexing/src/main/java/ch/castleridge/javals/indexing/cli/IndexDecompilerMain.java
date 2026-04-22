@@ -1,5 +1,6 @@
 package ch.castleridge.javals.indexing.cli;
 
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryPoolMXBean;
 import java.lang.management.MemoryType;
@@ -9,6 +10,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.mbt.MbtInfo;
+import ch.castleridge.javals.indexing.mbt.MbtJson;
 import ch.castleridge.javals.indexing.scan.DirInput;
 import ch.castleridge.javals.indexing.scan.InputSource;
 import ch.castleridge.javals.indexing.scan.JarInput;
@@ -22,6 +25,7 @@ import ch.castleridge.javals.indexing.scan.Scanner;
  *   --dir &lt;path&gt;       index a directory recursively
  *   --jar &lt;path&gt;       index a jar file
  *   --jrt [module]    index jrt:/ (every module if no name is given)
+ *   --mbt &lt;path&gt;       read an mbt.json file and index every source/class/jar/jdk it references
  * </pre>
  *
  * After the scan finishes, prints the number of indexed types, any walker
@@ -32,7 +36,7 @@ public final class IndexDecompilerMain {
     public static void main(String[] args) {
         List<InputSource> sources = parseArgs(args);
         if (sources.isEmpty()) {
-            System.err.println("Usage: --dir <path> | --jar <path> | --jrt [module]");
+            System.err.println("Usage: --dir <path> | --jar <path> | --jrt [module] | --mbt <mbt.json>");
             System.exit(2);
         }
 
@@ -159,6 +163,16 @@ public final class IndexDecompilerMain {
                         module = args[++i];
                     }
                     sources.add(new JrtInput(module));
+                }
+                case "--mbt" -> {
+                    if (i + 1 >= args.length) fail("--mbt requires a path");
+                    Path mbtPath = Path.of(args[++i]);
+                    try {
+                        MbtInfo info = MbtJson.read(mbtPath);
+                        sources.addAll(MbtJson.toInputSources(info));
+                    } catch (IOException e) {
+                        fail("Failed reading " + mbtPath + ": " + e.getMessage());
+                    }
                 }
                 default -> fail("Unknown argument: " + a);
             }

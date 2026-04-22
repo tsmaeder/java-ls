@@ -1,6 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.net.URI;
 import java.util.List;
 
 /**
@@ -26,11 +25,10 @@ import java.util.List;
  * know about classpath order.
  */
 public record TypeEntry(
-        URI resourceUri,
-        URI sourceUri,
+        String resourceUri,
+        String sourceUri,
         String jvmOwnerName,
         int accessFlags,
-        String signatureOrNull,
         TypeRef superRef,
         List<TypeRef> interfaceRefs,
         List<FieldEntry> fields,
