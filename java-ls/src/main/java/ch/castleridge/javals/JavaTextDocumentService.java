@@ -5,9 +5,24 @@ import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.jsonrpc.messages.Either3;
 import org.eclipse.lsp4j.services.TextDocumentService;
 
+import java.net.URI;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+
+import javax.lang.model.element.Element;
+
+import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.LineMap;
+import com.sun.source.util.TreePath;
+import com.sun.source.util.Trees;
+
+import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.javac.ClasspathOrder;
+import ch.castleridge.javals.javac.SourceCache;
+import ch.castleridge.javals.javac.SymbolLocator;
+import ch.castleridge.javals.javac.TreePathLocator;
+import ch.castleridge.javals.javac.WorkspaceCompiler;
 
 /**
  * Text Document Service implementation handling document operations
@@ -17,6 +32,8 @@ public class JavaTextDocumentService implements TextDocumentService {
 
     private final JavaLanguageServer server;
     private final Map<String, TextDocumentItem> documents = new ConcurrentHashMap<>();
+    private final SourceCache sourceCache = new SourceCache();
+    private final SymbolLocator symbolLocator = new SymbolLocator(sourceCache);
 
     public JavaTextDocumentService(JavaLanguageServer server) {
         this.server = server;
@@ -116,10 +133,97 @@ public class JavaTextDocumentService implements TextDocumentService {
         return CompletableFuture.completedFuture(help);
     }
 
+    /**
+     * Resolve "go to definition" by recompiling the open document under
+     * the workspace's {@link Index} and {@link ClasspathOrder}, then
+     * mapping the resolved javac {@link Element} back to a source range
+     * via {@link SymbolLocator}.
+     *
+     * <p>If the workspace index has not finished loading yet, the call
+     * still succeeds for symbols whose declaration lives in the open
+     * document but cannot resolve cross-file references.
+     *
+     * <p>See {@link SymbolLocator} for the resolution algorithm and its
+     * caveats around overload disambiguation, bytecode-only dependencies
+     * and {@code jar:} / {@code jrt:} URIs in the returned
+     * {@link Location}.
+     */
     @Override
     public CompletableFuture<Either<List<? extends Location>, List<? extends LocationLink>>> definition(DefinitionParams params) {
-        // Return empty list for now - would need actual Java parsing
-        return CompletableFuture.completedFuture(Either.forLeft(new ArrayList<>()));
+        String uri = params.getTextDocument().getUri();
+        Position position = params.getPosition();
+        return CompletableFuture.supplyAsync(() -> Either.forLeft(computeDefinition(uri, position)));
+    }
+
+    private List<Location> computeDefinition(String uri, Position position) {
+        TextDocumentItem doc = documents.get(uri);
+        if (doc == null) return List.of();
+
+        IndexService indexService = server.getIndexService();
+        Index index = indexService.index().orElse(null);
+        ClasspathOrder classpath = indexService.classpath().orElse(null);
+        if (index == null || classpath == null) {
+            // Index not ready yet: fall back to an empty in-memory index so that
+            // same-file lookups still work.
+            index = new Index();
+            classpath = ClasspathOrder.UNRESTRICTED;
+        }
+
+        URI docUri;
+        try {
+            docUri = URI.create(uri);
+        } catch (IllegalArgumentException e) {
+            return List.of();
+        }
+
+        WorkspaceCompiler.Result compiled;
+        try {
+            compiled = WorkspaceCompiler.compile(docUri, doc.getText(), index, classpath);
+        } catch (RuntimeException e) {
+            server.logMessage(MessageType.Warning, "Definition: compile failed for " + uri + ": " + e.getMessage());
+            return List.of();
+        }
+
+        CompilationUnitTree cu = compiled.cu();
+        if (cu == null) return List.of();
+
+        long offset = positionToOffset(cu.getLineMap(), position);
+        if (offset < 0) return List.of();
+
+        Trees trees = compiled.trees();
+        TreePath path = TreePathLocator.findAt(trees, cu, offset);
+        if (path == null) return List.of();
+
+        Element element = elementForPath(trees, path);
+        if (element == null) return List.of();
+
+        return symbolLocator.locate(element, trees, cu, uri)
+                .map(List::of)
+                .orElse(List.of());
+    }
+
+    private static long positionToOffset(LineMap lineMap, Position position) {
+        if (lineMap == null) return -1;
+        try {
+            return lineMap.getPosition(position.getLine() + 1, position.getCharacter() + 1);
+        } catch (IndexOutOfBoundsException | IllegalArgumentException e) {
+            return -1;
+        }
+    }
+
+    /**
+     * Resolve {@code path}'s leaf to an {@link Element}, walking up the
+     * path if the leaf itself isn't bound (e.g. punctuation tokens that
+     * sit inside a parent {@code MemberSelectTree}).
+     */
+    private static Element elementForPath(Trees trees, TreePath path) {
+        TreePath cur = path;
+        while (cur != null) {
+            Element e = trees.getElement(cur);
+            if (e != null) return e;
+            cur = cur.getParentPath();
+        }
+        return null;
     }
 
     @Override

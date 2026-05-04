@@ -12,16 +12,24 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     
     private final TextDocumentService textDocumentService;
     private final WorkspaceService workspaceService;
+    private final IndexService indexService;
     private LanguageClient client;
     private int errorCode = 1;
 
     public JavaLanguageServer() {
         this.textDocumentService = new JavaTextDocumentService(this);
         this.workspaceService = new JavaWorkspaceService(this);
+        this.indexService = new IndexService(this);
+    }
+
+    public IndexService getIndexService() {
+        return indexService;
     }
 
     @Override
     public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
+        indexService.initialize(params);
+
         // Set up server capabilities
         ServerCapabilities capabilities = new ServerCapabilities();
         
