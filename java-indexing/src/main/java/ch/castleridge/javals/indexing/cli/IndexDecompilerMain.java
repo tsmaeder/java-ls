@@ -169,7 +169,8 @@ public final class IndexDecompilerMain {
                     Path mbtPath = Path.of(args[++i]);
                     try {
                         MbtInfo info = MbtJson.read(mbtPath);
-                        sources.addAll(MbtJson.toInputSources(info));
+                        Path workspace = mbtPath.toAbsolutePath().normalize().getParent();
+                        sources.addAll(MbtJson.toInputSources(info, workspace));
                     } catch (IOException e) {
                         fail("Failed reading " + mbtPath + ": " + e.getMessage());
                     }

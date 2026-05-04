@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
@@ -66,14 +67,15 @@ public final class IndexService {
             log(MessageType.Info, "No mbt.json found in workspace roots; index disabled");
             return CompletableFuture.completedFuture(null);
         }
+        Path workspacePath = resolveWorkspacePath(params, roots, mbt);
         log(MessageType.Info, "Loading mbt.json: " + mbt);
-        return CompletableFuture.runAsync(() -> loadFrom(mbt));
+        return CompletableFuture.runAsync(() -> loadFrom(mbt, workspacePath));
     }
 
-    private void loadFrom(Path mbt) {
+    private void loadFrom(Path mbt, Path workspacePath) {
         try {
             MbtInfo info = MbtJson.read(mbt);
-            List<InputSource> sources = MbtJson.toInputSources(info);
+            List<InputSource> sources = MbtJson.toInputSources(info, workspacePath);
             if (sources.isEmpty()) {
                 log(MessageType.Warning, "mbt.json contained no input sources: " + mbt);
                 return;
@@ -96,20 +98,44 @@ public final class IndexService {
         }
     }
 
+    private static Path resolveWorkspacePath(InitializeParams params, List<Path> roots, Path mbt) {
+        Path fromOptions = workspacePathFromInitializationOptions(params);
+        if (fromOptions != null) {
+            return fromOptions.toAbsolutePath().normalize();
+        }
+        if (!roots.isEmpty()) {
+            return roots.get(0).toAbsolutePath().normalize();
+        }
+        return mbt.toAbsolutePath().normalize().getParent();
+    }
+
+    private static Path workspacePathFromInitializationOptions(InitializeParams params) {
+        if (params == null) return null;
+        Object options = params.getInitializationOptions();
+        if (!(options instanceof Map<?, ?> map)) {
+            return null;
+        }
+        Object workspacePath = map.get("workspacePath");
+        if (workspacePath instanceof String s) {
+            return pathFromClientString(s);
+        }
+        return null;
+    }
+
     private static List<Path> workspaceRoots(InitializeParams params) {
         List<Path> roots = new ArrayList<>();
         if (params == null) return roots;
         List<WorkspaceFolder> folders = params.getWorkspaceFolders();
         if (folders != null) {
             for (WorkspaceFolder f : folders) {
-                Path p = uriToPath(f.getUri());
+                Path p = pathFromClientString(f.getUri());
                 if (p != null) roots.add(p);
             }
         }
         if (roots.isEmpty()) {
             @SuppressWarnings("deprecation")
             String rootUri = params.getRootUri();
-            Path p = uriToPath(rootUri);
+            Path p = pathFromClientString(rootUri);
             if (p != null) roots.add(p);
             if (p == null) {
                 @SuppressWarnings("deprecation")
@@ -122,13 +148,16 @@ public final class IndexService {
         return roots;
     }
 
-    private static Path uriToPath(String uri) {
-        if (uri == null || uri.isBlank()) return null;
-        try {
-            return Paths.get(URI.create(uri));
-        } catch (IllegalArgumentException | java.nio.file.FileSystemNotFoundException e) {
-            return null;
+    private static Path pathFromClientString(String s) {
+        if (s == null || s.isBlank()) return null;
+        if (s.startsWith("file:") || s.contains("://")) {
+            try {
+                return Paths.get(URI.create(s));
+            } catch (IllegalArgumentException | java.nio.file.FileSystemNotFoundException e) {
+                return null;
+            }
         }
+        return Paths.get(s);
     }
 
     private static Path findMbtJson(List<Path> roots) {
