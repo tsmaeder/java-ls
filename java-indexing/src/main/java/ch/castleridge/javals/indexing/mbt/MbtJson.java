@@ -85,7 +85,6 @@ public final class MbtJson {
         if (info.dependencyModules != null) {
             for (MbtDependencyModuleInfo dm : info.dependencyModules) {
                 addJar(dm.jar, out, seenJars);
-                addJar(dm.sources, out, seenJars);
             }
         }
         return out;

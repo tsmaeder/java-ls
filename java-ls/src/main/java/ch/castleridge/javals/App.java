@@ -6,6 +6,7 @@ import org.eclipse.lsp4j.services.LanguageClient;
 
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintStream;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.logging.LogManager;
@@ -21,10 +22,13 @@ public class App {
 
     public static void main(String[] args) {
         try {
+            PrintStream out = System.out;
+            System.setOut(System.err);
+
             // Disable default logging to avoid interference with LSP communication
             LogManager.getLogManager().reset();
             
-            startServer(System.in, System.out);
+            startServer(System.in, out);
         } catch (Exception e) {
             LOGGER.severe("Error starting language server: " + e.getMessage());
             System.exit(1);

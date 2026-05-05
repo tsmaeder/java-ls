@@ -9,7 +9,11 @@
             "name": "Attach to Remote Program",
             "request": "attach",
             "hostName": "localhost",
-            "port": 9000
+            "port": 9000,
+            "sourcePaths": [
+                "${workspaceFolder}/java-indexing/src/main/java",
+                "${workspaceFolder}/java-ls/src/main/java"
+            ]
         },
 
         {
