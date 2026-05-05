@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -17,6 +18,7 @@ import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.WorkspaceFolder;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.mbt.MbtDependencyModuleInfo;
 import ch.castleridge.javals.indexing.mbt.MbtInfo;
 import ch.castleridge.javals.indexing.mbt.MbtJson;
 import ch.castleridge.javals.indexing.scan.InputSource;
@@ -53,6 +55,10 @@ public final class IndexService {
         return Optional.ofNullable(cp);
     }
 
+    public Map<String, String> sourceJarByBinaryJar() {
+        return state.get().sourceJarByBinaryJar;
+    }
+
     /**
      * Look for an {@code mbt.json} under any of the workspace folders
      * declared in {@code params} (falling back to the deprecated
@@ -86,7 +92,8 @@ public final class IndexService {
             List<Throwable> failures = scanner.scanAll(sources, index);
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
             ClasspathOrder cp = ClasspathOrder.ofSources(sources);
-            state.set(new State(index, cp));
+            Map<String, String> sourceJarByBinaryJar = sourceJarLookup(info);
+            state.set(new State(index, cp, sourceJarByBinaryJar));
             log(MessageType.Info, "Indexed " + index.size() + " types ("
                     + index.entryCount() + " entries) from " + sources.size()
                     + " sources in " + elapsedMs + " ms"
@@ -174,9 +181,33 @@ public final class IndexService {
         }
     }
 
-    private record State(Index index, ClasspathOrder classpath) {
+    static Map<String, String> sourceJarLookup(MbtInfo info) {
+        if (info == null || info.dependencyModules == null || info.dependencyModules.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        for (MbtDependencyModuleInfo dm : info.dependencyModules) {
+            Path binaryJar = pathFromUri(dm == null ? null : dm.jar);
+            Path sourceJar = pathFromUri(dm == null ? null : dm.sources);
+            if (binaryJar == null || sourceJar == null) continue;
+            if (!Files.isRegularFile(binaryJar) || !Files.isRegularFile(sourceJar)) continue;
+            out.putIfAbsent(binaryJar.toUri().toString(), sourceJar.toUri().toString());
+        }
+        return out.isEmpty() ? Map.of() : Map.copyOf(out);
+    }
+
+    private static Path pathFromUri(String s) {
+        if (s == null || s.isBlank()) return null;
+        try {
+            return Path.of(URI.create(s)).toAbsolutePath().normalize();
+        } catch (IllegalArgumentException | java.nio.file.FileSystemNotFoundException e) {
+            return null;
+        }
+    }
+
+    private record State(Index index, ClasspathOrder classpath, Map<String, String> sourceJarByBinaryJar) {
         static State empty() {
-            return new State(null, null);
+            return new State(null, null, Map.of());
         }
     }
 }

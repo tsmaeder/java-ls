@@ -14,7 +14,6 @@ import java.util.Map;
 import java.util.Optional;
 
 import javax.tools.JavaFileObject;
-import javax.tools.SimpleJavaFileObject;
 import javax.tools.StandardJavaFileManager;
 
 import com.sun.source.tree.CompilationUnitTree;
@@ -122,20 +121,6 @@ public final class SourceCache {
     private static <T> T firstOrNull(Iterable<? extends T> it) {
         Iterator<? extends T> i = it.iterator();
         return i.hasNext() ? i.next() : null;
-    }
-
-    private static final class InMemorySource extends SimpleJavaFileObject {
-        private final String text;
-
-        InMemorySource(URI uri, String text) {
-            super(uri, Kind.SOURCE);
-            this.text = text;
-        }
-
-        @Override
-        public CharSequence getCharContent(boolean ignoreEncodingErrors) {
-            return text;
-        }
     }
 
     private static final class LruMap<K, V> extends LinkedHashMap<K, V> {

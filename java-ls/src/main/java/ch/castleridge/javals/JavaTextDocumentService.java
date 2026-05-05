@@ -197,7 +197,7 @@ public class JavaTextDocumentService implements TextDocumentService {
         Element element = elementForPath(trees, path);
         if (element == null) return List.of();
 
-        return symbolLocator.locate(element, trees, cu, uri)
+        return symbolLocator.locate(element, trees, cu, uri, indexService.sourceJarByBinaryJar())
                 .map(List::of)
                 .orElse(List.of());
     }

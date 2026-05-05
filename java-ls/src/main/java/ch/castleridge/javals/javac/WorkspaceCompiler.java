@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Locale;
 
 import javax.tools.JavaFileObject;
-import javax.tools.SimpleJavaFileObject;
 import javax.tools.StandardJavaFileManager;
 
 import com.sun.source.tree.CompilationUnitTree;
@@ -84,17 +83,4 @@ public final class WorkspaceCompiler {
         return i.hasNext() ? i.next() : null;
     }
 
-    private static final class InMemorySource extends SimpleJavaFileObject {
-        private final CharSequence text;
-
-        InMemorySource(URI uri, CharSequence text) {
-            super(uri, Kind.SOURCE);
-            this.text = text;
-        }
-
-        @Override
-        public CharSequence getCharContent(boolean ignoreEncodingErrors) {
-            return text;
-        }
-    }
 }

@@ -4,6 +4,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import javax.lang.model.element.Element;
@@ -84,21 +85,11 @@ public final class SymbolLocator {
         this.sourceCache = sourceCache;
     }
 
-    /**
-     * Resolve {@code element} to a definition {@link Location}.
-     *
-     * @param element       the javac element bound at the cursor
-     * @param trees         the {@link Trees} instance from the compile
-     *                      that produced {@code element}
-     * @param openCu        the compilation unit currently open in the LSP
-     *                      session - used to short-circuit same-file lookups
-     * @param openDocUri    URI string of the open document, used as the
-     *                      {@link Location#getUri()} for same-file results
-     */
     public Optional<Location> locate(Element element,
                                      Trees trees,
                                      CompilationUnitTree openCu,
-                                     String openDocUri) {
+                                     String openDocUri,
+                                     Map<String, String> sourceJarByBinaryJar) {
         if (element == null) return Optional.empty();
 
         TreePath sameCuPath = trees.getPath(element);
@@ -108,20 +99,20 @@ public final class SymbolLocator {
                     .map(r -> new Location(openDocUri, r));
         }
 
-        return locateThroughIndex(element);
+        return locateThroughIndex(element, sourceJarByBinaryJar);
     }
 
-    private Optional<Location> locateThroughIndex(Element element) {
+    private Optional<Location> locateThroughIndex(Element element,
+                                                  Map<String, String> sourceJarByBinaryJar) {
         ClassSymbol enclosing = enclosingClass(element);
         if (enclosing == null) return Optional.empty();
         JavaFileObject classfile = enclosing.classfile;
         TypeEntry entry = IndexFileManager.asEntry(classfile);
         if (entry == null) return Optional.empty();
 
-        String sourceUri = entry.resourceUri();
-        if (sourceUri == null) return Optional.empty();
-        // Bytecode-only entries point at a .class - skip those for now.
-        if (sourceUri.endsWith(".class")) return Optional.empty();
+        Optional<String> sourceUriOpt = sourceResourceUri(entry, sourceJarByBinaryJar);
+        if (sourceUriOpt.isEmpty()) return Optional.empty();
+        String sourceUri = sourceUriOpt.get();
 
         Optional<SourceCache.ParsedSource> parsedOpt = sourceCache.parse(sourceUri);
         if (parsedOpt.isEmpty()) return Optional.empty();
@@ -135,6 +126,32 @@ public final class SymbolLocator {
 
         return rangeFor(decl, parsed.cu(), parsed.positions())
                 .map(r -> new Location(sourceUri, r));
+    }
+
+    static Optional<String> sourceResourceUri(TypeEntry entry, Map<String, String> sourceJarByBinaryJar) {
+        if (entry == null) return Optional.empty();
+        String resourceUri = entry.resourceUri();
+        if (resourceUri == null || resourceUri.isBlank()) return Optional.empty();
+        if (!resourceUri.endsWith(".class")) return Optional.of(resourceUri);
+
+        String sourceJarUri = sourceJarByBinaryJar.get(entry.sourceUri());
+        System.err.println("sourceJarUri: " + sourceJarUri);
+        if (sourceJarUri == null || sourceJarUri.isBlank()) return Optional.empty();
+
+        int sep = resourceUri.indexOf("!/");
+        if (sep < 0 || sep + 2 >= resourceUri.length()) return Optional.empty();
+        String classEntry = resourceUri.substring(sep + 2);
+        if (!classEntry.endsWith(".class")) return Optional.empty();
+        String javaEntry = classEntry.substring(0, classEntry.length() - ".class".length()) + ".java";
+        try {
+            return Optional.of(jarEntryUri(sourceJarUri, javaEntry));
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
+    }
+
+    private static String jarEntryUri(String jarFileUri, String entryName) {
+        return "jar:" + java.net.URI.create(jarFileUri) + "!/" + entryName;
     }
 
     private static ClassSymbol enclosingClass(Element element) {
