@@ -1,9 +1,6 @@
 package ch.castleridge.javals.indexing.index;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -53,7 +50,7 @@ public final class Index {
     private static Object appendBucket(Object prior, TypeEntry entry) {
         if (prior == null) return entry;
         if (prior instanceof TypeEntry only) {
-            return new TypeEntry[] { only, entry };
+            return new TypeEntry[]{only, entry};
         }
         TypeEntry[] arr = (TypeEntry[]) prior;
         TypeEntry[] grown = new TypeEntry[arr.length + 1];
@@ -99,8 +96,19 @@ public final class Index {
      * {@code packageJvm}. May contain duplicates (same JVM name from
      * multiple sources) - consumers apply their own deduplication.
      */
-    public List<TypeEntry> listPackage(String packageJvm) {
-        return toList(byPackage.get(packageJvm == null ? "" : packageJvm));
+    public List<TypeEntry> listPackage(String packageJvm, boolean recurse) {
+        if (recurse) {
+            List<TypeEntry> entries = new ArrayList<>();
+            for (Map.Entry<String, Object> entry : byPackage.entrySet()) {
+                String packageName = entry.getKey();
+                if (packageJvm.startsWith(packageName)) {
+                    addBucketTo(entry.getValue(), entries);
+                }
+            }
+            return entries;
+        } else {
+            return toList(byPackage.get(packageJvm == null ? "" : packageJvm));
+        }
     }
 
     /** Every {@link TypeEntry} currently stored, including duplicates. */

@@ -161,13 +161,7 @@ public class JavaTextDocumentService implements TextDocumentService {
 
         IndexService indexService = server.getIndexService();
         Index index = indexService.index().orElse(null);
-        ClasspathOrder classpath = indexService.classpath().orElse(null);
-        if (index == null || classpath == null) {
-            // Index not ready yet: fall back to an empty in-memory index so that
-            // same-file lookups still work.
-            index = new Index();
-            classpath = ClasspathOrder.UNRESTRICTED;
-        }
+
 
         URI docUri;
         try {
@@ -175,6 +169,8 @@ public class JavaTextDocumentService implements TextDocumentService {
         } catch (IllegalArgumentException e) {
             return List.of();
         }
+
+        ClasspathOrder classpath = indexService.classPathFor(uri);
 
         WorkspaceCompiler.Result compiled;
         try {

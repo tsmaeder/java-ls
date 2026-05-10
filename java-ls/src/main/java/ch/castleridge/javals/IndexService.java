@@ -5,33 +5,28 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
+import ch.castleridge.javals.indexing.mbt.*;
+import ch.castleridge.javals.indexing.scan.*;
+import ch.castleridge.javals.indexing.scan.Scanner;
+import ch.castleridge.javals.javac.ClasspathEntry;
+import ch.castleridge.javals.javac.ClasspathOrder;
+import ch.castleridge.javals.javac.UriClasspathEntry;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.WorkspaceFolder;
 
 import ch.castleridge.javals.indexing.index.Index;
-import ch.castleridge.javals.indexing.mbt.MbtDependencyModuleInfo;
-import ch.castleridge.javals.indexing.mbt.MbtInfo;
-import ch.castleridge.javals.indexing.mbt.MbtJson;
-import ch.castleridge.javals.indexing.scan.InputSource;
-import ch.castleridge.javals.indexing.scan.Scanner;
-import ch.castleridge.javals.javac.ClasspathOrder;
 
 /**
  * Bootstraps the workspace {@link Index} by locating an {@code mbt.json}
  * in one of the workspace folders and asynchronously running the
  * {@link Scanner} over the {@link InputSource}s it describes.
  *
- * <p>While the scan is running both {@link #index()} and
- * {@link #classpath()} return {@link Optional#empty()}; callers that need
+ * <p>While the scan is running both {@link #index()}  returns {@link Optional#empty()}; callers that need
  * the index should treat that as "not yet ready" and skip cross-file
  * resolution. Once the future completes the references are published
  * atomically.
@@ -48,11 +43,6 @@ public final class IndexService {
     public Optional<Index> index() {
         Index i = state.get().index;
         return Optional.ofNullable(i);
-    }
-
-    public Optional<ClasspathOrder> classpath() {
-        ClasspathOrder cp = state.get().classpath;
-        return Optional.ofNullable(cp);
     }
 
     public Map<String, String> sourceJarByBinaryJar() {
@@ -77,11 +67,26 @@ public final class IndexService {
         log(MessageType.Info, "Loading mbt.json: " + mbt);
         return CompletableFuture.runAsync(() -> loadFrom(mbt, workspacePath));
     }
+   
+   public ClasspathOrder classPathFor(String uri) {
+      for(ClasspathOrder classpath : state.get().classpathsByNamespace.values()) {
+         if (classpath.contains(uri)) {
+            return classpath;
+         }
+      }
+      return ClasspathOrder.UNRESTRICTED;
 
+   } 
+ 
     private void loadFrom(Path mbt, Path workspacePath) {
         try {
             MbtInfo info = MbtJson.read(mbt);
-            List<InputSource> sources = MbtJson.toInputSources(info, workspacePath);
+            Map<String, String> sourceJarByBinaryJar = new HashMap<>();
+            Map<String, ClasspathOrder> classpathsByNamespace = new HashMap<>();
+            Map<String, InputSource> sources = new HashMap<>(); 
+
+            extractInfo(info, workspacePath, sourceJarByBinaryJar, classpathsByNamespace, sources);
+
             if (sources.isEmpty()) {
                 log(MessageType.Warning, "mbt.json contained no input sources: " + mbt);
                 return;
@@ -89,11 +94,10 @@ public final class IndexService {
             Index index = new Index();
             Scanner scanner = new Scanner();
             long t0 = System.nanoTime();
-            List<Throwable> failures = scanner.scanAll(sources, index);
+            List<Throwable> failures = scanner.scanAll(sources.values(), index);
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
-            ClasspathOrder cp = ClasspathOrder.ofSources(sources);
-            Map<String, String> sourceJarByBinaryJar = sourceJarLookup(info);
-            state.set(new State(index, cp, sourceJarByBinaryJar));
+
+            state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar));
             log(MessageType.Info, "Indexed " + index.size() + " types ("
                     + index.entryCount() + " entries) from " + sources.size()
                     + " sources in " + elapsedMs + " ms"
@@ -103,6 +107,63 @@ public final class IndexService {
         } catch (RuntimeException e) {
             log(MessageType.Error, "Indexing failed for " + mbt + ": " + e.getMessage());
         }
+    }
+
+    private void extractInfo(MbtInfo info, Path workspacePath, Map<String, String> sourceJarByBinaryJar, Map<String, ClasspathOrder> classpathsByNamespace, Map<String, InputSource> sources) {
+        Map<String, MbtDependencyModuleInfo> dependencyModuleInfos = new HashMap<>();
+       
+        for (MbtDependencyModuleInfo dependencyModuleInfo : info.dependencyModules) {
+            dependencyModuleInfos.put(dependencyModuleInfo.id, dependencyModuleInfo);
+        }
+
+        for (MbtDependencyModuleInfo dependencyModuleInfo : info.dependencyModules) {
+            String binaryJar = dependencyModuleInfo.jar;
+            String sourceJar = dependencyModuleInfo.sources;
+            if (binaryJar != null && sourceJar != null) {
+                sourceJarByBinaryJar.put(binaryJar, sourceJar);
+                if (!sources.containsKey(binaryJar)) {
+                    sources.put(dependencyModuleInfo.id, new JarInput(pathFromUri(binaryJar)));
+                }
+            }
+        }
+
+        for (String namespaceId : info.namespaces.keySet()) {
+            MbtTargetInfo targetInfo = info.namespaces.get(namespaceId);
+           classpathOrder(namespaceId, targetInfo, workspacePath, dependencyModuleInfos, classpathsByNamespace, sources); 
+        }
+    }
+
+    private static void classpathOrder(String namespaceId, MbtTargetInfo targetInfo, Path workspacePath, Map<String, MbtDependencyModuleInfo> dependencyModules, Map<String, ClasspathOrder> classpathsByNamespace, Map<String, InputSource> sources) {
+        List<ClasspathEntry> classpathEntries = new ArrayList<>();
+        for (String source : targetInfo.sources) {
+            Path sourcePath = workspacePath.resolve(source);
+            if (Files.isDirectory(sourcePath)) {
+               String sourceUri = sourcePath.toUri().toString(); 
+                classpathEntries.add(UriClasspathEntry.of(sourceUri));
+                if (!sources.containsKey(sourceUri)) {
+                    sources.put(sourceUri, new DirInput(sourcePath));
+                }
+            }
+        }
+       
+       Path jdk = null; 
+
+        if (targetInfo.javaHome != null && !targetInfo.javaHome.isBlank()) {
+            jdk = Path.of(targetInfo.javaHome).toAbsolutePath().normalize();
+        } 
+        JrtInput jrtInput = new JrtInput(JrtInput.ALL, jdk) ; 
+
+        if (!sources.containsKey(jrtInput.sourceUri().toString())) {
+            sources.put(jrtInput.sourceUri().toString(), jrtInput);
+        }
+
+        for (String dependencyModuleId : targetInfo.dependencyModules) {
+            MbtDependencyModuleInfo dependencyModuleInfo = dependencyModules.get(dependencyModuleId);
+            if (dependencyModuleInfo != null) {
+                classpathEntries.add(UriClasspathEntry.of(dependencyModuleInfo.jar));
+            }
+        }
+        classpathsByNamespace.put(namespaceId,   new ClasspathOrder(classpathEntries, false));
     }
 
     private static Path resolveWorkspacePath(InitializeParams params, List<Path> roots, Path mbt) {
@@ -204,10 +265,10 @@ public final class IndexService {
             return null;
         }
     }
-
-    private record State(Index index, ClasspathOrder classpath, Map<String, String> sourceJarByBinaryJar) {
+    private record State(Index index, Map<String, ClasspathOrder> classpathsByNamespace,
+                         Map<String, String> sourceJarByBinaryJar) {
         static State empty() {
-            return new State(null, null, Map.of());
+            return new State(null, Map.of(), Map.of());
         }
     }
 }

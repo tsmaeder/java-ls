@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Collectors;
 
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
@@ -32,6 +33,12 @@ class IndexCompileTest {
 
     private static final String SOURCE_URI = "index:///test-classpath/";
 
+   
+    private static ClasspathOrder classPathOf(List<String> uris) {
+        return new ClasspathOrder(uris.stream().map(UriClasspathEntry::of).collect(Collectors.toList()), false);
+    }
+ 
+
     @Test
     void sourceReferencingIndexedClassCompilesCleanly() throws Exception {
         Index index = new Index();
@@ -56,7 +63,7 @@ class IndexCompileTest {
                 List.of(),
                 null));
 
-        ClasspathOrder cp = ClasspathOrder.ofStrings(List.of(SOURCE_URI));
+        ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
         JavacTool tool = JavacTool.create();
         Context context = new Context();
@@ -125,7 +132,7 @@ class IndexCompileTest {
                 List.of(),
                 null));
 
-        ClasspathOrder cp = ClasspathOrder.ofStrings(List.of(SOURCE_URI));
+        ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
         JavacTool tool = JavacTool.create();
         Context context = new Context();
@@ -166,7 +173,7 @@ class IndexCompileTest {
         index.add(typeWithMethod(loserUri, "com/example/Dup", "shadowed"));
 
         // Winner listed first in classpath order.
-        ClasspathOrder cp = ClasspathOrder.ofStrings(List.of(winnerUri, loserUri));
+        ClasspathOrder cp = classPathOf(List.of(winnerUri, loserUri));
 
         JavacTool tool = JavacTool.create();
         Context context = new Context();
@@ -199,7 +206,7 @@ class IndexCompileTest {
 
         // Reverse the classpath order - now the shadowed entry wins and
         // primary() is no longer visible: compilation must fail.
-        ClasspathOrder flipped = ClasspathOrder.ofStrings(List.of(loserUri, winnerUri));
+        ClasspathOrder flipped = classPathOf(List.of(loserUri, winnerUri));
         JavacTool tool2 = JavacTool.create();
         Context ctx2 = new Context();
         IndexClassReader.preRegister(ctx2, index, flipped);
@@ -232,14 +239,14 @@ class IndexCompileTest {
         index.add(typeWithMethod(onCp, "com/example/On", "yes"));
         index.add(typeWithMethod(offCp, "com/example/Off", "nope"));
 
-        ClasspathOrder cp = ClasspathOrder.ofStrings(List.of(onCp));
+        ClasspathOrder cp = classPathOf(List.of(onCp));
 
         // Even though the index contains com/example/Off, an entry whose
         // source isn't on the classpath must not leak through.
         assertEquals(1, index.getAll("com/example/On").size());
         assertEquals(1, index.getAll("com/example/Off").size());
-        TypeEntry onWinner = cp.pick(index.getAll("com/example/On"));
-        TypeEntry offWinner = cp.pick(index.getAll("com/example/Off"));
+        TypeEntry onWinner = cp.pick(index.getAll("com/example/On"), TypeEntry::sourceUri);
+        TypeEntry offWinner = cp.pick(index.getAll("com/example/Off"), TypeEntry::sourceUri);
         assertTrue(onWinner != null, "On should have a winner");
         assertTrue(offWinner == null, "Off should be filtered out by the classpath");
     }

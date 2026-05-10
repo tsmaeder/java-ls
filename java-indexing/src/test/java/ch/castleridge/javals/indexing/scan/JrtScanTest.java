@@ -56,7 +56,7 @@ class JrtScanTest {
         Scanner scanner = new Scanner();
         scanner.scanAll(List.of(new JrtInput("java.base")), index);
 
-        List<TypeEntry> javaUtil = index.listPackage("java/util");
+        List<TypeEntry> javaUtil = index.listPackage("java/util", false);
         assertTrue(javaUtil.stream().anyMatch(e -> e.jvmName().equals("java/util/ArrayList")),
                 "java/util should contain ArrayList");
         assertTrue(javaUtil.stream().anyMatch(e -> e.jvmName().equals("java/util/HashMap")),

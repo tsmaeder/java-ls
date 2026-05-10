@@ -3,6 +3,7 @@ package ch.castleridge.javals.indexing.scan;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -51,7 +52,7 @@ public final class Scanner {
         this.ownsPool = owns;
     }
 
-    public List<Throwable> scanAll(List<InputSource> sources, Index into) {
+    public List<Throwable> scanAll(Collection<InputSource> sources, Index into) {
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
         // Bound walker concurrency so we never hold more than a handful of
         // JarFiles open at once. Indexing itself is still parallel up to

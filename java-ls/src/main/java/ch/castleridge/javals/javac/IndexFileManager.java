@@ -83,20 +83,13 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
         }
 
         Map<String, TypeEntry> winners = new HashMap<>();
-        Iterable<TypeEntry> candidates = recurse ? index.all() : index.listPackage(pkgJvm);
-        String prefix = pkgJvm.isEmpty() ? "" : pkgJvm + "/";
+        Iterable<TypeEntry> candidates = index.listPackage(pkgJvm, recurse);
         for (TypeEntry e : candidates) {
             if (!classpath.contains(e.sourceUri())) continue;
             String jvm = e.jvmOwnerName();
-            if (recurse) {
-                if (!prefix.isEmpty() && !jvm.startsWith(prefix)) continue;
-            } else {
-                if (!e.packageJvm().equals(pkgJvm)) continue;
-            }
             String binName = jvm.replace('/', '.');
             TypeEntry existing = winners.get(binName);
-            if (existing == null
-                    || classpath.priorityOf(e.sourceUri()) < classpath.priorityOf(existing.sourceUri())) {
+            if (existing == null || classpath.pick(List.of(e, existing), TypeEntry::sourceUri) == e) {
                 winners.put(binName, e);
             }
         }
@@ -129,7 +122,7 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
             String jvm = className.replace('.', '/');
             List<TypeEntry> all = index.getAll(jvm);
             if (!all.isEmpty()) {
-                TypeEntry winner = classpath.pick(all);
+                TypeEntry winner = classpath.pick(all, TypeEntry::sourceUri);
                 if (winner != null) {
                     return new IndexClassFileObject(winner);
                 }

@@ -166,6 +166,6 @@ final class TypeRefResolver {
     }
 
     private boolean availableOnClasspath(String jvmName) {
-        return classpath.anyOnClasspath(index.getAll(jvmName));
+        return classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri) != null;
     }
 }
