@@ -1,6 +1,8 @@
 package ch.castleridge.javals;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -102,6 +104,11 @@ public final class IndexService {
                     + index.entryCount() + " entries) from " + sources.size()
                     + " sources in " + elapsedMs + " ms"
                     + (failures.isEmpty() ? "" : "; " + failures.size() + " failures"));
+            failures.forEach(f -> {
+                StringWriter writer = new StringWriter();
+                f.printStackTrace(new PrintWriter(writer));
+                log(MessageType.Error, "Indexing failure: " + writer.toString());
+            });
         } catch (IOException e) {
             log(MessageType.Error, "Failed to load mbt.json " + mbt + ": " + e.getMessage());
         } catch (RuntimeException e) {
@@ -129,11 +136,11 @@ public final class IndexService {
 
         for (String namespaceId : info.namespaces.keySet()) {
             MbtTargetInfo targetInfo = info.namespaces.get(namespaceId);
-           classpathOrder(namespaceId, targetInfo, workspacePath, dependencyModuleInfos, classpathsByNamespace, sources); 
+           classpathOrder(namespaceId, targetInfo, workspacePath, dependencyModuleInfos, classpathsByNamespace, sources, sourceJarByBinaryJar); 
         }
     }
 
-    private static void classpathOrder(String namespaceId, MbtTargetInfo targetInfo, Path workspacePath, Map<String, MbtDependencyModuleInfo> dependencyModules, Map<String, ClasspathOrder> classpathsByNamespace, Map<String, InputSource> sources) {
+    private static void classpathOrder(String namespaceId, MbtTargetInfo targetInfo, Path workspacePath, Map<String, MbtDependencyModuleInfo> dependencyModules, Map<String, ClasspathOrder> classpathsByNamespace, Map<String, InputSource> sources, Map<String, String> sourceJarByBinaryJar) {
         List<ClasspathEntry> classpathEntries = new ArrayList<>();
         for (String source : targetInfo.sources) {
             Path sourcePath = workspacePath.resolve(source);
@@ -146,7 +153,7 @@ public final class IndexService {
             }
         }
        
-       Path jdk = null; 
+       Path jdk = Path.of(System.getProperty("java.home")); 
 
         if (targetInfo.javaHome != null && !targetInfo.javaHome.isBlank()) {
             jdk = Path.of(targetInfo.javaHome).toAbsolutePath().normalize();
@@ -155,6 +162,10 @@ public final class IndexService {
 
         if (!sources.containsKey(jrtInput.sourceUri().toString())) {
             sources.put(jrtInput.sourceUri().toString(), jrtInput);
+           Path sourcePath = jdk.resolve("lib/src.zip");
+            if (Files.isRegularFile(sourcePath)) {
+                sourceJarByBinaryJar.put(jrtInput.sourceUri().toString(), sourcePath.toUri().toString());
+            }
         }
 
         for (String dependencyModuleId : targetInfo.dependencyModules) {

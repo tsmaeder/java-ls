@@ -141,7 +141,7 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
     private static boolean shouldAnswerFromIndex(Location location) {
         if (location == StandardLocation.CLASS_PATH) return true;
         if (location == StandardLocation.SOURCE_PATH) return false;
-        if (location == StandardLocation.SYSTEM_MODULES) return true;
+        if (location.getName().startsWith("SYSTEM_MODULES")) return true;
         if (location == StandardLocation.MODULE_PATH) return true;
         return false;
     }
