@@ -5,21 +5,25 @@ import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symbol.ModuleSymbol;
+import com.sun.tools.javac.code.Symbol.TypeVariableSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Symtab;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ClassType;
 import com.sun.tools.javac.code.Type.MethodType;
+import com.sun.tools.javac.code.Type.TypeVar;
 import com.sun.tools.javac.code.Types;
 import com.sun.tools.javac.jvm.ClassReader;
 import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.List;
+import com.sun.tools.javac.util.ListBuffer;
 import com.sun.tools.javac.util.Names;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
+import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
 /**
@@ -111,7 +115,7 @@ public final class IndexClassReader extends ClassReader {
             interfaces = interfaces.prepend(resolver.resolve(iref, module, entry));
         }
         ct.interfaces_field = interfaces.reverse();
-        ct.typarams_field = List.nil();
+        ct.typarams_field = synthesizeTypeParams(c, entry);
 
         for (FieldEntry f : entry.fields()) {
             Type t = resolver.resolveField(f, module, entry);
@@ -126,5 +130,27 @@ public final class IndexClassReader extends ClassReader {
         }
 
         c.completer = Symbol.Completer.NULL_COMPLETER;
+    }
+
+    /**
+     * Build javac {@link TypeVar}s for each formal type parameter
+     * declared on {@code entry}. Phase 1 sets every upper bound to
+     * {@code java.lang.Object}, which is enough for parameterized uses
+     * like {@code Function<? super T, U>} to match the right arity even
+     * though we lose the precise bounds (e.g. {@code <T extends
+     * Comparable<T>>}). Members on the class still see {@code Object} for
+     * type-variable references because the index erases them at indexing
+     * time; tightening that is Phase 2 work.
+     */
+    private List<Type> synthesizeTypeParams(ClassSymbol c, TypeEntry entry) {
+        if (entry.typeParams().isEmpty()) return List.nil();
+        ListBuffer<Type> out = new ListBuffer<>();
+        for (TypeParamRef tp : entry.typeParams()) {
+            TypeVar tv = new TypeVar(names.fromString(tp.name()), c, syms.botType);
+            tv.setUpperBound(syms.objectType);
+            ((TypeVariableSymbol) tv.tsym).type = tv;
+            out.add(tv);
+        }
+        return out.toList();
     }
 }

@@ -15,6 +15,13 @@ import java.util.List;
  * bytecode-derived entries every {@link TypeRef} is already
  * {@link TypeRef.Resolved}.
  *
+ * <p>{@link #typeParams()} captures the formal type parameters declared
+ * on the class header (e.g. {@code <T, R>} on
+ * {@code java.util.function.Function}). It is empty for non-generic
+ * types. The entries appear in declaration order so that
+ * {@code IndexClassReader} can synthesize a {@code TypeVar} per
+ * parameter and javac sees the correct arity for parameterized uses.
+ *
  * <p>{@link #hints()} is non-{@code null} only for source-derived
  * entries; bytecode entries leave it {@code null}.
  *
@@ -31,6 +38,7 @@ public record TypeEntry(
         int accessFlags,
         TypeRef superRef,
         List<TypeRef> interfaceRefs,
+        List<TypeParamRef> typeParams,
         List<FieldEntry> fields,
         List<MethodEntry> methods,
         List<String> innerTypeJvmNames,
@@ -39,6 +47,7 @@ public record TypeEntry(
 
     public TypeEntry {
         interfaceRefs = interfaceRefs == null ? List.of() : List.copyOf(interfaceRefs);
+        typeParams = typeParams == null ? List.of() : List.copyOf(typeParams);
         fields = fields == null ? List.of() : List.copyOf(fields);
         methods = methods == null ? List.of() : List.copyOf(methods);
         innerTypeJvmNames = innerTypeJvmNames == null ? List.of() : List.copyOf(innerTypeJvmNames);

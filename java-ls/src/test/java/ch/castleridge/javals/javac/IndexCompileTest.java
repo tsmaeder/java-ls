@@ -24,6 +24,7 @@ import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
+import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -51,6 +52,7 @@ class IndexCompileTest {
                 "com/example/Hello",
                 0x0001 /* ACC_PUBLIC */,
                 new TypeRef.Resolved("java/lang/Object"),
+                List.of(),
                 List.of(),
                 List.of(),
                 List.of(new MethodEntry(
@@ -123,6 +125,7 @@ class IndexCompileTest {
                 "com/example/Holder",
                 0x0001,
                 new TypeRef.Resolved("java/lang/Object"),
+                List.of(),
                 List.of(),
                 List.of(new FieldEntry(
                         "index:///com/example/Holder.class",
@@ -237,6 +240,64 @@ class IndexCompileTest {
 
 
     @Test
+    void genericIndexedTypeAcceptsTypeArguments() throws Exception {
+        // Regression: javac used to report "type ... does not take parameters"
+        // because IndexClassReader hard-wired typarams_field to an empty list.
+        // With class-level type parameters synthesised, parameterised uses of
+        // an indexed generic type must compile cleanly.
+        Index index = new Index();
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/String", "<init>"));
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Number", "<init>"));
+        index.add(new TypeEntry(
+                "index:///com/example/Box.class",
+                SOURCE_URI,
+                "com/example/Box",
+                0x0001 /* ACC_PUBLIC */,
+                new TypeRef.Resolved("java/lang/Object"),
+                List.of(),
+                List.of(TypeParamRef.of("T")),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                null));
+
+        ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
+
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("test:///UseBox.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return "import com.example.Box;\n"
+                        + "public class UseBox {\n"
+                        + "    Box<String> stringBox;\n"
+                        + "    Box<? extends Number> numberBox;\n"
+                        + "}\n";
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "Box<...> should be accepted because Box has one formal "
+                        + "type parameter; got errors: " + errors);
+    }
+
+    @Test
     void classpathOrderIgnoresEntriesNotOnClasspath() {
         String onCp = "index:///on/";
         String offCp = "index:///off/";
@@ -264,6 +325,7 @@ class IndexCompileTest {
                 jvmName,
                 0x0001,
                 null,
+                List.of(),
                 List.of(),
                 List.of(),
                 List.of(new MethodEntry(

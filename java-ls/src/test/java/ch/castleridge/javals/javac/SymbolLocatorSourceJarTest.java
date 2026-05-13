@@ -36,6 +36,7 @@ class SymbolLocatorSourceJarTest {
                 List.of(),
                 List.of(),
                 List.of(),
+                List.of(),
                 null);
 
         Optional<String> uri = SymbolLocator.sourceResourceUri(

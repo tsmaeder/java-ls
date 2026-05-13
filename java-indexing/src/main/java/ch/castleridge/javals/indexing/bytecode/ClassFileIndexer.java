@@ -14,6 +14,8 @@ import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.signature.SignatureReader;
+import org.objectweb.asm.signature.SignatureVisitor;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.intern.Interner;
@@ -22,6 +24,7 @@ import ch.castleridge.javals.indexing.model.Descriptors;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
+import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
 /**
@@ -67,6 +70,7 @@ public final class ClassFileIndexer {
         private int access;
         private String superName;
         private List<TypeRef> interfaces = List.of();
+        private List<TypeParamRef> typeParams = List.of();
         private final List<FieldEntry> fields = new ArrayList<>();
         private final List<MethodEntry> methods = new ArrayList<>();
         private final List<String> innerTypes = new ArrayList<>();
@@ -96,6 +100,9 @@ public final class ClassFileIndexer {
                 for (String i : interfaces) refs.add(TypeRef.resolved(i));
                 this.interfaces = List.copyOf(refs);
             }
+            this.typeParams = signature == null
+                    ? List.of()
+                    : parseFormalTypeParameters(signature);
         }
 
         @Override
@@ -172,12 +179,41 @@ public final class ClassFileIndexer {
                     access,
                     superRef,
                     interfaces,
+                    typeParams,
                     fields,
                     methods,
                     innerTypes,
                     annotations,
                     null);
         }
+    }
+
+    /**
+     * Pull just the formal type parameter <em>names</em> out of a JVM
+     * class {@code Signature} attribute. Bounds are ignored in Phase 1 of
+     * generics support and normalised to {@code java/lang/Object} by
+     * {@link TypeParamRef}.
+     *
+     * <p>The signature grammar (JVMS 4.7.9.1) starts with an optional
+     * {@code <FormalTypeParameter+>} block; we only need the names from
+     * that prefix, and we let ASM's {@link SignatureReader} drive a
+     * tolerant {@link SignatureVisitor} that ignores everything else.
+     */
+    private static List<TypeParamRef> parseFormalTypeParameters(String signature) {
+        if (signature == null || signature.isEmpty() || signature.charAt(0) != '<') {
+            return List.of();
+        }
+        List<TypeParamRef> collected = new ArrayList<>();
+        SignatureVisitor sv = new SignatureVisitor(ASM_API) {
+            @Override
+            public void visitFormalTypeParameter(String name) {
+                if (name != null && !name.isEmpty()) {
+                    collected.add(TypeParamRef.of(Interner.intern(name)));
+                }
+            }
+        };
+        new SignatureReader(signature).accept(sv);
+        return collected.isEmpty() ? List.of() : List.copyOf(collected);
     }
 
     private static final class CapturingAnnotationVisitor extends AnnotationVisitor {

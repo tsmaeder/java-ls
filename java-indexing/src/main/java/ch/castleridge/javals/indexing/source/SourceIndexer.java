@@ -44,6 +44,7 @@ import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.SourceResolutionHints;
 import ch.castleridge.javals.indexing.model.TypeEntry;
+import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
 /**
@@ -148,8 +149,11 @@ public final class SourceIndexer {
         localName = Interner.intern(localName);
 
         Set<String> classTypeParams = new HashSet<>(outerTypeParams);
+        List<TypeParamRef> declaredTypeParams = new ArrayList<>();
         for (TypeParameterTree tp : ct.getTypeParameters()) {
-            classTypeParams.add(tp.getName().toString());
+            String tpName = tp.getName().toString();
+            classTypeParams.add(tpName);
+            declaredTypeParams.add(TypeParamRef.of(Interner.intern(tpName)));
         }
 
         int access = classAccessFlags(ct);
@@ -190,6 +194,7 @@ public final class SourceIndexer {
                 access,
                 superRef,
                 interfaceRefs,
+                declaredTypeParams,
                 fields,
                 methods,
                 innerTypes,

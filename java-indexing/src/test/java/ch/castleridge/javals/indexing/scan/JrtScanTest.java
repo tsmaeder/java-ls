@@ -36,6 +36,34 @@ class JrtScanTest {
     }
 
     @Test
+    void formalTypeParametersAreExtractedFromClassSignatures() {
+        Index index = new Index();
+        Scanner scanner = new Scanner();
+        scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
+
+        TypeEntry list = index.get("java/util/List");
+        assertNotNull(list);
+        assertEquals(1, list.typeParams().size(), "List<E> has one type parameter");
+        assertEquals("E", list.typeParams().get(0).name());
+
+        TypeEntry map = index.get("java/util/Map");
+        assertNotNull(map);
+        assertEquals(2, map.typeParams().size(), "Map<K,V> has two type parameters");
+        assertEquals("K", map.typeParams().get(0).name());
+        assertEquals("V", map.typeParams().get(1).name());
+
+        TypeEntry function = index.get("java/util/function/Function");
+        assertNotNull(function);
+        assertEquals(2, function.typeParams().size(), "Function<T,R> has two type parameters");
+        assertEquals("T", function.typeParams().get(0).name());
+        assertEquals("R", function.typeParams().get(1).name());
+
+        TypeEntry object = index.get("java/lang/Object");
+        assertNotNull(object);
+        assertTrue(object.typeParams().isEmpty(), "Object is not generic");
+    }
+
+    @Test
     void packageInfoAndModuleInfoAreFiltered() {
         Index index = new Index();
         Scanner scanner = new Scanner();
