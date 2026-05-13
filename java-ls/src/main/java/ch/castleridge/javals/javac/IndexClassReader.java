@@ -102,9 +102,6 @@ public final class IndexClassReader extends ClassReader {
         c.members_field = WriteableScope.create(c);
 
         ClassType ct = (ClassType) c.type;
-        if (c.name().toString().equals("java/lang/Object")) {
-            System.err.println("superRef: " + entry.superRef());
-        }
         ct.supertype_field = entry.superRef() == null
                 ? Type.noType
                 : resolver.resolve(entry.superRef(), module, entry);

@@ -73,7 +73,10 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
         for (TypeEntry e : candidates) {
             if (!classpath.contains(e.sourceUri())) continue;
             String jvm = e.jvmOwnerName();
-            winners.put(jvm, e);
+            TypeEntry existing = winners.get(jvm);
+            if (existing == null || classpath.pick(List.of(e, existing), TypeEntry::sourceUri) == e) {
+                winners.put(jvm, e);
+            }
         }
         return winners.values().stream().map(IndexClassFileObject::new).collect(Collectors.toList());
     }

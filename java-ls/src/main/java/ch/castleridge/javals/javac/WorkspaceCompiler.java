@@ -7,6 +7,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 
+import javax.tools.Diagnostic;
+import javax.tools.DiagnosticCollector;
 import javax.tools.JavaFileObject;
 import javax.tools.StandardJavaFileManager;
 
@@ -17,6 +19,7 @@ import com.sun.tools.javac.api.JavacTool;
 import com.sun.tools.javac.util.Context;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemorySource;
 
 /**
  * Compiles a single Java source under a {@link JavacTask} whose file
@@ -36,7 +39,11 @@ public final class WorkspaceCompiler {
      * cheapest way to get back to {@link javax.lang.model.element.Element}
      * instances and source positions.
      */
-    public record Result(JavacTask task, CompilationUnitTree cu, Trees trees, JavaFileObject source) {}
+    public record Result(JavacTask task,
+                         CompilationUnitTree cu,
+                         Trees trees,
+                         JavaFileObject source,
+                         List<Diagnostic<? extends JavaFileObject>> diagnostics) {}
 
     /**
      * Compile {@code text} as if it lived at {@code uri}. Diagnostics are
@@ -49,6 +56,8 @@ public final class WorkspaceCompiler {
         Context ctx = new Context();
         IndexClassReader.preRegister(ctx, index, classpath);
 
+        DiagnosticCollector<JavaFileObject> collector = new DiagnosticCollector<>();
+
         StandardJavaFileManager std = tool.getStandardFileManager(
                 d -> {}, Locale.ROOT, StandardCharsets.UTF_8);
         IndexFileManager fm = new IndexFileManager(std, index, classpath);
@@ -58,7 +67,7 @@ public final class WorkspaceCompiler {
         JavacTask task = (JavacTask) tool.getTask(
                 null,
                 fm,
-                d -> {},
+                collector,
                 List.of(),
                 List.of(),
                 List.of(input),
@@ -72,9 +81,9 @@ public final class WorkspaceCompiler {
             } catch (RuntimeException ignored) {
                 // Analysis errors are fine; we just want as much binding as javac can give us.
             }
-            return new Result(task, cu, Trees.instance(task), input);
+            return new Result(task, cu, Trees.instance(task), input, List.copyOf(collector.getDiagnostics()));
         } catch (IOException e) {
-            return new Result(task, null, Trees.instance(task), input);
+            return new Result(task, null, Trees.instance(task), input, List.copyOf(collector.getDiagnostics()));
         }
     }
 

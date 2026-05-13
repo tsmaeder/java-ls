@@ -3,6 +3,7 @@ package ch.castleridge.javals;
 import org.eclipse.lsp4j.*;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.jsonrpc.messages.Either3;
+import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.TextDocumentService;
 
 import java.net.URI;
@@ -11,6 +12,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.lang.model.element.Element;
+import javax.tools.JavaFileObject;
 
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.LineMap;
@@ -32,6 +34,7 @@ public class JavaTextDocumentService implements TextDocumentService {
 
     private final JavaLanguageServer server;
     private final Map<String, TextDocumentItem> documents = new ConcurrentHashMap<>();
+    private final Map<String, CachedCompile> compileCache = new ConcurrentHashMap<>();
     private final SourceCache sourceCache = new SourceCache();
     private final SymbolLocator symbolLocator = new SymbolLocator(sourceCache);
 
@@ -39,37 +42,91 @@ public class JavaTextDocumentService implements TextDocumentService {
         this.server = server;
     }
 
+    private record CachedCompile(int version, WorkspaceCompiler.Result result) {}
+
     @Override
     public void didOpen(DidOpenTextDocumentParams params) {
         TextDocumentItem doc = params.getTextDocument();
         documents.put(doc.getUri(), doc);
         server.logMessage(MessageType.Info, "Document opened: " + doc.getUri());
+        refreshCompile(doc.getUri());
     }
 
     @Override
     public void didChange(DidChangeTextDocumentParams params) {
         String uri = params.getTextDocument().getUri();
         List<TextDocumentContentChangeEvent> changes = params.getContentChanges();
-        
+
         if (!changes.isEmpty()) {
             // For full sync, just take the last change which contains the full text
             TextDocumentContentChangeEvent change = changes.get(changes.size() - 1);
             TextDocumentItem doc = documents.get(uri);
             if (doc != null) {
-                
-                // complete bullshit
-                documents.put(uri, new TextDocumentItem(uri, doc.getLanguageId(), 
-                    doc.getVersion() + 1, change.getText()));
+                Integer paramVersion = params.getTextDocument().getVersion();
+                int newVersion = paramVersion != null ? paramVersion : doc.getVersion() + 1;
+                documents.put(uri, new TextDocumentItem(uri, doc.getLanguageId(),
+                    newVersion, change.getText()));
             }
         }
         server.logMessage(MessageType.Log, "Document changed: " + uri);
+        refreshCompile(uri);
     }
 
     @Override
     public void didClose(DidCloseTextDocumentParams params) {
         String uri = params.getTextDocument().getUri();
         documents.remove(uri);
+        compileCache.remove(uri);
+        publishEmptyDiagnostics(uri);
         server.logMessage(MessageType.Info, "Document closed: " + uri);
+    }
+
+    /**
+     * Recompile {@code uri} in the background and refresh
+     * {@link #compileCache} + publish diagnostics for it. Guarded against
+     * stale writes: if the document has been edited again while we were
+     * compiling, drop the result on the floor - a fresher refresh is
+     * already (or will be) in flight.
+     */
+    private void refreshCompile(String uri) {
+        TextDocumentItem doc = documents.get(uri);
+        if (doc == null) return;
+        int versionAtStart = doc.getVersion();
+        String text = doc.getText();
+
+        CompletableFuture.runAsync(() -> {
+            IndexService indexService = server.getIndexService();
+            Index index = indexService.index().orElse(null);
+            ClasspathOrder classpath = indexService.classPathFor(uri);
+
+            URI docUri;
+            try {
+                docUri = URI.create(uri);
+            } catch (IllegalArgumentException e) {
+                return;
+            }
+
+            WorkspaceCompiler.Result result;
+            try {
+                long t0 = System.currentTimeMillis();
+                result = WorkspaceCompiler.compile(docUri, text, index, classpath);
+                long t1 = System.currentTimeMillis();
+                server.logMessage(MessageType.Log,
+                        "Refresh compile took " + (t1 - t0) + "ms for " + uri);
+            } catch (RuntimeException e) {
+                server.logMessage(MessageType.Warning,
+                        "Refresh compile failed for " + uri + ": " + e.getMessage());
+                return;
+            }
+
+            TextDocumentItem latest = documents.get(uri);
+            if (latest == null || latest.getVersion() != versionAtStart) {
+                // Superseded by a newer edit (or document closed) - drop.
+                return;
+            }
+            compileCache.put(uri, new CachedCompile(versionAtStart, result));
+            publishDiagnostics(uri, result.cu(), result.source(), result.diagnostics());
+        });
     }
 
     @Override
@@ -160,27 +217,33 @@ public class JavaTextDocumentService implements TextDocumentService {
         if (doc == null) return List.of();
 
         IndexService indexService = server.getIndexService();
-        Index index = indexService.index().orElse(null);
 
-
-        URI docUri;
-        try {
-            docUri = URI.create(uri);
-        } catch (IllegalArgumentException e) {
-            return List.of();
+        WorkspaceCompiler.Result compiled = null;
+        CachedCompile cached = compileCache.get(uri);
+        if (cached != null && cached.version() == doc.getVersion()) {
+            compiled = cached.result();
         }
 
-        ClasspathOrder classpath = indexService.classPathFor(uri);
+        if (compiled == null) {
+            URI docUri;
+            try {
+                docUri = URI.create(uri);
+            } catch (IllegalArgumentException e) {
+                return List.of();
+            }
 
-        WorkspaceCompiler.Result compiled;
-        try {
-            long t0 = System.currentTimeMillis();
-            compiled = WorkspaceCompiler.compile(docUri, doc.getText(), index, classpath);
-            long t1 = System.currentTimeMillis();
-            server.logMessage(MessageType.Info, "Definition: compile took " + (t1 - t0) + "ms");
-        } catch (RuntimeException e) {
-            server.logMessage(MessageType.Warning, "Definition: compile failed for " + uri + ": " + e.getMessage());
-            return List.of();
+            Index index = indexService.index().orElse(null);
+            ClasspathOrder classpath = indexService.classPathFor(uri);
+
+            try {
+                long t0 = System.currentTimeMillis();
+                compiled = WorkspaceCompiler.compile(docUri, doc.getText(), index, classpath);
+                long t1 = System.currentTimeMillis();
+                server.logMessage(MessageType.Info, "Definition: compile took " + (t1 - t0) + "ms");
+            } catch (RuntimeException e) {
+                server.logMessage(MessageType.Warning, "Definition: compile failed for " + uri + ": " + e.getMessage());
+                return List.of();
+            }
         }
 
         CompilationUnitTree cu = compiled.cu();
@@ -266,5 +329,93 @@ public class JavaTextDocumentService implements TextDocumentService {
 
     public TextDocumentItem getDocument(String uri) {
         return documents.get(uri);
+    }
+
+    /**
+     * Translate javac diagnostics into LSP diagnostics and push them to
+     * the client. Diagnostics whose source isn't {@code compiledSource}
+     * are dropped - they belong to indexed classpath files that the
+     * client has no buffer for.
+     */
+    private void publishDiagnostics(String uri,
+                                    CompilationUnitTree cu,
+                                    JavaFileObject compiledSource,
+                                    List<javax.tools.Diagnostic<? extends JavaFileObject>> diags) {
+        LanguageClient client = server.getClient();
+        if (client == null) return;
+
+        LineMap lineMap = cu != null ? cu.getLineMap() : null;
+        List<Diagnostic> out = new ArrayList<>();
+        for (javax.tools.Diagnostic<? extends JavaFileObject> d : diags) {
+            if (compiledSource != null && d.getSource() != null && d.getSource() != compiledSource) {
+                continue;
+            }
+            Range range = rangeOf(lineMap, d);
+            Diagnostic lsp = new Diagnostic(range, d.getMessage(Locale.ROOT));
+            lsp.setSeverity(severityOf(d.getKind()));
+            lsp.setSource("javac");
+            String code = d.getCode();
+            if (code != null && !code.isEmpty()) {
+                lsp.setCode(code);
+            }
+            out.add(lsp);
+        }
+
+        PublishDiagnosticsParams params = new PublishDiagnosticsParams(uri, out);
+        client.publishDiagnostics(params);
+    }
+
+    private void publishEmptyDiagnostics(String uri) {
+        LanguageClient client = server.getClient();
+        if (client == null) return;
+        client.publishDiagnostics(new PublishDiagnosticsParams(uri, new ArrayList<>()));
+    }
+
+    private static Range rangeOf(LineMap lineMap, javax.tools.Diagnostic<?> d) {
+        long start = clampPos(d.getStartPosition());
+        long end = clampPos(d.getEndPosition());
+        if (end < start) end = start;
+
+        if (lineMap != null) {
+            try {
+                Position s = positionAt(lineMap, start);
+                Position e = positionAt(lineMap, end);
+                return new Range(s, e);
+            } catch (IndexOutOfBoundsException | IllegalArgumentException ignored) {
+                // fall through to line/column fallback below
+            }
+        }
+
+        // Fallback: javac reports 1-based line/column; LSP wants 0-based.
+        long line = d.getLineNumber();
+        long col = d.getColumnNumber();
+        int lspLine = line > 0 ? (int) (line - 1) : 0;
+        int lspCol = col > 0 ? (int) (col - 1) : 0;
+        Position p = new Position(lspLine, lspCol);
+        return new Range(p, p);
+    }
+
+    private static long clampPos(long pos) {
+        return pos < 0 ? 0 : pos;
+    }
+
+    private static Position positionAt(LineMap lineMap, long offset) {
+        long line = lineMap.getLineNumber(offset);
+        long col = lineMap.getColumnNumber(offset);
+        int lspLine = line > 0 ? (int) (line - 1) : 0;
+        int lspCol = col > 0 ? (int) (col - 1) : 0;
+        return new Position(lspLine, lspCol);
+    }
+
+    private static DiagnosticSeverity severityOf(javax.tools.Diagnostic.Kind kind) {
+        if (kind == null) return DiagnosticSeverity.Hint;
+        switch (kind) {
+            case ERROR: return DiagnosticSeverity.Error;
+            case WARNING:
+            case MANDATORY_WARNING: return DiagnosticSeverity.Warning;
+            case NOTE: return DiagnosticSeverity.Information;
+            case OTHER:
+            default: return DiagnosticSeverity.Hint;
+        }
     }
 }

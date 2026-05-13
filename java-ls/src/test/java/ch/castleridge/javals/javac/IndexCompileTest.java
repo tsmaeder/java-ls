@@ -42,6 +42,9 @@ class IndexCompileTest {
     @Test
     void sourceReferencingIndexedClassCompilesCleanly() throws Exception {
         Index index = new Index();
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/String", "<init>"));    
+        
         index.add(new TypeEntry(
                 "index:///com/example/Hello.class",
                 SOURCE_URI,
@@ -113,6 +116,7 @@ class IndexCompileTest {
     @Test
     void indexedFieldIsVisibleToSourceReference() throws Exception {
         Index index = new Index();
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         index.add(new TypeEntry(
                 "index:///com/example/Holder.class",
                 SOURCE_URI,
@@ -169,7 +173,7 @@ class IndexCompileTest {
         String loserUri = "index:///shadowed/";
 
         Index index = new Index();
-        index.add(typeWithMethod(winnerUri, "java/lang/Object", "equals"));
+        index.add(typeWithMethod(winnerUri, "java/lang/Object", "<init>"));
         index.add(typeWithMethod(winnerUri, "com/example/Dup", "primary"));
         index.add(typeWithMethod(loserUri, "com/example/Dup", "shadowed"));
 
@@ -189,7 +193,7 @@ class IndexCompileTest {
             @Override
             public CharSequence getCharContent(boolean ignoreEncodingErrors) {
                 return "import com.example.Dup;\n"
-                        + "public class Use { void go() { Dup.primary(); } }\n";
+                        + "public class Use {\nvoid go() {\n Dup.primary();\n } }\n";
             }
         };
 
@@ -231,6 +235,7 @@ class IndexCompileTest {
                         + diag2.getDiagnostics());
     }
 
+
     @Test
     void classpathOrderIgnoresEntriesNotOnClasspath() {
         String onCp = "index:///on/";
@@ -258,7 +263,7 @@ class IndexCompileTest {
                 srcUri,
                 jvmName,
                 0x0001,
-                new TypeRef.Resolved("java/lang/Object"),
+                null,
                 List.of(),
                 List.of(),
                 List.of(new MethodEntry(
