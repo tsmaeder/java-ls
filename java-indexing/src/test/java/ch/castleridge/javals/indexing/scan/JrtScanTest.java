@@ -1,5 +1,6 @@
 package ch.castleridge.javals.indexing.scan;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -19,7 +20,7 @@ class JrtScanTest {
     void scanJavaBaseFindsWellKnownTypes() {
         Index index = new Index();
         Scanner scanner = new Scanner();
-        List<Throwable> failures = scanner.scanAll(List.of(new JrtInput("java.base")), index);
+        List<Throwable> failures = scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
         assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);
 
         TypeEntry object = index.get("java/lang/Object");
@@ -38,7 +39,7 @@ class JrtScanTest {
     void packageInfoAndModuleInfoAreFiltered() {
         Index index = new Index();
         Scanner scanner = new Scanner();
-        List<Throwable> failures = scanner.scanAll(List.of(new JrtInput("java.base")), index);
+        List<Throwable> failures = scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
         assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);
 
         for (TypeEntry e : index.all()) {
@@ -54,7 +55,7 @@ class JrtScanTest {
     void listPackageReturnsPackageMembers() {
         Index index = new Index();
         Scanner scanner = new Scanner();
-        scanner.scanAll(List.of(new JrtInput("java.base")), index);
+        scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
 
         List<TypeEntry> javaUtil = index.listPackage("java/util", false);
         assertTrue(javaUtil.stream().anyMatch(e -> e.jvmName().equals("java/util/ArrayList")),

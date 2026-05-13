@@ -158,7 +158,7 @@ public final class IndexService {
         if (targetInfo.javaHome != null && !targetInfo.javaHome.isBlank()) {
             jdk = Path.of(targetInfo.javaHome).toAbsolutePath().normalize();
         } 
-        JrtInput jrtInput = new JrtInput(JrtInput.ALL, jdk) ; 
+        JrtInput jrtInput = new JrtInput(jdk) ; 
 
         if (!sources.containsKey(jrtInput.sourceUri().toString())) {
             sources.put(jrtInput.sourceUri().toString(), jrtInput);

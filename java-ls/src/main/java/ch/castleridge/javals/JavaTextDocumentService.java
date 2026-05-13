@@ -174,7 +174,10 @@ public class JavaTextDocumentService implements TextDocumentService {
 
         WorkspaceCompiler.Result compiled;
         try {
+            long t0 = System.currentTimeMillis();
             compiled = WorkspaceCompiler.compile(docUri, doc.getText(), index, classpath);
+            long t1 = System.currentTimeMillis();
+            server.logMessage(MessageType.Info, "Definition: compile took " + (t1 - t0) + "ms");
         } catch (RuntimeException e) {
             server.logMessage(MessageType.Warning, "Definition: compile failed for " + uri + ": " + e.getMessage());
             return List.of();

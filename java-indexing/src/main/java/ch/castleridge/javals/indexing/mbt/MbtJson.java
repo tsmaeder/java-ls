@@ -73,7 +73,7 @@ public final class MbtJson {
                     try {
                         Path jdk = Path.of(new URI(t.javaHome)).toAbsolutePath().normalize();
                         if (seenJdks.add(jdk)) {
-                            out.add(new JrtInput(JrtInput.ALL, jdk));
+                            out.add(new JrtInput(jdk));
                         }
                     } catch (URISyntaxException e) {
                         System.err.println("Skipping mbt target (invalid javaHome URI): " + t.javaHome);

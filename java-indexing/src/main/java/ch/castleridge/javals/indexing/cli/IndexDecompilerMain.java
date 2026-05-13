@@ -158,11 +158,7 @@ public final class IndexDecompilerMain {
                     sources.add(new JarInput(Path.of(args[++i])));
                 }
                 case "--jrt" -> {
-                    String module = JrtInput.ALL;
-                    if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
-                        module = args[++i];
-                    }
-                    sources.add(new JrtInput(module));
+                    sources.add(new JrtInput(Path.of(System.getProperty("java.home"))));
                 }
                 case "--mbt" -> {
                     if (i + 1 >= args.length) fail("--mbt requires a path");

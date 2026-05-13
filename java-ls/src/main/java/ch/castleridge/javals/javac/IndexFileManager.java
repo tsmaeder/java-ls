@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import javax.tools.ForwardingJavaFileManager;
 import javax.tools.JavaFileObject;
@@ -49,16 +50,8 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
 
     public IndexFileManager(StandardJavaFileManager delegate, Index index, ClasspathOrder classpath) {
         super(delegate);
-        this.index = Objects.requireNonNull(index);
-        this.classpath = Objects.requireNonNull(classpath);
-    }
-
-    public Index index() {
-        return index;
-    }
-
-    public ClasspathOrder classpath() {
-        return classpath;
+        this.index = index;
+        this.classpath = classpath;
     }
 
     @Override
@@ -66,38 +59,23 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
                                          String packageName,
                                          Set<Kind> kinds,
                                          boolean recurse) throws IOException {
-        Iterable<JavaFileObject> delegateListing = super.list(location, packageName, kinds, recurse);
 
+                                            
         if (!kinds.contains(Kind.CLASS)) {
-            return delegateListing;
-        }
-        if (!shouldAnswerFromIndex(location)) {
-            return delegateListing;
+            return super.list(location, packageName, kinds, recurse);
         }
 
         String pkgJvm = packageName.replace('.', '/');
         Map<String, JavaFileObject> merged = new LinkedHashMap<>();
-        for (JavaFileObject fo : delegateListing) {
-            String binName = super.inferBinaryName(location, fo);
-            merged.put(binName != null ? binName : fo.getName(), fo);
-        }
 
         Map<String, TypeEntry> winners = new HashMap<>();
         Iterable<TypeEntry> candidates = index.listPackage(pkgJvm, recurse);
         for (TypeEntry e : candidates) {
             if (!classpath.contains(e.sourceUri())) continue;
             String jvm = e.jvmOwnerName();
-            String binName = jvm.replace('/', '.');
-            TypeEntry existing = winners.get(binName);
-            if (existing == null || classpath.pick(List.of(e, existing), TypeEntry::sourceUri) == e) {
-                winners.put(binName, e);
-            }
+            winners.put(jvm, e);
         }
-        for (Map.Entry<String, TypeEntry> w : winners.entrySet()) {
-            merged.put(w.getKey(), new IndexClassFileObject(w.getValue()));
-        }
-
-        return new ArrayList<>(merged.values());
+        return winners.values().stream().map(IndexClassFileObject::new).collect(Collectors.toList());
     }
 
     @Override
@@ -108,17 +86,10 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
         return super.inferBinaryName(location, file);
     }
 
-    @Override
-    public boolean hasLocation(Location location) {
-        if (shouldAnswerFromIndex(location) && hasAnyOnClasspath()) {
-            return true;
-        }
-        return super.hasLocation(location);
-    }
 
     @Override
     public JavaFileObject getJavaFileForInput(Location location, String className, Kind kind) throws IOException {
-        if (kind == Kind.CLASS && shouldAnswerFromIndex(location)) {
+        if (kind == Kind.CLASS) {
             String jvm = className.replace('.', '/');
             List<TypeEntry> all = index.getAll(jvm);
             if (!all.isEmpty()) {
@@ -129,29 +100,6 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
             }
         }
         return super.getJavaFileForInput(location, className, kind);
-    }
-
-    private boolean hasAnyOnClasspath() {
-        for (TypeEntry e : index.all()) {
-            if (classpath.contains(e.sourceUri())) return true;
-        }
-        return false;
-    }
-
-    private static boolean shouldAnswerFromIndex(Location location) {
-        if (location == StandardLocation.CLASS_PATH) return true;
-        if (location == StandardLocation.SOURCE_PATH) return false;
-        if (location.getName().startsWith("SYSTEM_MODULES")) return true;
-        if (location == StandardLocation.MODULE_PATH) return true;
-        return false;
-    }
-
-    /**
-     * Returns true if the supplied file object is a synthetic
-     * {@link IndexClassFileObject} known to this file manager.
-     */
-    public static boolean isIndexObject(JavaFileObject file) {
-        return file instanceof IndexClassFileObject;
     }
 
     /** Convenience: cast and extract the backing entry, or null. */
