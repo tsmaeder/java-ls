@@ -169,6 +169,7 @@ class IndexCompileTest {
         String loserUri = "index:///shadowed/";
 
         Index index = new Index();
+        index.add(typeWithMethod(winnerUri, "java/lang/Object", "equals"));
         index.add(typeWithMethod(winnerUri, "com/example/Dup", "primary"));
         index.add(typeWithMethod(loserUri, "com/example/Dup", "shadowed"));
 

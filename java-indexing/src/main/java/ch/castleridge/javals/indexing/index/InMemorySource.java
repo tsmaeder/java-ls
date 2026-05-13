@@ -1,11 +1,11 @@
-package ch.castleridge.javals.javac;
+package ch.castleridge.javals.indexing.index;
 
 import java.net.URI;
 
-final class InMemorySource extends AbstractJavaFileObject {
+public final class InMemorySource extends AbstractJavaFileObject {
     private final CharSequence text;
 
-    InMemorySource(URI uri, CharSequence text) {
+    public InMemorySource(URI uri, CharSequence text) {
         super(uri, Kind.SOURCE);
         this.text = text;
     }

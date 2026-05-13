@@ -5,6 +5,7 @@ import java.net.URI;
 
 import com.sun.tools.javac.api.ClientCodeWrapper;
 
+import ch.castleridge.javals.indexing.index.AbstractJavaFileObject;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**

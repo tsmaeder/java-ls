@@ -1,4 +1,4 @@
-package ch.castleridge.javals.javac;
+package ch.castleridge.javals.indexing.index;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -11,7 +11,7 @@ import javax.lang.model.element.Modifier;
 import javax.lang.model.element.NestingKind;
 import javax.tools.JavaFileObject;
 
-abstract class AbstractJavaFileObject implements JavaFileObject {
+public abstract class AbstractJavaFileObject implements JavaFileObject {
     private final URI uri;
     private final Kind kind;
 

@@ -36,6 +36,7 @@ import com.sun.source.tree.VariableTree;
 import com.sun.source.tree.WildcardTree;
 import com.sun.source.util.JavacTask;
 
+import ch.castleridge.javals.indexing.index.InMemorySource;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.intern.Interner;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
@@ -341,19 +342,5 @@ public final class SourceIndexer {
             out.add(new AnnotationRef(name, Map.of()));
         }
         return out;
-    }
-
-    private static final class InMemorySource extends SimpleJavaFileObject {
-        private final CharSequence content;
-
-        InMemorySource(URI uri, CharSequence content) {
-            super(uri, Kind.SOURCE);
-            this.content = content;
-        }
-
-        @Override
-        public CharSequence getCharContent(boolean ignoreEncodingErrors) {
-            return content;
-        }
     }
 }

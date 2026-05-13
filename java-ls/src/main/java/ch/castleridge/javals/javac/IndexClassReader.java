@@ -102,6 +102,9 @@ public final class IndexClassReader extends ClassReader {
         c.members_field = WriteableScope.create(c);
 
         ClassType ct = (ClassType) c.type;
+        if (c.name().toString().equals("java/lang/Object")) {
+            System.err.println("superRef: " + entry.superRef());
+        }
         ct.supertype_field = entry.superRef() == null
                 ? Type.noType
                 : resolver.resolve(entry.superRef(), module, entry);
@@ -126,11 +129,5 @@ public final class IndexClassReader extends ClassReader {
         }
 
         c.completer = Symbol.Completer.NULL_COMPLETER;
-
-        // Keep references to the index/classpath so callers can introspect if needed.
-        @SuppressWarnings("unused")
-        Object unused = this.index;
-        @SuppressWarnings("unused")
-        Object unused2 = this.classpath;
     }
 }

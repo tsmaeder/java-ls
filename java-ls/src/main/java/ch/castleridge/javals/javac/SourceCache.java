@@ -23,6 +23,8 @@ import com.sun.source.util.SourcePositions;
 import com.sun.source.util.Trees;
 import com.sun.tools.javac.api.JavacTool;
 
+import ch.castleridge.javals.indexing.index.InMemorySource;
+
 /**
  * Bounded LRU cache of parsed (but not analysed) Java source files, keyed
  * by their resource URI string. Used by {@link SymbolLocator} to turn a
