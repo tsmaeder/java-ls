@@ -47,14 +47,15 @@ public class JavaTextDocumentService implements TextDocumentService {
     @Override
     public void didOpen(DidOpenTextDocumentParams params) {
         TextDocumentItem doc = params.getTextDocument();
-        documents.put(doc.getUri(), doc);
-        server.logMessage(MessageType.Info, "Document opened: " + doc.getUri());
-        refreshCompile(doc.getUri());
+        String uri = UriCoding.decode(doc.getUri());
+        documents.put(uri, doc);
+        server.logMessage(MessageType.Info, "Document opened: " + uri);
+        refreshCompile(uri);
     }
 
     @Override
     public void didChange(DidChangeTextDocumentParams params) {
-        String uri = params.getTextDocument().getUri();
+        String uri = UriCoding.decode(params.getTextDocument().getUri());
         List<TextDocumentContentChangeEvent> changes = params.getContentChanges();
 
         if (!changes.isEmpty()) {
@@ -74,7 +75,7 @@ public class JavaTextDocumentService implements TextDocumentService {
 
     @Override
     public void didClose(DidCloseTextDocumentParams params) {
-        String uri = params.getTextDocument().getUri();
+        String uri = UriCoding.decode(params.getTextDocument().getUri());
         documents.remove(uri);
         compileCache.remove(uri);
         publishEmptyDiagnostics(uri);
@@ -131,7 +132,7 @@ public class JavaTextDocumentService implements TextDocumentService {
 
     @Override
     public void didSave(DidSaveTextDocumentParams params) {
-        server.logMessage(MessageType.Info, "Document saved: " + params.getTextDocument().getUri());
+        server.logMessage(MessageType.Info, "Document saved: " + UriCoding.decode(params.getTextDocument().getUri()));
     }
 
     @Override
@@ -165,7 +166,7 @@ public class JavaTextDocumentService implements TextDocumentService {
 
     @Override
     public CompletableFuture<Hover> hover(HoverParams params) {
-        String uri = params.getTextDocument().getUri();
+        String uri = UriCoding.decode(params.getTextDocument().getUri());
         TextDocumentItem doc = documents.get(uri);
         
         if (doc != null) {
@@ -207,7 +208,7 @@ public class JavaTextDocumentService implements TextDocumentService {
      */
     @Override
     public CompletableFuture<Either<List<? extends Location>, List<? extends LocationLink>>> definition(DefinitionParams params) {
-        String uri = params.getTextDocument().getUri();
+        String uri = UriCoding.decode(params.getTextDocument().getUri());
         Position position = params.getPosition();
         return CompletableFuture.supplyAsync(() -> Either.forLeft(computeDefinition(uri, position)));
     }
@@ -325,10 +326,6 @@ public class JavaTextDocumentService implements TextDocumentService {
         WorkspaceEdit edit = new WorkspaceEdit();
         edit.setChanges(new HashMap<>());
         return CompletableFuture.completedFuture(edit);
-    }
-
-    public TextDocumentItem getDocument(String uri) {
-        return documents.get(uri);
     }
 
     /**
