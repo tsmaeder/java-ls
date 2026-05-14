@@ -1,4 +1,4 @@
-package ch.castleridge.javals;
+package ch.castleridge.javals.indexing.index;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;

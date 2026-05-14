@@ -23,7 +23,7 @@ final class JrtWalker {
         try (FileSystem fs = FileSystems.newFileSystem(
                 URI.create("jrt:/"),
                 Map.of("java.home", in.javaHome.toString()))) {
-            walkOn(fs, in, sink, in.sourceUri().toString());
+            walkOn(fs, in, sink, in.sourceUri());
         } catch (IOException e) {
             throw new RuntimeException("Failed opening jrt:/ for " + in.javaHome, e);
         }
@@ -50,7 +50,7 @@ final class JrtWalker {
                 String name = file.getFileName().toString();
                 if (!isIndexable(name)) return FileVisitResult.CONTINUE;
                 if (Index.isSkippedFileName(name)) return FileVisitResult.CONTINUE;
-                URI uri = jrtUri(javaHomeUriPath, file);
+                String uri = jrtUri(javaHomeUriPath, file);
                 // Read eagerly: the sink typically defers to an async task,
                 // and the jrt filesystem may close before that task runs.
                 byte[] bytes;
@@ -74,10 +74,10 @@ final class JrtWalker {
      * can never collide on the same key, and the install is recoverable
      * from any URI later.
      */
-    private static URI jrtUri(String javaHomeUriPath, Path file) {
+    private static String jrtUri(String javaHomeUriPath, Path file) {
         String inside = file.toUri().getRawPath();
         if (inside.startsWith("/")) inside = inside.substring(1);
-        return URI.create(javaHomeUriPath + "!/" + inside);
+        return javaHomeUriPath + "!/" + inside;
     }
 
     private static boolean isIndexable(String name) {

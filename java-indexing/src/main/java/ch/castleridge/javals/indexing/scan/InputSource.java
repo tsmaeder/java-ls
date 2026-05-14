@@ -23,5 +23,5 @@ public sealed interface InputSource permits DirInput, JarInput, JrtInput {
      * root, the JRT module subset). Stable across runs so callers can build
      * classpath-priority maps keyed by it.
      */
-    URI sourceUri();
+    String sourceUri();
 }

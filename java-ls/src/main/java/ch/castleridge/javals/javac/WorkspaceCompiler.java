@@ -76,11 +76,7 @@ public final class WorkspaceCompiler {
         try {
             Iterable<? extends CompilationUnitTree> parsed = task.parse();
             CompilationUnitTree cu = firstOrNull(parsed);
-            try {
                 task.analyze();
-            } catch (RuntimeException ignored) {
-                // Analysis errors are fine; we just want as much binding as javac can give us.
-            }
             return new Result(task, cu, Trees.instance(task), input, List.copyOf(collector.getDiagnostics()));
         } catch (IOException e) {
             return new Result(task, null, Trees.instance(task), input, List.copyOf(collector.getDiagnostics()));

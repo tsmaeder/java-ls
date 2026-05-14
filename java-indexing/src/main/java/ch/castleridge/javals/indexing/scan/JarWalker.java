@@ -25,7 +25,7 @@ final class JarWalker {
                 if (!isIndexable(simple)) continue;
                 if (Index.isSkippedFileName(simple)) continue;
 
-                URI uri = jarEntryUri(jar, name);
+                String uri = jarEntryUri(jar, name);
                 // Read bytes eagerly: the sink typically hands the bytes supplier
                 // to an async task, and by the time the task runs the
                 // try-with-resources below would have closed the JarFile.
@@ -54,8 +54,8 @@ final class JarWalker {
         return name.endsWith(".java") || name.endsWith(".class");
     }
 
-    private static URI jarEntryUri(Path jar, String entryName) {
+    private static String jarEntryUri(Path jar, String entryName) {
         String jarUri = jar.toUri().toString();
-        return URI.create("jar:" + jarUri + "!/" + entryName);
+        return "jar:" + jarUri + "!/" + entryName;
     }
 }

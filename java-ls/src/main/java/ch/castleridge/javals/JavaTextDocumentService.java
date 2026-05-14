@@ -20,6 +20,7 @@ import com.sun.source.util.TreePath;
 import com.sun.source.util.Trees;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.UriCoding;
 import ch.castleridge.javals.javac.ClasspathOrder;
 import ch.castleridge.javals.javac.SourceCache;
 import ch.castleridge.javals.javac.SymbolLocator;
@@ -108,17 +109,16 @@ public class JavaTextDocumentService implements TextDocumentService {
             }
 
             WorkspaceCompiler.Result result;
-            try {
                 long t0 = System.currentTimeMillis();
+                try {
                 result = WorkspaceCompiler.compile(docUri, text, index, classpath);
-                long t1 = System.currentTimeMillis();
-                server.logMessage(MessageType.Log,
-                        "Refresh compile took " + (t1 - t0) + "ms for " + uri);
-            } catch (RuntimeException e) {
-                server.logMessage(MessageType.Warning,
-                        "Refresh compile failed for " + uri + ": " + e.getMessage());
-                return;
-            }
+                    long t1 = System.currentTimeMillis();
+                    server.logMessage(MessageType.Log,
+                            "Refresh compile took " + (t1 - t0) + "ms for " + uri);
+                } catch (RuntimeException e) {
+                    server.logException(e);
+                    return;
+                }
 
             TextDocumentItem latest = documents.get(uri);
             if (latest == null || latest.getVersion() != versionAtStart) {
@@ -219,33 +219,7 @@ public class JavaTextDocumentService implements TextDocumentService {
 
         IndexService indexService = server.getIndexService();
 
-        WorkspaceCompiler.Result compiled = null;
-        CachedCompile cached = compileCache.get(uri);
-        if (cached != null && cached.version() == doc.getVersion()) {
-            compiled = cached.result();
-        }
-
-        if (compiled == null) {
-            URI docUri;
-            try {
-                docUri = URI.create(uri);
-            } catch (IllegalArgumentException e) {
-                return List.of();
-            }
-
-            Index index = indexService.index().orElse(null);
-            ClasspathOrder classpath = indexService.classPathFor(uri);
-
-            try {
-                long t0 = System.currentTimeMillis();
-                compiled = WorkspaceCompiler.compile(docUri, doc.getText(), index, classpath);
-                long t1 = System.currentTimeMillis();
-                server.logMessage(MessageType.Info, "Definition: compile took " + (t1 - t0) + "ms");
-            } catch (RuntimeException e) {
-                server.logMessage(MessageType.Warning, "Definition: compile failed for " + uri + ": " + e.getMessage());
-                return List.of();
-            }
-        }
+        WorkspaceCompiler.Result compiled = compileCache.get(uri).result();
 
         CompilationUnitTree cu = compiled.cu();
         if (cu == null) return List.of();

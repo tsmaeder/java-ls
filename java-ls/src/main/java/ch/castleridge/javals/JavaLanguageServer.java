@@ -3,7 +3,8 @@ package ch.castleridge.javals;
 import org.eclipse.lsp4j.*;
 import org.eclipse.lsp4j.services.*;
 import java.util.concurrent.CompletableFuture;
-
+import java.io.PrintWriter;
+import java.io.StringWriter;
 /**
  * Main Language Server implementation for Java LSP
  * Copyright Anysphere Inc.
@@ -111,6 +112,18 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     public void logMessage(MessageType type, String message) {
         if (client != null) {
             MessageParams params = new MessageParams(type, message);
+            client.logMessage(params);
+        }
+    }
+
+    public void logException(Exception e) {
+        if (client != null) {
+            StringWriter stringWriter = new StringWriter();
+            PrintWriter printWriter = new PrintWriter(stringWriter);
+            e.printStackTrace(printWriter);
+            printWriter.close();
+            String stackTrace = stringWriter.toString();
+            MessageParams params = new MessageParams(MessageType.Error, e.getMessage() + "\n" + stackTrace);
             client.logMessage(params);
         }
     }

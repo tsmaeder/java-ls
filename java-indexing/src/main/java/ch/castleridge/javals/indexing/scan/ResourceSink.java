@@ -1,7 +1,6 @@
 package ch.castleridge.javals.indexing.scan;
 
 import java.io.IOException;
-import java.net.URI;
 
 /**
  * Callback shape used by {@link InputSource#walk(ResourceSink)}. The walker
@@ -11,7 +10,7 @@ import java.net.URI;
  */
 @FunctionalInterface
 public interface ResourceSink {
-    void accept(URI uri, String fileName, BytesProvider bytes) throws IOException;
+    void accept(String uri, String fileName, BytesProvider bytes) throws IOException;
 
     @FunctionalInterface
     interface BytesProvider {

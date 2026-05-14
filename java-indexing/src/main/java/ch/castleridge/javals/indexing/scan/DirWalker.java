@@ -23,7 +23,7 @@ final class DirWalker {
                     String name = file.getFileName().toString();
                     if (!isIndexable(name)) return FileVisitResult.CONTINUE;
                     if (Index.isSkippedFileName(name)) return FileVisitResult.CONTINUE;
-                    sink.accept(file.toUri(), name, () -> Files.readAllBytes(file));
+                    sink.accept(file.toUri().toString(), name, () -> Files.readAllBytes(file));
                     return FileVisitResult.CONTINUE;
                 }
             });

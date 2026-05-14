@@ -11,7 +11,7 @@ public record DirInput(Path root) implements InputSource {
     }
 
     @Override
-    public URI sourceUri() {
-        return root.toUri();
+    public String sourceUri() {
+        return root.toUri().toString();
     }
 }

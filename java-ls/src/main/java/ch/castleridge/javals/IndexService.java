@@ -159,21 +159,22 @@ public final class IndexService {
             jdk = Path.of(targetInfo.javaHome).toAbsolutePath().normalize();
         } 
         JrtInput jrtInput = new JrtInput(jdk) ; 
-
+        
         if (!sources.containsKey(jrtInput.sourceUri().toString())) {
             sources.put(jrtInput.sourceUri().toString(), jrtInput);
-           Path sourcePath = jdk.resolve("lib/src.zip");
+            Path sourcePath = jdk.resolve("lib/src.zip");
             if (Files.isRegularFile(sourcePath)) {
                 sourceJarByBinaryJar.put(jrtInput.sourceUri().toString(), sourcePath.toUri().toString());
             }
         }
-
+        
         for (String dependencyModuleId : targetInfo.dependencyModules) {
             MbtDependencyModuleInfo dependencyModuleInfo = dependencyModules.get(dependencyModuleId);
             if (dependencyModuleInfo != null) {
                 classpathEntries.add(UriClasspathEntry.of(dependencyModuleInfo.jar));
             }
         }
+        classpathEntries.add(UriClasspathEntry.of(jrtInput.sourceUri()));
         classpathsByNamespace.put(namespaceId,   new ClasspathOrder(classpathEntries, false));
     }
 

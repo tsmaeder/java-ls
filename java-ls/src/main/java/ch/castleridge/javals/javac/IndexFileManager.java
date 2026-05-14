@@ -66,7 +66,6 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
         }
 
         String pkgJvm = packageName.replace('.', '/');
-        Map<String, JavaFileObject> merged = new LinkedHashMap<>();
 
         Map<String, TypeEntry> winners = new HashMap<>();
         Iterable<TypeEntry> candidates = index.listPackage(pkgJvm, recurse);

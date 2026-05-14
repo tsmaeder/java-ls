@@ -1,7 +1,11 @@
 package ch.castleridge.javals.indexing.scan;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+
+import ch.castleridge.javals.indexing.index.UriCoding;
 
 /**
  * JRT image entries. Specify {@link #ALL} for every module or a concrete
@@ -22,11 +26,9 @@ import java.nio.file.Path;
  */
 public final class JrtInput implements InputSource {
     public final Path javaHome;
-    private URI sourceUri;
 
     public JrtInput(Path javaHome) {
         this.javaHome = javaHome;
-        this.sourceUri = URI.create("jrt://" + javaHomeUriPath(javaHome));
     }
 
     @Override
@@ -35,22 +37,8 @@ public final class JrtInput implements InputSource {
     }
 
     @Override
-    public URI sourceUri() {
-        return sourceUri;
+    public String sourceUri() {
+        return "jrt://" + this.javaHome.toUri().getRawPath();
     }
 
-    /**
-     * Convert {@code javaHome} to the URI-path fragment used as the
-     * authority/path part of our {@code jrt://} URIs (e.g.
-     * {@code /C:/Java/jdk-21} on Windows, {@code /usr/lib/jvm/java-21}
-     * on Linux). Trailing slashes are stripped so the same install
-     * always produces the same URI prefix.
-     */
-    static String javaHomeUriPath(Path javaHome) {
-        String p = javaHome.toUri().getRawPath();
-        while (p.length() > 1 && p.endsWith("/")) {
-            p = p.substring(0, p.length() - 1);
-        }
-        return p;
-    }
 }

@@ -68,7 +68,7 @@ public final class Scanner {
             List<Future<?>> walkFutures = new ArrayList<>(sources.size());
             List<ForkJoinTask<?>> indexTasks = Collections.synchronizedList(new ArrayList<>());
             for (InputSource src : sources) {
-                URI srcUri = src.sourceUri();
+                String srcUri = src.sourceUri();
                 walkFutures.add(driverPool.submit(() -> {
                     try {
                         src.walk((uri, fileName, bytes) -> {
@@ -124,11 +124,11 @@ public final class Scanner {
         return failures;
     }
 
-    private static void indexOne(URI uri, URI sourceUri, String fileName, byte[] content, Index into) {
+    private static void indexOne(String uri, String sourceUri, String fileName, byte[] content, Index into) {
         if (fileName.endsWith(".class")) {
-            ClassFileIndexer.index(uri, sourceUri, content, into);
+            ClassFileIndexer.index(URI.create(uri), URI.create(sourceUri), content, into);
         } else if (fileName.endsWith(".java")) {
-            SourceIndexer.index(uri, sourceUri, new String(content, StandardCharsets.UTF_8), into);
+            SourceIndexer.index(URI.create(uri), URI.create(sourceUri), new String(content, StandardCharsets.UTF_8), into);
         }
     }
 }

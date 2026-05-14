@@ -179,7 +179,7 @@ public final class SourceIndexer {
             if (member instanceof VariableTree vt) {
                 fields.add(toFieldEntry(uri, localName, vt, classTypeParams));
             } else if (member instanceof MethodTree mt) {
-                methods.add(toMethodEntry(uri, localName, mt, classTypeParams));
+                methods.add(toMethodEntry(ct, uri, localName, mt, classTypeParams));
             } else if (member instanceof ClassTree inner) {
                 nested.add(inner);
                 String innerName = Interner.intern(localName + "$" + inner.getSimpleName().toString());
@@ -224,7 +224,7 @@ public final class SourceIndexer {
                 annotationsOf(vt.getModifiers()));
     }
 
-    private static MethodEntry toMethodEntry(String uri, String owner, MethodTree mt,
+    private static MethodEntry toMethodEntry(ClassTree ct, String uri, String owner, MethodTree mt,
                                              Set<String> classTypeParams) {
         Set<String> methodTypeParams = new HashSet<>(classTypeParams);
         for (TypeParameterTree tp : mt.getTypeParameters()) {
@@ -245,7 +245,7 @@ public final class SourceIndexer {
             throwsRefs.add(toTypeRef(th, methodTypeParams));
         }
 
-        int access = methodAccessFlags(mt.getModifiers());
+        int access = methodAccessFlags(ct, mt.getModifiers());
         String name = Interner.intern(mt.getName().toString());
         return new MethodEntry(
                 uri,
@@ -313,8 +313,12 @@ public final class SourceIndexer {
         return modifierFlags(mods);
     }
 
-    private static int methodAccessFlags(ModifiersTree mods) {
-        return modifierFlags(mods);
+    private static int methodAccessFlags(ClassTree ct, ModifiersTree mods) {
+        int flags = modifierFlags(mods);
+        if (ct.getKind() == ClassTree.Kind.INTERFACE) {
+            flags |= Opcodes.ACC_PUBLIC;
+        }
+        return flags;
     }
 
     private static int modifierFlags(ModifiersTree mods) {

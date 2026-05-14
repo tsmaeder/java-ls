@@ -16,7 +16,20 @@
                 "${workspaceFolder}/java-ls/src/main/java"
             ]
         },
-
+        {
+            "type": "java",
+            "name": "Attach to Tests",
+            "request": "attach",
+            "hostName": "localhost",
+            "projectName": "java-ls",
+            "port": 5005,
+            "sourcePaths": [
+                "${workspaceFolder}/java-indexing/src/main/java",
+                "${workspaceFolder}/java-ls/src/main/java",
+                "${workspaceFolder}/java-indexing/src/test/java",
+                "${workspaceFolder}/java-ls/src/test/java"
+            ]
+        },
         {
             "type": "java",
             "name": "Current File",
