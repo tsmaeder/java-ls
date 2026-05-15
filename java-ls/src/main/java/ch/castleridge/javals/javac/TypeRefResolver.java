@@ -1,11 +1,16 @@
 package ch.castleridge.javals.javac;
 
+import com.sun.tools.javac.code.BoundKind;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.ModuleSymbol;
 import com.sun.tools.javac.code.Symtab;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ArrayType;
+import com.sun.tools.javac.code.Type.ClassType;
 import com.sun.tools.javac.code.Type.MethodType;
+import com.sun.tools.javac.code.Type.TypeVar;
+import com.sun.tools.javac.code.Type.WildcardType;
+import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.ListBuffer;
 import com.sun.tools.javac.util.Names;
 
@@ -19,21 +24,25 @@ import ch.castleridge.javals.indexing.model.TypeRef;
 /**
  * Resolves {@link TypeRef} instances - produced by the source and bytecode
  * indexers - into javac {@link Type} instances.
- *
- * <p>Bytecode-derived references are always {@link TypeRef.Resolved} /
- * {@link TypeRef.Primitive} / {@link TypeRef.Array} and resolve trivially.
- * Source-derived references may contain {@link TypeRef.Unresolved} leaves
- * whose final JVM binary name is only decided here, using the
- * {@link SourceResolutionHints} attached to the enclosing
- * {@link TypeEntry} and the full {@link Index}. Resolution follows the
- * JLS lookup order: declared-in-CU &gt; single-type-import &gt; same-package
- * &gt; on-demand-import &gt; {@code java.lang}.
- *
- * <p>The {@link ClasspathOrder} filters which index hits count as
- * "found": a candidate JVM name is only considered present if at least
- * one of its index entries comes from a source on the current classpath.
  */
 final class TypeRefResolver {
+
+    record ResolutionContext(
+            TypeEntry enclosing,
+            List<Type> classTypeParams,
+            List<Type> methodTypeParams) {
+
+        static ResolutionContext of(TypeEntry enclosing, List<Type> classTypeParams) {
+            return new ResolutionContext(enclosing, classTypeParams, List.nil());
+        }
+
+        static ResolutionContext of(
+                TypeEntry enclosing,
+                List<Type> classTypeParams,
+                List<Type> methodTypeParams) {
+            return new ResolutionContext(enclosing, classTypeParams, methodTypeParams);
+        }
+    }
 
     private final Symtab syms;
     private final Names names;
@@ -47,54 +56,92 @@ final class TypeRefResolver {
         this.classpath = classpath;
     }
 
-    /** Resolve a single {@link TypeRef} in the context of {@code enclosing}. */
     Type resolve(TypeRef ref, ModuleSymbol module, TypeEntry enclosing) {
+        return resolve(ref, module, ResolutionContext.of(enclosing, List.nil()));
+    }
+
+    Type resolve(TypeRef ref, ModuleSymbol module, ResolutionContext ctx) {
         if (ref == null) return syms.errType;
         if (ref instanceof TypeRef.Primitive p) return primitive(p);
         if (ref instanceof TypeRef.Array a) {
-            return new ArrayType(resolve(a.element(), module, enclosing), syms.arrayClass);
+            return new ArrayType(resolve(a.element(), module, ctx), syms.arrayClass);
+        }
+        if (ref instanceof TypeRef.TypeVariable tv) {
+            return lookupTypeVar(tv.name(), ctx);
+        }
+        if (ref instanceof TypeRef.Wildcard w) {
+            return resolveWildcard(w, module, ctx);
+        }
+        if (ref instanceof TypeRef.Parameterized p) {
+            return resolveParameterized(p, module, ctx);
         }
         if (ref instanceof TypeRef.Resolved r) {
             return classType(module, r.jvmBinaryName());
         }
         if (ref instanceof TypeRef.Unresolved u) {
-            return classType(module, resolveSimple(u.simpleName(), enclosing));
+            return classType(module, resolveSimple(u.simpleName(), ctx.enclosing()));
         }
         return syms.errType;
     }
 
-    /** Resolve a whole method descriptor into a javac {@link MethodType}. */
-    MethodType resolveMethod(MethodEntry m, ModuleSymbol module, TypeEntry enclosing) {
+    MethodType resolveMethod(MethodEntry m, ModuleSymbol module, ResolutionContext ctx) {
         ListBuffer<Type> params = new ListBuffer<>();
         for (TypeRef pr : m.paramTypes()) {
-            params.add(resolve(pr, module, enclosing));
+            params.add(resolve(pr, module, ctx));
         }
         ListBuffer<Type> thrown = new ListBuffer<>();
         for (TypeRef tr : m.throwsTypes()) {
-            thrown.add(resolve(tr, module, enclosing));
+            thrown.add(resolve(tr, module, ctx));
         }
-        Type ret = resolve(m.returnType(), module, enclosing);
-        return new MethodType(
-                params.toList(),
-                ret,
-                thrown.toList(),
-                syms.methodClass);
+        Type ret = resolve(m.returnType(), module, ctx);
+        return new MethodType(params.toList(), ret, thrown.toList(), syms.methodClass);
     }
 
-    /** Resolve a field's declared type. */
-    Type resolveField(FieldEntry f, ModuleSymbol module, TypeEntry enclosing) {
-        return resolve(f.type(), module, enclosing);
+    Type resolveField(FieldEntry f, ModuleSymbol module, ResolutionContext ctx) {
+        return resolve(f.type(), module, ctx);
     }
 
-    /**
-     * Turn a JVM binary name ({@code java/util/Map$Entry}) into the matching
-     * javac {@link ClassSymbol#type}, creating the stub symbol on demand.
-     */
     Type classType(ModuleSymbol module, String jvmBinaryName) {
         if (jvmBinaryName == null || jvmBinaryName.isEmpty()) return syms.errType;
         String dotted = jvmBinaryName.replace('/', '.');
         ClassSymbol sym = syms.enterClass(module, names.fromString(dotted));
         return sym.type;
+    }
+
+    private Type resolveParameterized(TypeRef.Parameterized p, ModuleSymbol module, ResolutionContext ctx) {
+        Type raw = resolve(p.raw(), module, ctx);
+        ListBuffer<Type> args = new ListBuffer<>();
+        for (TypeRef arg : p.typeArgs()) {
+            args.add(resolve(arg, module, ctx));
+        }
+        if (raw instanceof ClassType ct) {
+            return new ClassType(ct.getEnclosingType(), args.toList(), ct.tsym);
+        }
+        return raw;
+    }
+
+    private Type resolveWildcard(TypeRef.Wildcard w, ModuleSymbol module, ResolutionContext ctx) {
+        return switch (w.kind()) {
+            case UNBOUNDED -> new WildcardType(syms.objectType, BoundKind.UNBOUND, syms.boundClass);
+            case EXTENDS -> new WildcardType(
+                    resolve(w.bound(), module, ctx), BoundKind.EXTENDS, syms.boundClass);
+            case SUPER -> new WildcardType(
+                    resolve(w.bound(), module, ctx), BoundKind.SUPER, syms.boundClass);
+        };
+    }
+
+    private Type lookupTypeVar(String name, ResolutionContext ctx) {
+        for (Type t : ctx.methodTypeParams()) {
+            if (t instanceof TypeVar tv && tv.tsym.name.contentEquals(name)) {
+                return t;
+            }
+        }
+        for (Type t : ctx.classTypeParams()) {
+            if (t instanceof TypeVar tv && tv.tsym.name.contentEquals(name)) {
+                return t;
+            }
+        }
+        return syms.objectType;
     }
 
     private Type primitive(TypeRef.Primitive p) {
@@ -111,21 +158,11 @@ final class TypeRefResolver {
         };
     }
 
-    /**
-     * Apply the JLS resolution order to a simple name using the hints on
-     * {@code enclosing} and the global {@link Index}, considering only
-     * candidates that are actually on the current {@link ClasspathOrder}.
-     * The result is a JVM binary name (slash-delimited).
-     */
     private String resolveSimple(String simple, TypeEntry enclosing) {
         if (enclosing == null) {
             return "java/lang/" + simple;
         }
 
-        // (0) Direct nested types of the enclosing type can be referenced
-        //     by simple name. We trust the enclosing entry's own metadata
-        //     here without consulting the classpath - nested types live in
-        //     the same jar as their enclosing.
         for (String nested : enclosing.innerTypeJvmNames()) {
             int dollar = nested.lastIndexOf('$');
             int slash = nested.lastIndexOf('/');
@@ -140,28 +177,23 @@ final class TypeRefResolver {
             return "java/lang/" + simple;
         }
 
-        // (1) Types declared in the same compilation unit at top level.
         if (hints.siblingSimpleNames().contains(simple)) {
             String pkg = hints.sourcePackage();
             return pkg.isEmpty() ? simple : pkg + "/" + simple;
         }
 
-        // (2) Single-type imports.
         String single = hints.singleTypeImports().get(simple);
         if (single != null) return single;
 
-        // (3) Same-package lookup.
         String pkg = hints.sourcePackage();
         String samePkg = pkg.isEmpty() ? simple : pkg + "/" + simple;
         if (availableOnClasspath(samePkg)) return samePkg;
 
-        // (4) On-demand imports.
         for (String od : hints.onDemandImports()) {
             String candidate = od.isEmpty() ? simple : od + "/" + simple;
             if (availableOnClasspath(candidate)) return candidate;
         }
 
-        // (5) java.lang fallback.
         return "java/lang/" + simple;
     }
 

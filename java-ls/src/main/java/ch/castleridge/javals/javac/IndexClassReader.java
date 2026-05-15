@@ -106,26 +106,36 @@ public final class IndexClassReader extends ClassReader {
         c.members_field = WriteableScope.create(c);
 
         ClassType ct = (ClassType) c.type;
+        List<Type> classTypeParams = synthesizeTypeParams(c, entry);
+        ct.typarams_field = classTypeParams;
+        TypeRefResolver.ResolutionContext classCtx =
+                TypeRefResolver.ResolutionContext.of(entry, classTypeParams);
+
         ct.supertype_field = entry.superRef() == null
                 ? Type.noType
-                : resolver.resolve(entry.superRef(), module, entry);
+                : resolver.resolve(entry.superRef(), module, classCtx);
 
         List<Type> interfaces = List.nil();
         for (TypeRef iref : entry.interfaceRefs()) {
-            interfaces = interfaces.prepend(resolver.resolve(iref, module, entry));
+            interfaces = interfaces.prepend(resolver.resolve(iref, module, classCtx));
         }
         ct.interfaces_field = interfaces.reverse();
-        ct.typarams_field = synthesizeTypeParams(c, entry);
 
         for (FieldEntry f : entry.fields()) {
-            Type t = resolver.resolveField(f, module, entry);
+            Type t = resolver.resolveField(f, module, classCtx);
             VarSymbol v = new VarSymbol(f.accessFlags(), names.fromString(f.name()), t, c);
             c.members_field.enter(v);
         }
 
         for (MethodEntry m : entry.methods()) {
-            MethodType mt = resolver.resolveMethod(m, module, entry);
-            MethodSymbol ms = new MethodSymbol(m.accessFlags(), names.fromString(m.name()), mt, c);
+            List<Type> methodTypeParams = synthesizeMethodTypeParams(c, m);
+            TypeRefResolver.ResolutionContext methodCtx =
+                    TypeRefResolver.ResolutionContext.of(entry, classTypeParams, methodTypeParams);
+            MethodType mt = resolver.resolveMethod(m, module, methodCtx);
+            Type methodType = methodTypeParams.isEmpty()
+                    ? mt
+                    : new Type.ForAll(methodTypeParams, mt);
+            MethodSymbol ms = new MethodSymbol(m.accessFlags(), names.fromString(m.name()), methodType, c);
             c.members_field.enter(ms);
         }
 
@@ -134,23 +144,31 @@ public final class IndexClassReader extends ClassReader {
 
     /**
      * Build javac {@link TypeVar}s for each formal type parameter
-     * declared on {@code entry}. Phase 1 sets every upper bound to
-     * {@code java.lang.Object}, which is enough for parameterized uses
-     * like {@code Function<? super T, U>} to match the right arity even
-     * though we lose the precise bounds (e.g. {@code <T extends
-     * Comparable<T>>}). Members on the class still see {@code Object} for
-     * type-variable references because the index erases them at indexing
-     * time; tightening that is Phase 2 work.
+     * declared on {@code entry}. Bounds are normalised to
+     * {@code java.lang.Object} for now.
      */
     private List<Type> synthesizeTypeParams(ClassSymbol c, TypeEntry entry) {
         if (entry.typeParams().isEmpty()) return List.nil();
         ListBuffer<Type> out = new ListBuffer<>();
         for (TypeParamRef tp : entry.typeParams()) {
-            TypeVar tv = new TypeVar(names.fromString(tp.name()), c, syms.botType);
-            tv.setUpperBound(syms.objectType);
-            ((TypeVariableSymbol) tv.tsym).type = tv;
-            out.add(tv);
+            out.add(newTypeVar(tp.name(), c));
         }
         return out.toList();
+    }
+
+    private List<Type> synthesizeMethodTypeParams(ClassSymbol owner, MethodEntry entry) {
+        if (entry.typeParams().isEmpty()) return List.nil();
+        ListBuffer<Type> out = new ListBuffer<>();
+        for (TypeParamRef tp : entry.typeParams()) {
+            out.add(newTypeVar(tp.name(), owner));
+        }
+        return out.toList();
+    }
+
+    private TypeVar newTypeVar(String name, ClassSymbol owner) {
+        TypeVar tv = new TypeVar(names.fromString(name), owner, syms.botType);
+        tv.setUpperBound(syms.objectType);
+        ((TypeVariableSymbol) tv.tsym).type = tv;
+        return tv;
     }
 }

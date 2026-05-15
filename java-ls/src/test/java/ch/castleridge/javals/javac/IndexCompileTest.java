@@ -3,6 +3,8 @@ package ch.castleridge.javals.javac;
 import java.io.StringWriter;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -26,8 +28,10 @@ import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.TypeRef;
+import ch.castleridge.javals.indexing.source.SourceIndexer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class IndexCompileTest {
@@ -316,6 +320,120 @@ class IndexCompileTest {
         TypeEntry offWinner = cp.pick(index.getAll("com/example/Off"), TypeEntry::sourceUri);
         assertTrue(onWinner != null, "On should have a winner");
         assertTrue(offWinner == null, "Off should be filtered out by the classpath");
+    }
+
+    @Test
+    void genericOverrideWithSuperWildcardCompilesCleanly() throws Exception {
+        Path resources = Path.of("src/test/resources/ch/castleridge/javals/test");
+        if (!Files.exists(resources)) {
+            resources = Path.of("java-ls/src/test/resources/ch/castleridge/javals/test");
+        }
+
+        Index index = new Index();
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Throwable", "<init>"));
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Error", "<init>"));
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Exception", "<init>"));
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/RuntimeException", "<init>"));
+        indexSourceFile(index, resources.resolve("Expectation.java"));
+        indexSourceFile(index, resources.resolve("Completable.java"));
+        indexSourceFile(index, resources.resolve("Future.java"));
+
+        ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
+        String futureBaseSource = Files.readString(resources.resolve("FutureBase.java"));
+
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("test:///FutureBase.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return futureBaseSource;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) {
+                errors.add(d);
+            }
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "FutureBase.expecting should override Future.expecting cleanly; got: " + errors);
+    }
+
+    private static void indexSourceFile(Index index, Path file) throws Exception {
+        String source = Files.readString(file);
+        String fileName = file.getFileName().toString();
+        SourceIndexer.index(
+                URI.create("mem:///" + fileName),
+                URI.create(SOURCE_URI),
+                source,
+                index);
+    }
+
+    @Test
+    void sourceIndexedInterfacePrivateMethodStaysPrivate() throws Exception {
+        Index index = new Index();
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
+        SourceIndexer.index(
+                URI.create("mem:///Api.java"),
+                URI.create(SOURCE_URI),
+                "package com.example;\n"
+                        + "public interface Api {\n"
+                        + "    private static void hidden() {}\n"
+                        + "    static void exposed() {}\n"
+                        + "}\n",
+                index);
+        TypeEntry api = index.get("com/example/Api");
+        assertNotNull(api, "SourceIndexer should emit com/example/Api");
+        MethodEntry hidden = api.methods().stream()
+                .filter(m -> m.name().equals("hidden"))
+                .findFirst()
+                .orElseThrow();
+        assertTrue((hidden.accessFlags() & 0x0002) != 0,
+                "hidden() should remain private in indexed flags");
+        assertTrue((hidden.accessFlags() & 0x0001) == 0,
+                "hidden() must not be marked public");
+
+        ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
+
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject ok = new SimpleJavaFileObject(
+                URI.create("test:///UseApiOk.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return "import com.example.Api;\n"
+                        + "public class UseApiOk {\n"
+                        + "  void use() { Api.exposed(); }\n"
+                        + "}\n";
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> okDiagnostics = new DiagnosticCollector<>();
+        JavacTask okTask = (JavacTask) tool.getTask(
+                null, fm, okDiagnostics, List.of(), List.of(), List.of(ok), context);
+        okTask.analyze();
+        List<Diagnostic<? extends JavaFileObject>> okErrors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : okDiagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) okErrors.add(d);
+        }
+        assertTrue(okErrors.isEmpty(), () -> "Api.exposed() should compile, got: " + okErrors);
+
     }
 
     private static TypeEntry typeWithMethod(String srcUri, String jvmName, String methodName) {

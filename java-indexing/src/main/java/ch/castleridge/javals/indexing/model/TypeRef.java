@@ -1,5 +1,6 @@
 package ch.castleridge.javals.indexing.model;
 
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -21,18 +22,24 @@ import ch.castleridge.javals.indexing.intern.Interner;
  * on-demand-import &gt; {@code java.lang}).
  *
  * <p>Bytecode-derived {@link TypeEntry}s contain only {@link Primitive},
- * {@link Array} and {@link Resolved} leaves - the classfile format
- * never produces {@link Unresolved}.
+ * {@link Array}, {@link Resolved}, {@link TypeVariable}, {@link Wildcard}
+ * and {@link Parameterized} leaves.
  *
  * <p>{@link Resolved} and {@link Unresolved} are constructed through the
  * {@link #resolved(String)} / {@link #unresolved(String)} factories which
  * cache instances by name. The indexer emits millions of refs for a small
- * set of common JVM names (most of {@code java.lang}, type-parameter
- * erasure to {@code java/lang/Object}, etc.); sharing a single record per
- * distinct name turns a ~100 MiB allocation into a few kilobytes.
+ * set of common JVM names (most of {@code java.lang}, etc.); sharing a
+ * single record per distinct name turns a ~100 MiB allocation into a few
+ * kilobytes.
  */
 public sealed interface TypeRef
-        permits TypeRef.Primitive, TypeRef.Array, TypeRef.Resolved, TypeRef.Unresolved {
+        permits TypeRef.Primitive,
+                TypeRef.Array,
+                TypeRef.Resolved,
+                TypeRef.Unresolved,
+                TypeRef.TypeVariable,
+                TypeRef.Wildcard,
+                TypeRef.Parameterized {
 
     /** The nine primitive forms, plus {@code void}. */
     enum Primitive implements TypeRef {
@@ -82,8 +89,57 @@ public sealed interface TypeRef
         }
     }
 
+    /**
+     * A type variable reference such as {@code T} or {@code V} declared on
+     * the enclosing class or method.
+     */
+    record TypeVariable(String name) implements TypeRef {
+        public TypeVariable {
+            if (name == null || name.isEmpty()) {
+                throw new IllegalArgumentException("name must be non-empty");
+            }
+        }
+    }
+
+    /**
+     * A wildcard type argument: unbounded {@code ?}, {@code ? extends X},
+     * or {@code ? super X}. {@code bound} is {@code null} for unbounded
+     * {@code ?}.
+     */
+    record Wildcard(BoundKind kind, TypeRef bound) implements TypeRef {
+        public enum BoundKind {
+            UNBOUNDED, EXTENDS, SUPER
+        }
+
+        public static Wildcard unbounded() {
+            return new Wildcard(BoundKind.UNBOUNDED, null);
+        }
+
+        public static Wildcard extendsBound(TypeRef bound) {
+            return new Wildcard(BoundKind.EXTENDS, bound);
+        }
+
+        public static Wildcard superBound(TypeRef bound) {
+            return new Wildcard(BoundKind.SUPER, bound);
+        }
+    }
+
+    /**
+     * A parameterized type such as {@code List<String>} or
+     * {@code Expectation<? super T>}.
+     */
+    record Parameterized(TypeRef raw, List<TypeRef> typeArgs) implements TypeRef {
+        public Parameterized {
+            if (raw == null) {
+                throw new IllegalArgumentException("raw must not be null");
+            }
+            typeArgs = typeArgs == null ? List.of() : List.copyOf(typeArgs);
+        }
+    }
+
     ConcurrentMap<String, Resolved> RESOLVED_CACHE = new ConcurrentHashMap<>(1 << 13);
     ConcurrentMap<String, Unresolved> UNRESOLVED_CACHE = new ConcurrentHashMap<>(1 << 10);
+    ConcurrentMap<String, TypeVariable> TYPE_VARIABLE_CACHE = new ConcurrentHashMap<>(1 << 8);
 
     /**
      * Return a cached {@link Resolved} for {@code jvmBinaryName}. The name
@@ -111,6 +167,19 @@ public sealed interface TypeRef
         if (cached != null) return cached;
         Unresolved made = new Unresolved(key);
         Unresolved prior = UNRESOLVED_CACHE.putIfAbsent(key, made);
+        return prior == null ? made : prior;
+    }
+
+    /** Return a cached {@link TypeVariable} for {@code name}. */
+    static TypeVariable typeVariable(String name) {
+        if (name == null || name.isEmpty()) {
+            throw new IllegalArgumentException("name must be non-empty");
+        }
+        String key = Interner.intern(name);
+        TypeVariable cached = TYPE_VARIABLE_CACHE.get(key);
+        if (cached != null) return cached;
+        TypeVariable made = new TypeVariable(key);
+        TypeVariable prior = TYPE_VARIABLE_CACHE.putIfAbsent(key, made);
         return prior == null ? made : prior;
     }
 }

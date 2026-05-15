@@ -14,7 +14,6 @@ import java.util.Set;
 
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
-import javax.tools.SimpleJavaFileObject;
 import javax.tools.ToolProvider;
 
 import org.objectweb.asm.Opcodes;
@@ -177,7 +176,7 @@ public final class SourceIndexer {
 
         for (Tree member : ct.getMembers()) {
             if (member instanceof VariableTree vt) {
-                fields.add(toFieldEntry(uri, localName, vt, classTypeParams));
+                fields.add(toFieldEntry(ct, uri, localName, vt, classTypeParams));
             } else if (member instanceof MethodTree mt) {
                 methods.add(toMethodEntry(ct, uri, localName, mt, classTypeParams));
             } else if (member instanceof ClassTree inner) {
@@ -212,9 +211,9 @@ public final class SourceIndexer {
         }
     }
 
-    private static FieldEntry toFieldEntry(String uri, String owner, VariableTree vt,
+    private static FieldEntry toFieldEntry(ClassTree ct, String uri, String owner, VariableTree vt,
                                            Set<String> typeParams) {
-        int access = fieldAccessFlags(vt.getModifiers());
+        int access = fieldAccessFlags(ct, vt.getModifiers());
         return new FieldEntry(
                 uri,
                 owner,
@@ -245,7 +244,12 @@ public final class SourceIndexer {
             throwsRefs.add(toTypeRef(th, methodTypeParams));
         }
 
-        int access = methodAccessFlags(ct, mt.getModifiers());
+        List<TypeParamRef> declaredMethodTypeParams = new ArrayList<>();
+        for (TypeParameterTree tp : mt.getTypeParameters()) {
+            declaredMethodTypeParams.add(TypeParamRef.of(Interner.intern(tp.getName().toString())));
+        }
+
+        int access = methodAccessFlags(ct, mt);
         String name = Interner.intern(mt.getName().toString());
         return new MethodEntry(
                 uri,
@@ -255,6 +259,7 @@ public final class SourceIndexer {
                 returnRef,
                 paramRefs,
                 throwsRefs,
+                declaredMethodTypeParams,
                 annotationsOf(mt.getModifiers()));
     }
 
@@ -277,17 +282,27 @@ public final class SourceIndexer {
         if (t instanceof ArrayTypeTree at) {
             return new TypeRef.Array(toTypeRef(at.getType(), typeParams));
         }
-        if (t instanceof ParameterizedTypeTree pt) {
-            return toTypeRef(pt.getType(), typeParams);
+        if (t instanceof WildcardTree wt) {
+            Tree bound = wt.getBound();
+            return switch (wt.getKind()) {
+                case UNBOUNDED_WILDCARD -> TypeRef.Wildcard.unbounded();
+                case EXTENDS_WILDCARD -> TypeRef.Wildcard.extendsBound(toTypeRef(bound, typeParams));
+                case SUPER_WILDCARD -> TypeRef.Wildcard.superBound(toTypeRef(bound, typeParams));
+                default -> TypeRef.Wildcard.unbounded();
+            };
         }
-        if (t instanceof WildcardTree) {
-            return TypeRef.resolved("java/lang/Object");
+        if (t instanceof ParameterizedTypeTree pt) {
+            TypeRef raw = toTypeRef(pt.getType(), typeParams);
+            List<TypeRef> args = new ArrayList<>();
+            for (Tree arg : pt.getTypeArguments()) {
+                args.add(toTypeRef(arg, typeParams));
+            }
+            return new TypeRef.Parameterized(raw, args);
         }
         if (t instanceof IdentifierTree id) {
             String name = id.getName().toString();
-            // Type variables erase to java.lang.Object for symbol-population purposes.
             if (typeParams.contains(name)) {
-                return TypeRef.resolved("java/lang/Object");
+                return TypeRef.typeVariable(name);
             }
             return TypeRef.unresolved(name);
         }
@@ -309,16 +324,42 @@ public final class SourceIndexer {
         return flags;
     }
 
-    private static int fieldAccessFlags(ModifiersTree mods) {
-        return modifierFlags(mods);
-    }
-
-    private static int methodAccessFlags(ClassTree ct, ModifiersTree mods) {
+    private static int fieldAccessFlags(ClassTree ct, ModifiersTree mods) {
         int flags = modifierFlags(mods);
-        if (ct.getKind() == ClassTree.Kind.INTERFACE) {
-            flags |= Opcodes.ACC_PUBLIC;
+        if (isInterfaceLike(ct)) {
+            flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL;
         }
         return flags;
+    }
+
+    private static int methodAccessFlags(ClassTree ct, MethodTree mt) {
+        int flags = modifierFlags(mt.getModifiers());
+        if (isVarArgs(mt)) {
+            flags |= Opcodes.ACC_VARARGS;
+        }
+        if (isInterfaceLike(ct)) {
+            if ((flags & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) == 0) {
+                flags |= Opcodes.ACC_PUBLIC;
+            }
+            if (mt.getBody() == null && (flags & (Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC)) == 0) {
+                flags |= Opcodes.ACC_ABSTRACT;
+            }
+        }
+        return flags;
+    }
+
+    private static boolean isInterfaceLike(ClassTree ct) {
+        return ct.getKind() == ClassTree.Kind.INTERFACE
+                || ct.getKind() == ClassTree.Kind.ANNOTATION_TYPE;
+    }
+
+    private static boolean isVarArgs(MethodTree mt) {
+        if (mt.getParameters().isEmpty()) return false;
+        VariableTree lastParam = mt.getParameters().get(mt.getParameters().size() - 1);
+        if (lastParam.toString().contains("...")) {
+            return true;
+        }
+        return false;
     }
 
     private static int modifierFlags(ModifiersTree mods) {
