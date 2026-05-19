@@ -126,10 +126,13 @@ public final class IndexService {
         for (MbtDependencyModuleInfo dependencyModuleInfo : info.dependencyModules) {
             String binaryJar = dependencyModuleInfo.jar;
             String sourceJar = dependencyModuleInfo.sources;
-            if (binaryJar != null && sourceJar != null) {
-                sourceJarByBinaryJar.put(binaryJar, sourceJar);
-                if (!sources.containsKey(binaryJar)) {
+            if (binaryJar != null) {
+                if (!sources.containsKey(dependencyModuleInfo.id)) {
                     sources.put(dependencyModuleInfo.id, new JarInput(pathFromUri(binaryJar)));
+                    if (sourceJar != null) {
+                        sourceJarByBinaryJar.put(binaryJar, sourceJar);
+                    }
+
                 }
             }
         }
