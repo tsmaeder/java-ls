@@ -5,6 +5,7 @@ import java.net.URI;
 import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeRef;
@@ -54,6 +55,24 @@ class SourceIndexerGenericsTest {
         MethodEntry all = method(entry, "all");
         org.junit.jupiter.api.Assertions.assertTrue(all.varargs(),
                 "Future<?>... should be indexed as a varargs method");
+    }
+
+    @Test
+    void qualifiedNestedTypeUsesDollarInJvmName() {
+        TypeEntry entry = indexSingle(
+                "package p;\n"
+                        + "class Foo {\n"
+                        + "    public interface Bar {}\n"
+                        + "    Foo.Bar field;\n"
+                        + "}\n",
+                "p/Foo");
+
+        FieldEntry field = entry.fields().stream()
+                .filter(f -> f.name().equals("field"))
+                .findFirst()
+                .orElseThrow();
+        TypeRef.Resolved type = assertInstanceOf(TypeRef.Resolved.class, field.type());
+        assertEquals("p/Foo$Bar", type.jvmBinaryName());
     }
 
     @Test

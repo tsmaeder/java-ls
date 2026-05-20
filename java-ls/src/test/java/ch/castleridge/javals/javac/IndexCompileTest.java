@@ -36,6 +36,7 @@ import ch.castleridge.javals.indexing.bytecode.ClassFileIndexer;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
+import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.TypeRef;
@@ -185,6 +186,70 @@ class IndexCompileTest {
             if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
         }
         assertTrue(errors.isEmpty(), () -> "errors: " + errors);
+    }
+
+    @Test
+    void indexedNestedInterfaceIsVisibleAsQualifiedType() throws Exception {
+        Index index = new Index();
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
+        index.add(new TypeEntry(
+                "index:///com/example/Foo.class",
+                SOURCE_URI,
+                "com/example/Foo",
+                Opcodes.ACC_PUBLIC,
+                TypeDeclKind.CLASS,
+                new TypeRef.Resolved("java/lang/Object"),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of("com/example/Foo$Bar"),
+                List.of(),
+                null));
+        index.add(new TypeEntry(
+                "index:///com/example/Foo$Bar.class",
+                SOURCE_URI,
+                "com/example/Foo$Bar",
+                Opcodes.ACC_PUBLIC,
+                TypeDeclKind.INTERFACE,
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                null));
+
+        ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
+
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("test:///Use.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return "import com.example.Foo;\n"
+                        + "public class Use {\n"
+                        + "    Foo.Bar x = null;\n"
+                        + "}\n";
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
+        }
+        assertTrue(errors.isEmpty(), () -> "Foo.Bar should compile, got: " + errors);
     }
 
     @Test

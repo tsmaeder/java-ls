@@ -1,5 +1,8 @@
 package ch.castleridge.javals.javac;
 
+import static com.sun.tools.javac.code.Flags.STATIC;
+
+import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Scope.WriteableScope;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
@@ -22,6 +25,7 @@ import com.sun.tools.javac.util.Names;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
+import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.TypeRef;
@@ -54,6 +58,7 @@ public final class IndexClassReader extends ClassReader {
     private final ClasspathOrder classpath;
     private final Symtab syms;
     private final Names names;
+    private final Types types;
     private final TypeRefResolver resolver;
 
     private IndexClassReader(Context context, Index index, ClasspathOrder classpath) {
@@ -62,7 +67,7 @@ public final class IndexClassReader extends ClassReader {
         this.classpath = classpath;
         this.syms = Symtab.instance(context);
         this.names = Names.instance(context);
-        Types.instance(context); // touch to ensure the service is materialized
+        this.types = Types.instance(context);
         this.resolver = new TypeRefResolver(syms, names, index, classpath);
     }
 
@@ -105,6 +110,8 @@ public final class IndexClassReader extends ClassReader {
         c.flags_field = IndexAccessFlags.classFlags(entry);
         c.members_field = WriteableScope.create(c);
 
+        registerInnerTypes(c, entry, module);
+
         ClassType ct = (ClassType) c.type;
         List<Type> classTypeParams = synthesizeTypeParams(c, entry);
         ct.typarams_field = classTypeParams;
@@ -140,6 +147,55 @@ public final class IndexClassReader extends ClassReader {
         }
 
         c.completer = Symbol.Completer.NULL_COMPLETER;
+    }
+
+    /**
+     * Mirrors {@code ClassReader.readInnerClasses}: register each nested type
+     * listed on the outer {@link TypeEntry} so qualified nested-type references
+     * resolve via {@code outer.members_field}.
+     */
+    private void registerInnerTypes(ClassSymbol outer, TypeEntry entry, ModuleSymbol module) {
+        for (String innerJvm : entry.innerTypeJvmNames()) {
+            java.util.List<TypeEntry> candidates = index.getAll(innerJvm);
+            if (candidates.isEmpty()) continue;
+            TypeEntry innerEntry = classpath.pick(candidates, TypeEntry::sourceUri);
+            if (innerEntry == null) continue;
+
+            int dollar = innerJvm.lastIndexOf('$');
+            if (dollar < 0) continue;
+            String simple = innerJvm.substring(dollar + 1);
+            if (simple.isEmpty()) continue;
+
+            ClassSymbol inner = syms.enterClass(module, names.fromString(simple), outer);
+            if (inner.owner != outer) continue;
+
+            inner.classfile = new IndexClassFileObject(innerEntry);
+            long flags = IndexAccessFlags.classFlags(innerEntry);
+            if (isImplicitlyStaticNested(innerEntry)) {
+                flags |= STATIC;
+            }
+            inner.flags_field = flags;
+
+            if ((flags & STATIC) == 0) {
+                ClassType innerCt = (ClassType) inner.type;
+                innerCt.setEnclosingType(outer.type);
+                if (inner.erasure_field != null) {
+                    ((ClassType) inner.erasure_field).setEnclosingType(types.erasure(outer.type));
+                }
+            }
+
+            if ((flags & (Flags.SYNTHETIC | Flags.BRIDGE)) != Flags.SYNTHETIC
+                    || inner.name.startsWith(names.lambda)) {
+                outer.members_field.enter(inner);
+            }
+        }
+    }
+
+    private static boolean isImplicitlyStaticNested(TypeEntry inner) {
+        TypeDeclKind kind = inner.declKind();
+        return kind == TypeDeclKind.INTERFACE
+                || kind == TypeDeclKind.ENUM
+                || kind == TypeDeclKind.ANNOTATION;
     }
 
     /**

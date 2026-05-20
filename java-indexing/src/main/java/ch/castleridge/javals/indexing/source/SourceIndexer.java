@@ -162,7 +162,7 @@ public final class SourceIndexer {
         int modifiers = modifierFlags(ct.getModifiers());
         TypeRef superRef;
         if (ct.getExtendsClause() != null) {
-            superRef = toTypeRef(ct.getExtendsClause(), classTypeParams);
+            superRef = toTypeRef(ct.getExtendsClause(), classTypeParams, localName);
         } else if (declKind != TypeDeclKind.INTERFACE && declKind != TypeDeclKind.ANNOTATION) {
             superRef = TypeRef.resolved("java/lang/Object");
         } else {
@@ -170,7 +170,7 @@ public final class SourceIndexer {
         }
         List<TypeRef> interfaceRefs = new ArrayList<>();
         for (Tree intf : ct.getImplementsClause()) {
-            interfaceRefs.add(toTypeRef(intf, classTypeParams));
+            interfaceRefs.add(toTypeRef(intf, classTypeParams, localName));
         }
 
         List<FieldEntry> fields = new ArrayList<>();
@@ -180,9 +180,9 @@ public final class SourceIndexer {
 
         for (Tree member : ct.getMembers()) {
             if (member instanceof VariableTree vt) {
-                fields.add(toFieldEntry(uri, localName, vt, classTypeParams));
+                fields.add(toFieldEntry(uri, localName, vt, classTypeParams, localName));
             } else if (member instanceof MethodTree mt) {
-                methods.add(toMethodEntry(uri, localName, mt, classTypeParams));
+                methods.add(toMethodEntry(uri, localName, mt, classTypeParams, localName));
             } else if (member instanceof ClassTree inner) {
                 nested.add(inner);
                 String innerName = Interner.intern(localName + "$" + inner.getSimpleName().toString());
@@ -217,18 +217,18 @@ public final class SourceIndexer {
     }
 
     private static FieldEntry toFieldEntry(String uri, String owner, VariableTree vt,
-                                           Set<String> typeParams) {
+                                           Set<String> typeParams, String ownerJvm) {
         return new FieldEntry(
                 uri,
                 owner,
                 modifierFlags(vt.getModifiers()),
                 Interner.intern(vt.getName().toString()),
-                toTypeRef(vt.getType(), typeParams),
+                toTypeRef(vt.getType(), typeParams, ownerJvm),
                 annotationsOf(vt.getModifiers()));
     }
 
     private static MethodEntry toMethodEntry(String uri, String owner, MethodTree mt,
-                                             Set<String> classTypeParams) {
+                                             Set<String> classTypeParams, String ownerJvm) {
         Set<String> methodTypeParams = new HashSet<>(classTypeParams);
         for (TypeParameterTree tp : mt.getTypeParameters()) {
             methodTypeParams.add(tp.getName().toString());
@@ -236,16 +236,16 @@ public final class SourceIndexer {
 
         List<TypeRef> paramRefs = new ArrayList<>();
         for (VariableTree p : mt.getParameters()) {
-            paramRefs.add(toTypeRef(p.getType(), methodTypeParams));
+            paramRefs.add(toTypeRef(p.getType(), methodTypeParams, ownerJvm));
         }
 
         TypeRef returnRef = mt.getReturnType() == null
                 ? TypeRef.Primitive.VOID
-                : toTypeRef(mt.getReturnType(), methodTypeParams);
+                : toTypeRef(mt.getReturnType(), methodTypeParams, ownerJvm);
 
         List<TypeRef> throwsRefs = new ArrayList<>();
         for (Tree th : mt.getThrows()) {
-            throwsRefs.add(toTypeRef(th, methodTypeParams));
+            throwsRefs.add(toTypeRef(th, methodTypeParams, ownerJvm));
         }
 
         List<TypeParamRef> declaredMethodTypeParams = new ArrayList<>();
@@ -268,7 +268,7 @@ public final class SourceIndexer {
                 annotationsOf(mt.getModifiers()));
     }
 
-    private static TypeRef toTypeRef(Tree t, Set<String> typeParams) {
+    private static TypeRef toTypeRef(Tree t, Set<String> typeParams, String ownerJvm) {
         if (t == null) return TypeRef.Primitive.VOID;
         if (t instanceof PrimitiveTypeTree pt) {
             return switch (pt.getPrimitiveTypeKind()) {
@@ -285,22 +285,22 @@ public final class SourceIndexer {
             };
         }
         if (t instanceof ArrayTypeTree at) {
-            return new TypeRef.Array(toTypeRef(at.getType(), typeParams));
+            return new TypeRef.Array(toTypeRef(at.getType(), typeParams, ownerJvm));
         }
         if (t instanceof WildcardTree wt) {
             Tree bound = wt.getBound();
             return switch (wt.getKind()) {
                 case UNBOUNDED_WILDCARD -> TypeRef.Wildcard.unbounded();
-                case EXTENDS_WILDCARD -> TypeRef.Wildcard.extendsBound(toTypeRef(bound, typeParams));
-                case SUPER_WILDCARD -> TypeRef.Wildcard.superBound(toTypeRef(bound, typeParams));
+                case EXTENDS_WILDCARD -> TypeRef.Wildcard.extendsBound(toTypeRef(bound, typeParams, ownerJvm));
+                case SUPER_WILDCARD -> TypeRef.Wildcard.superBound(toTypeRef(bound, typeParams, ownerJvm));
                 default -> TypeRef.Wildcard.unbounded();
             };
         }
         if (t instanceof ParameterizedTypeTree pt) {
-            TypeRef raw = toTypeRef(pt.getType(), typeParams);
+            TypeRef raw = toTypeRef(pt.getType(), typeParams, ownerJvm);
             List<TypeRef> args = new ArrayList<>();
             for (Tree arg : pt.getTypeArguments()) {
-                args.add(toTypeRef(arg, typeParams));
+                args.add(toTypeRef(arg, typeParams, ownerJvm));
             }
             return new TypeRef.Parameterized(raw, args);
         }
@@ -312,9 +312,65 @@ public final class SourceIndexer {
             return TypeRef.unresolved(name);
         }
         if (t instanceof MemberSelectTree ms) {
-            return TypeRef.resolved(ms.toString().replace('.', '/'));
+            return typeRefForMemberSelect(ms, ownerJvm);
         }
         return TypeRef.resolved(t.toString().replace('.', '/'));
+    }
+
+    private static TypeRef typeRefForMemberSelect(MemberSelectTree ms, String ownerJvm) {
+        String jvm = memberSelectJvmName(ms);
+        if (ownerJvm != null) {
+            int start = Math.max(ownerJvm.lastIndexOf('$'), ownerJvm.lastIndexOf('/')) + 1;
+            String outerSimple = ownerJvm.substring(start);
+            if (jvm.startsWith(outerSimple + "$")) {
+                return TypeRef.resolved(Interner.intern(ownerJvm + jvm.substring(outerSimple.length())));
+            }
+        }
+        return TypeRef.resolved(jvm);
+    }
+
+    /**
+     * Builds a JVM binary name from a type {@link MemberSelectTree}, using
+     * {@code /} between package segments and {@code $} for nested classes
+     * (e.g. {@code java.util.Map.Entry} → {@code java/util/Map$Entry}).
+     */
+    private static String memberSelectJvmName(MemberSelectTree ms) {
+        List<String> parts = new ArrayList<>();
+        collectMemberSelectParts(ms, parts);
+        int classStart = 0;
+        for (int i = 0; i < parts.size(); i++) {
+            if (isClassLikeSimpleName(parts.get(i))) {
+                classStart = i;
+                break;
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < classStart; i++) {
+            if (i > 0) sb.append('/');
+            sb.append(parts.get(i));
+        }
+        for (int i = classStart; i < parts.size(); i++) {
+            if (i == classStart) {
+                if (classStart > 0) sb.append('/');
+                sb.append(parts.get(i));
+            } else {
+                sb.append('$').append(parts.get(i));
+            }
+        }
+        return Interner.intern(sb.toString());
+    }
+
+    private static void collectMemberSelectParts(Tree tree, List<String> parts) {
+        if (tree instanceof MemberSelectTree ms) {
+            collectMemberSelectParts(ms.getExpression(), parts);
+            parts.add(ms.getIdentifier().toString());
+        } else if (tree instanceof IdentifierTree id) {
+            parts.add(id.getName().toString());
+        }
+    }
+
+    private static boolean isClassLikeSimpleName(String name) {
+        return !name.isEmpty() && Character.isUpperCase(name.charAt(0));
     }
 
     private static TypeDeclKind declKind(ClassTree ct) {
