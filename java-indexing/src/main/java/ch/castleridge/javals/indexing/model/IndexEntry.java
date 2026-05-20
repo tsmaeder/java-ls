@@ -30,4 +30,13 @@ public sealed interface IndexEntry permits TypeEntry, FieldEntry, MethodEntry {
     List<AnnotationRef> annotations();
 
     EntryKind kind();
+
+    /**
+     * {@code true} when this entry was produced by source indexing rather than
+     * bytecode indexing. Only {@link TypeEntry} overrides this; for member
+     * entries consult the enclosing type.
+     */
+    default boolean isSourceEntry() {
+        return false;
+    }
 }

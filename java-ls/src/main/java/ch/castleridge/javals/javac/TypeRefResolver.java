@@ -172,10 +172,10 @@ final class TypeRefResolver {
             }
         }
 
-        SourceResolutionHints hints = enclosing.hints();
-        if (hints == null) {
+        if (!enclosing.isSourceEntry()) {
             return "java/lang/" + simple;
         }
+        SourceResolutionHints hints = enclosing.hints();
 
         if (hints.siblingSimpleNames().contains(simple)) {
             String pkg = hints.sourcePackage();

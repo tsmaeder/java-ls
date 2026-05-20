@@ -22,8 +22,9 @@ import java.util.List;
  * {@code IndexClassReader} can synthesize a {@code TypeVar} per
  * parameter and javac sees the correct arity for parameterized uses.
  *
- * <p>{@link #hints()} is non-{@code null} only for source-derived
- * entries; bytecode entries leave it {@code null}.
+ * <p>{@link #isSourceEntry()} is {@code true} for source-derived entries;
+ * bytecode entries are not source entries and leave {@link #hints()}
+ * {@code null}.
  *
  * <p>{@link #declKind()} is set for source-derived entries;
  * bytecode entries use {@link TypeDeclKind#UNKNOWN}.
@@ -90,5 +91,10 @@ public record TypeEntry(
     @Override
     public EntryKind kind() {
         return EntryKind.TYPE;
+    }
+
+    @Override
+    public boolean isSourceEntry() {
+        return hints != null;
     }
 }

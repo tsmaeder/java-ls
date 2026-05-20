@@ -16,7 +16,7 @@ final class IndexAccessFlags {
     private IndexAccessFlags() {}
 
     static int classFlags(TypeEntry entry) {
-        if (entry.hints() == null) {
+        if (!entry.isSourceEntry()) {
             return entry.modifiers();
         }
         int flags = entry.modifiers();
@@ -30,7 +30,7 @@ final class IndexAccessFlags {
     }
 
     static int fieldFlags(TypeEntry owner, FieldEntry field) {
-        if (owner.hints() == null) {
+        if (!owner.isSourceEntry()) {
             return field.modifiers();
         }
         int flags = field.modifiers();
@@ -41,7 +41,7 @@ final class IndexAccessFlags {
     }
 
     static int methodFlags(TypeEntry owner, MethodEntry method) {
-        if (owner.hints() == null) {
+        if (!owner.isSourceEntry()) {
             return method.modifiers();
         }
         int flags = method.modifiers();
