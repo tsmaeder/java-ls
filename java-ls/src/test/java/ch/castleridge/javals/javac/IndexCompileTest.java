@@ -541,7 +541,10 @@ class IndexCompileTest {
         // index reader its ClassSymbol kept the default notAnAnnotationType()
         // metadata, so every supplied element looked like a duplicate.
         // Check that the canonical "@SuppressWarnings + @Deprecated + @Override"
-        // combination compiles cleanly against a JRT-backed index.
+        // combination compiles cleanly against a JRT-backed index AND
+        // that @SuppressWarnings("unchecked") actually suppresses the
+        // unchecked-cast warning (Part 2: annotation values flow into
+        // Lint via the symbol's declaration attributes).
         Path jdk = Path.of(System.getProperty("java.home"));
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri().toString();
@@ -581,15 +584,214 @@ class IndexCompileTest {
 
         DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
         JavacTask task = (JavacTask) tool.getTask(
-                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+                null, fm, diagnostics, List.of("-Xlint:unchecked"), List.of(), List.of(src), context);
         task.analyze();
 
         List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        List<Diagnostic<? extends JavaFileObject>> uncheckedWarnings = new ArrayList<>();
         for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
             if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
+            String code = d.getCode();
+            if (code != null && code.contains("unchecked")) {
+                uncheckedWarnings.add(d);
+            }
         }
         assertTrue(errors.isEmpty(),
                 () -> "@SuppressWarnings/@Deprecated/@Override on indexed JDK annotations should compile cleanly; got: " + errors);
+        assertTrue(uncheckedWarnings.isEmpty(),
+                () -> "@SuppressWarnings(\"unchecked\") must suppress the unchecked cast warning, got: " + uncheckedWarnings);
+    }
+
+    @Test
+    void indexedTargetAnnotationIsEnforced() throws Exception {
+        // Apply a user-written annotation type with @Target({METHOD}) to
+        // a field in user code: javac should report a target-mismatch
+        // error because the indexed @Target's value array reached
+        // AnnotationTypeMetadata via IndexAnnotations.
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        // Compile a tiny annotation type with @Target({METHOD}) to a
+        // temp dir, then index its bytecode into the same Index so the
+        // file manager hands it back through IndexClassReader.
+        Path outDir = Files.createTempDirectory("target-anno");
+        try {
+            JavaCompiler bootstrap = ToolProvider.getSystemJavaCompiler();
+            StandardJavaFileManager bfm = bootstrap.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+            bfm.setLocation(StandardLocation.CLASS_OUTPUT, List.of(outDir.toFile()));
+            JavaFileObject annSrc = new SimpleJavaFileObject(
+                    URI.create("mem:///OnlyMethod.java"), JavaFileObject.Kind.SOURCE) {
+                @Override
+                public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                    return """
+                            import java.lang.annotation.*;
+                            @Target({ElementType.METHOD})
+                            public @interface OnlyMethod {}
+                            """;
+                }
+            };
+            assertTrue(bootstrap.getTask(null, bfm, d -> {}, List.of(), List.of(), List.of(annSrc)).call(),
+                    "annotation type should compile");
+            byte[] annBytes = Files.readAllBytes(outDir.resolve("OnlyMethod.class"));
+
+            String annUri = "index:///cp/onlymethod/";
+            ClassFileIndexer.index(
+                    URI.create("index:///OnlyMethod.class"),
+                    URI.create(annUri),
+                    annBytes,
+                    index);
+
+            ClasspathOrder cp = classPathOf(List.of(annUri, jrtUri));
+
+            JavacTool tool = JavacTool.create();
+            Context context = new Context();
+            IndexClassReader.preRegister(context, index, cp);
+            StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+            IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+            JavaFileObject src = new SimpleJavaFileObject(
+                    URI.create("test:///Misuse.java"), JavaFileObject.Kind.SOURCE) {
+                @Override
+                public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                    return """
+                            public class Misuse {
+                                @OnlyMethod
+                                int field = 0;
+                            }
+                            """;
+                }
+            };
+
+            DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+            JavacTask task = (JavacTask) tool.getTask(
+                    null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+            task.analyze();
+
+            boolean sawTargetError = false;
+            for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+                if (d.getKind() != Diagnostic.Kind.ERROR) continue;
+                String code = d.getCode();
+                String msg = d.getMessage(null);
+                if (code != null && (code.contains("annotation.type.not.applicable")
+                        || code.contains("annotation.not.applicable"))) {
+                    sawTargetError = true;
+                    break;
+                }
+                if (msg != null && msg.contains("not applicable")) {
+                    sawTargetError = true;
+                    break;
+                }
+            }
+            assertTrue(sawTargetError,
+                    () -> "@Target({METHOD}) on indexed annotation must reject application to a field; diagnostics: "
+                            + diagnostics.getDiagnostics());
+        } finally {
+            try (var paths = Files.walk(outDir)) {
+                paths.sorted(java.util.Comparator.reverseOrder())
+                        .forEach(p -> {
+                            try { Files.deleteIfExists(p); } catch (Exception ignored) {}
+                        });
+            }
+        }
+    }
+
+    @Test
+    void indexedDeprecatedForRemovalIsReportedDistinctly() throws Exception {
+        // An indexed method annotated @Deprecated(forRemoval = true) must
+        // produce a "for removal" deprecation diagnostic at the call site,
+        // not just the regular deprecation warning. This is the canonical
+        // case for needing annotation values (not just presence) on
+        // index-synthesized symbols.
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        Path outDir = Files.createTempDirectory("deprecated-removal");
+        try {
+            JavaCompiler bootstrap = ToolProvider.getSystemJavaCompiler();
+            StandardJavaFileManager bfm = bootstrap.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+            bfm.setLocation(StandardLocation.CLASS_OUTPUT, List.of(outDir.toFile()));
+            JavaFileObject apiSrc = new SimpleJavaFileObject(
+                    URI.create("mem:///GoneApi.java"), JavaFileObject.Kind.SOURCE) {
+                @Override
+                public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                    return """
+                            public class GoneApi {
+                                @Deprecated(forRemoval = true, since = "9")
+                                public static void gone() {}
+                            }
+                            """;
+                }
+            };
+            assertTrue(bootstrap.getTask(null, bfm, d -> {}, List.of(), List.of(), List.of(apiSrc)).call(),
+                    "GoneApi should compile");
+            byte[] apiBytes = Files.readAllBytes(outDir.resolve("GoneApi.class"));
+
+            String apiUri = "index:///cp/gone/";
+            ClassFileIndexer.index(
+                    URI.create("index:///GoneApi.class"),
+                    URI.create(apiUri),
+                    apiBytes,
+                    index);
+
+            ClasspathOrder cp = classPathOf(List.of(apiUri, jrtUri));
+
+            JavacTool tool = JavacTool.create();
+            Context context = new Context();
+            IndexClassReader.preRegister(context, index, cp);
+            StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+            IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+            JavaFileObject src = new SimpleJavaFileObject(
+                    URI.create("test:///Caller.java"), JavaFileObject.Kind.SOURCE) {
+                @Override
+                public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                    return """
+                            public class Caller {
+                                void go() { GoneApi.gone(); }
+                            }
+                            """;
+                }
+            };
+
+            DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+            JavacTask task = (JavacTask) tool.getTask(
+                    null, fm, diagnostics, List.of("-Xlint:removal"), List.of(), List.of(src), context);
+            task.analyze();
+
+            boolean sawForRemoval = false;
+            for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+                String code = d.getCode();
+                String msg = d.getMessage(null);
+                if (code != null && code.contains("removal")) {
+                    sawForRemoval = true;
+                    break;
+                }
+                if (msg != null && msg.contains("marked for removal")) {
+                    sawForRemoval = true;
+                    break;
+                }
+            }
+            assertTrue(sawForRemoval,
+                    () -> "@Deprecated(forRemoval=true) on indexed method should produce a removal diagnostic; got: "
+                            + diagnostics.getDiagnostics());
+        } finally {
+            try (var paths = Files.walk(outDir)) {
+                paths.sorted(java.util.Comparator.reverseOrder())
+                        .forEach(p -> {
+                            try { Files.deleteIfExists(p); } catch (Exception ignored) {}
+                        });
+            }
+        }
     }
 
     @Test

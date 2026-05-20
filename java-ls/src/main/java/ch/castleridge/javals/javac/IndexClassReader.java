@@ -57,12 +57,11 @@ import ch.castleridge.javals.indexing.model.TypeRef;
 public final class IndexClassReader extends ClassReader {
 
     /**
-     * Placeholder default value attached to {@link MethodSymbol#defaultValue}
-     * for annotation elements that have a {@code default} clause (or
-     * {@code AnnotationDefault} attribute in bytecode). The actual value
-     * is not preserved by the index because {@code Check.validateAnnotation}
-     * only checks for presence ({@code != null}); using {@link Attribute.Error}
-     * also gives a sensible "unknown value" mirror for any reflective access.
+     * Fallback default value for annotation elements whose default is
+     * recorded as {@link ch.castleridge.javals.indexing.model.AnnotationValue.Unsupported}
+     * (or otherwise non-convertible). {@code Check.validateAnnotation}
+     * only consults presence/absence here, so {@link Attribute.Error}
+     * is a sound placeholder.
      */
     private static final Attribute ANNOTATION_DEFAULT_SENTINEL = new Attribute.Error(Type.noType);
 
@@ -72,6 +71,7 @@ public final class IndexClassReader extends ClassReader {
     private final Names names;
     private final Types types;
     private final TypeRefResolver resolver;
+    private final IndexAnnotations annotations;
 
     private IndexClassReader(Context context, Index index, ClasspathOrder classpath) {
         super(context);
@@ -81,6 +81,7 @@ public final class IndexClassReader extends ClassReader {
         this.names = Names.instance(context);
         this.types = Types.instance(context);
         this.resolver = new TypeRefResolver(syms, names, index, classpath);
+        this.annotations = new IndexAnnotations(syms, names, types);
     }
 
     /**
@@ -143,6 +144,9 @@ public final class IndexClassReader extends ClassReader {
         for (FieldEntry f : entry.fields()) {
             Type t = resolver.resolveField(f, module, classCtx);
             VarSymbol v = new VarSymbol(IndexAccessFlags.fieldFlags(entry, f), names.fromString(f.name()), t, c);
+            List<Attribute.Compound> fAttrs = annotations.toCompounds(f.annotations(), module);
+            v.setDeclarationAttributes(fAttrs);
+            v.flags_field |= deprecationFlags(fAttrs);
             c.members_field.enter(v);
         }
 
@@ -155,25 +159,96 @@ public final class IndexClassReader extends ClassReader {
                     ? mt
                     : new Type.ForAll(methodTypeParams, mt);
             MethodSymbol ms = new MethodSymbol(IndexAccessFlags.methodFlags(entry, m), names.fromString(m.name()), methodType, c);
-            if (m.hasAnnotationDefault()) {
-                // Only the presence matters for Check.validateAnnotation;
-                // a sentinel non-null Attribute is enough to mark the
-                // element as having a default.
-                ms.defaultValue = ANNOTATION_DEFAULT_SENTINEL;
+            List<Attribute.Compound> mAttrs = annotations.toCompounds(m.annotations(), module);
+            ms.setDeclarationAttributes(mAttrs);
+            ms.flags_field |= deprecationFlags(mAttrs);
+            if (m.annotationDefault() != null) {
+                Attribute defaultAttr = annotations.toAttribute(m.annotationDefault(), mt.getReturnType(), module);
+                ms.defaultValue = defaultAttr != null ? defaultAttr : ANNOTATION_DEFAULT_SENTINEL;
             }
             c.members_field.enter(ms);
         }
 
+        // Class-level annotations must be attached before the
+        // AnnotationTypeMetadata is built so the metadata can pick up
+        // @Target and @Repeatable from the same compounds.
+        List<Attribute.Compound> classAttrs = annotations.toCompounds(entry.annotations(), module);
+        c.setDeclarationAttributes(classAttrs);
+        c.flags_field |= deprecationFlags(classAttrs);
+
         // Mirror ClassReader.readClassFile: annotation types need a real
         // AnnotationTypeMetadata so Check.validateAnnotation can enumerate
-        // their element methods. Without this the class keeps the default
-        // notAnAnnotationType() metadata, which exposes an empty element
-        // set and makes every supplied argument look like a duplicate.
+        // their element methods and enforce @Target / find the
+        // @Repeatable container. Without this the class keeps the
+        // default notAnAnnotationType() metadata, which exposes an empty
+        // element set and makes every supplied argument look like a
+        // duplicate.
         if ((c.flags_field & Flags.ANNOTATION) != 0) {
-            c.setAnnotationTypeMetadata(new AnnotationTypeMetadata(c, null));
+            AnnotationTypeMetadata meta = new AnnotationTypeMetadata(c, null);
+            populateAnnotationMetadata(meta, classAttrs);
+            c.setAnnotationTypeMetadata(meta);
         }
 
         c.completer = Symbol.Completer.NULL_COMPLETER;
+    }
+
+    /**
+     * Populate {@code meta.target} / {@code meta.repeatable} from the
+     * just-attached declaration attributes so {@code Check} can enforce
+     * {@code @Target} target sets and discover {@code @Repeatable}
+     * container types for indexed annotation types.
+     */
+    private static void populateAnnotationMetadata(AnnotationTypeMetadata meta, List<Attribute.Compound> classAttrs) {
+        for (Attribute.Compound a : classAttrs) {
+            if (a.type == null || a.type.tsym == null) continue;
+            String qn = a.type.tsym.getQualifiedName().toString();
+            switch (qn) {
+                case "java.lang.annotation.Target" -> meta.setTarget(a);
+                case "java.lang.annotation.Repeatable" -> meta.setRepeatable(a);
+                default -> {
+                    // nothing
+                }
+            }
+        }
+    }
+
+    /**
+     * Mirror javac's {@code ClassReader.attachAnnotations}: an
+     * {@code @Deprecated} annotation on the symbol must also bump the
+     * matching {@code DEPRECATED} / {@code DEPRECATED_ANNOTATION} /
+     * {@code DEPRECATED_REMOVAL} flag bits, because
+     * {@code Check.checkDeprecated} consults those flag bits directly
+     * rather than walking the attribute list each time.
+     */
+    private static long deprecationFlags(List<Attribute.Compound> attrs) {
+        long add = 0L;
+        for (Attribute.Compound a : attrs) {
+            if (a.type == null || a.type.tsym == null) continue;
+            if (!"java.lang.Deprecated".contentEquals(a.type.tsym.getQualifiedName())) continue;
+            add |= Flags.DEPRECATED | Flags.DEPRECATED_ANNOTATION;
+            if (deprecatedForRemoval(a)) {
+                add |= Flags.DEPRECATED_REMOVAL;
+            }
+        }
+        return add;
+    }
+
+    private static boolean deprecatedForRemoval(Attribute.Compound deprecated) {
+        for (var pair : deprecated.values) {
+            if (!"forRemoval".contentEquals(pair.fst.name)) continue;
+            if (pair.snd instanceof Attribute.Constant ct
+                    && ct.value instanceof Boolean b
+                    && b) {
+                return true;
+            }
+            // javac stores boolean annotation values as Integer 0/1 too
+            if (pair.snd instanceof Attribute.Constant ct
+                    && ct.value instanceof Integer i
+                    && i != 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

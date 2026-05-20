@@ -13,12 +13,15 @@ import java.util.List;
  * source-derived methods; bytecode entries use defaults and rely on
  * {@link #modifiers()} from ASM.
  *
- * <p>{@link #hasAnnotationDefault()} is true when this method is an
+ * <p>{@link #annotationDefault()} is non-null when this method is an
  * annotation element with a default value (either an
  * {@code AnnotationDefault} attribute in bytecode or a {@code default}
- * clause in source). The actual default value is not retained because
- * the LSP only needs the presence flag to satisfy
- * {@code Check.validateAnnotation}.
+ * clause in source). The actual default value is preserved so that
+ * {@code IndexClassReader} can construct an accurate
+ * {@code MethodSymbol.defaultValue} attribute; for source-derived
+ * defaults the indexer falls back to {@link AnnotationValue.Unsupported}
+ * when the default expression cannot be evaluated without a symbol
+ * table.
  */
 public record MethodEntry(
         String resourceUri,
@@ -31,7 +34,7 @@ public record MethodEntry(
         List<TypeParamRef> typeParams,
         boolean varargs,
         boolean hasBody,
-        boolean hasAnnotationDefault,
+        AnnotationValue annotationDefault,
         List<AnnotationRef> annotations) implements IndexEntry {
 
     public MethodEntry {
@@ -39,6 +42,16 @@ public record MethodEntry(
         throwsTypes = throwsTypes == null ? List.of() : List.copyOf(throwsTypes);
         typeParams = typeParams == null ? List.of() : List.copyOf(typeParams);
         annotations = annotations == null ? List.of() : List.copyOf(annotations);
+    }
+
+    /**
+     * {@code true} when this method has a default value attached. Kept
+     * for backward compatibility with the previous boolean field; new
+     * code should consult {@link #annotationDefault()} directly to
+     * recover the actual value.
+     */
+    public boolean hasAnnotationDefault() {
+        return annotationDefault != null;
     }
 
     /** Backward-compatible constructor without method type parameters. */
@@ -52,7 +65,7 @@ public record MethodEntry(
             List<TypeRef> throwsTypes,
             List<AnnotationRef> annotations) {
         this(resourceUri, jvmOwnerName, modifiers, name, returnType,
-                paramTypes, throwsTypes, List.of(), false, true, false, annotations);
+                paramTypes, throwsTypes, List.of(), false, true, null, annotations);
     }
 
     /** Backward-compatible constructor without varargs/hasBody. */
@@ -67,10 +80,10 @@ public record MethodEntry(
             List<TypeParamRef> typeParams,
             List<AnnotationRef> annotations) {
         this(resourceUri, jvmOwnerName, modifiers, name, returnType,
-                paramTypes, throwsTypes, typeParams, false, true, false, annotations);
+                paramTypes, throwsTypes, typeParams, false, true, null, annotations);
     }
 
-    /** Backward-compatible constructor without hasAnnotationDefault. */
+    /** Backward-compatible constructor without annotationDefault. */
     public MethodEntry(
             String resourceUri,
             String jvmOwnerName,
@@ -84,7 +97,7 @@ public record MethodEntry(
             boolean hasBody,
             List<AnnotationRef> annotations) {
         this(resourceUri, jvmOwnerName, modifiers, name, returnType,
-                paramTypes, throwsTypes, typeParams, varargs, hasBody, false, annotations);
+                paramTypes, throwsTypes, typeParams, varargs, hasBody, null, annotations);
     }
 
     @Override

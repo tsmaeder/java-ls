@@ -20,17 +20,22 @@ import org.objectweb.asm.Opcodes;
 
 import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.ArrayTypeTree;
+import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.ImportTree;
+import com.sun.source.tree.LiteralTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.ModifiersTree;
+import com.sun.source.tree.NewArrayTree;
 import com.sun.source.tree.ParameterizedTypeTree;
 import com.sun.source.tree.PrimitiveTypeTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.TypeParameterTree;
+import com.sun.source.tree.UnaryTree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.tree.WildcardTree;
 import com.sun.source.util.JavacTask;
@@ -41,6 +46,7 @@ import ch.castleridge.javals.indexing.index.InMemorySource;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.intern.Interner;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
+import ch.castleridge.javals.indexing.model.AnnotationValue;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.SourceResolutionHints;
@@ -254,6 +260,10 @@ public final class SourceIndexer {
         }
 
         String name = Interner.intern(mt.getName().toString());
+        Tree defaultTree = mt.getDefaultValue();
+        AnnotationValue defaultValue = defaultTree instanceof ExpressionTree dt
+                ? toAnnotationValue(dt)
+                : null;
         return new MethodEntry(
                 uri,
                 owner,
@@ -265,7 +275,7 @@ public final class SourceIndexer {
                 declaredMethodTypeParams,
                 isVarArgs(mt),
                 mt.getBody() != null,
-                mt.getDefaultValue() != null,
+                defaultValue,
                 annotationsOf(mt.getModifiers()));
     }
 
@@ -419,9 +429,194 @@ public final class SourceIndexer {
         if (mods == null || mods.getAnnotations().isEmpty()) return List.of();
         List<AnnotationRef> out = new ArrayList<>();
         for (AnnotationTree a : mods.getAnnotations()) {
-            String name = Interner.intern(a.getAnnotationType().toString().replace('.', '/'));
-            out.add(new AnnotationRef(name, Map.of()));
+            out.add(toAnnotationRef(a));
         }
         return out;
+    }
+
+    /**
+     * Build an {@link AnnotationRef} from an {@link AnnotationTree},
+     * walking each supplied element expression into an
+     * {@link AnnotationValue}. Arguments without an explicit name fall
+     * back to the {@code value} element per Java's single-element
+     * annotation shorthand.
+     */
+    private static AnnotationRef toAnnotationRef(AnnotationTree a) {
+        String name = Interner.intern(a.getAnnotationType().toString().replace('.', '/'));
+        List<? extends ExpressionTree> args = a.getArguments();
+        if (args == null || args.isEmpty()) {
+            return new AnnotationRef(name, Map.of());
+        }
+        Map<String, AnnotationValue> values = new HashMap<>();
+        for (ExpressionTree arg : args) {
+            String elementName;
+            ExpressionTree valueExpr;
+            if (arg instanceof AssignmentTree assign && assign.getVariable() instanceof IdentifierTree id) {
+                elementName = id.getName().toString();
+                valueExpr = assign.getExpression();
+            } else {
+                elementName = "value";
+                valueExpr = arg;
+            }
+            AnnotationValue value = toAnnotationValue(valueExpr);
+            values.put(Interner.intern(elementName), value);
+        }
+        return new AnnotationRef(name, values);
+    }
+
+    /**
+     * Best-effort conversion of an annotation-element expression into an
+     * {@link AnnotationValue}. The source indexer has no symbol table,
+     * so anything that isn't a literal, array literal, class literal,
+     * enum-shaped name reference or nested annotation collapses to
+     * {@link AnnotationValue.Unsupported} - the symbol-side converter
+     * then drops the element from the attribute map, which is the right
+     * semantic for "value not known".
+     */
+    private static AnnotationValue toAnnotationValue(ExpressionTree expr) {
+        if (expr == null) {
+            return new AnnotationValue.Unsupported("missing expression");
+        }
+        if (expr instanceof LiteralTree lit) {
+            Object value = lit.getValue();
+            if (value == null) {
+                return new AnnotationValue.Unsupported("null literal");
+            }
+            if (value instanceof String s) {
+                return new AnnotationValue.Str(s);
+            }
+            return new AnnotationValue.Primitive(value);
+        }
+        if (expr instanceof UnaryTree unary) {
+            // Allow negative numeric literals: -1, -1.5, ...
+            ExpressionTree operand = unary.getExpression();
+            if (operand instanceof LiteralTree litOperand && litOperand.getValue() instanceof Number n) {
+                switch (unary.getKind()) {
+                    case UNARY_MINUS -> {
+                        Object negated = negateNumber(n);
+                        if (negated != null) {
+                            return new AnnotationValue.Primitive(negated);
+                        }
+                    }
+                    case UNARY_PLUS -> {
+                        return new AnnotationValue.Primitive(n);
+                    }
+                    default -> { /* fall through to Unsupported */ }
+                }
+            }
+            return new AnnotationValue.Unsupported("unary expression");
+        }
+        if (expr instanceof NewArrayTree arr) {
+            List<? extends ExpressionTree> inits = arr.getInitializers();
+            if (inits == null) {
+                return new AnnotationValue.Arr(List.of());
+            }
+            List<AnnotationValue> elements = new ArrayList<>(inits.size());
+            for (ExpressionTree e : inits) {
+                elements.add(toAnnotationValue(e));
+            }
+            return new AnnotationValue.Arr(elements);
+        }
+        if (expr instanceof AnnotationTree nested) {
+            return new AnnotationValue.Nested(toAnnotationRef(nested));
+        }
+        // Foo.class -> ClassRef; Foo.BAR / Foo.Bar.BAZ -> tentative EnumConst; bare Identifier -> tentative EnumConst.
+        if (expr instanceof MemberSelectTree ms) {
+            String selected = ms.getIdentifier().toString();
+            if (selected.equals("class")) {
+                return new AnnotationValue.ClassRef(typeRefForExpression(ms.getExpression()));
+            }
+            return new AnnotationValue.EnumConst(typeRefForExpression(ms.getExpression()), Interner.intern(selected));
+        }
+        if (expr instanceof IdentifierTree id) {
+            // Unqualified identifier: could be an enum constant imported
+            // statically or via a static import. Without resolution we
+            // can only encode the simple name; the symbol-side converter
+            // will downgrade to Unsupported if it can't bind.
+            return new AnnotationValue.EnumConst(
+                    TypeRef.unresolved("?"),
+                    Interner.intern(id.getName().toString()));
+        }
+        return new AnnotationValue.Unsupported("non-constant expression");
+    }
+
+    /**
+     * Build a {@link TypeRef} suitable for a class-literal qualifier or
+     * an enum-constant qualifier. Only {@link IdentifierTree} and
+     * {@link MemberSelectTree} chains are supported - everything else
+     * yields {@link TypeRef.Unresolved} sentinel "?" so the symbol-side
+     * converter can fall back gracefully.
+     */
+    private static TypeRef typeRefForExpression(ExpressionTree e) {
+        if (e instanceof IdentifierTree id) {
+            return TypeRef.unresolved(id.getName().toString());
+        }
+        if (e instanceof MemberSelectTree ms) {
+            String jvm = qualifiedToJvm(ms);
+            return jvm == null ? TypeRef.unresolved("?") : TypeRef.resolved(jvm);
+        }
+        if (e instanceof ArrayTypeTree at) {
+            return new TypeRef.Array(typeRefForExpression((ExpressionTree) at.getType()));
+        }
+        if (e instanceof PrimitiveTypeTree pt) {
+            return switch (pt.getPrimitiveTypeKind()) {
+                case BOOLEAN -> TypeRef.Primitive.BOOLEAN;
+                case BYTE -> TypeRef.Primitive.BYTE;
+                case CHAR -> TypeRef.Primitive.CHAR;
+                case DOUBLE -> TypeRef.Primitive.DOUBLE;
+                case FLOAT -> TypeRef.Primitive.FLOAT;
+                case INT -> TypeRef.Primitive.INT;
+                case LONG -> TypeRef.Primitive.LONG;
+                case SHORT -> TypeRef.Primitive.SHORT;
+                case VOID -> TypeRef.Primitive.VOID;
+                default -> TypeRef.resolved("java/lang/Object");
+            };
+        }
+        return TypeRef.unresolved("?");
+    }
+
+    /**
+     * Best-effort conversion of a dotted member-select chain into a JVM
+     * binary name (packages joined with '/', nested types with '$'). The
+     * indexer cannot know without symbol resolution where the
+     * package/type boundary sits, so we use the simple-name-starts-with-
+     * upper-case heuristic that's also used by
+     * {@link #memberSelectJvmName}.
+     */
+    private static String qualifiedToJvm(MemberSelectTree ms) {
+        List<String> parts = new ArrayList<>();
+        collectMemberSelectParts(ms, parts);
+        if (parts.isEmpty()) return null;
+        int classStart = parts.size();
+        for (int i = 0; i < parts.size(); i++) {
+            if (isClassLikeSimpleName(parts.get(i))) {
+                classStart = i;
+                break;
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < classStart; i++) {
+            if (i > 0) sb.append('/');
+            sb.append(parts.get(i));
+        }
+        for (int i = classStart; i < parts.size(); i++) {
+            if (i == classStart) {
+                if (classStart > 0) sb.append('/');
+                sb.append(parts.get(i));
+            } else {
+                sb.append('$').append(parts.get(i));
+            }
+        }
+        return Interner.intern(sb.toString());
+    }
+
+    private static Object negateNumber(Number n) {
+        if (n instanceof Integer i) return -i;
+        if (n instanceof Long l) return -l;
+        if (n instanceof Float f) return -f;
+        if (n instanceof Double d) return -d;
+        if (n instanceof Short s) return (short) -s;
+        if (n instanceof Byte b) return (byte) -b;
+        return null;
     }
 }
