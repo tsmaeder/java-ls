@@ -10,6 +10,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
 
+import javax.lang.model.element.Element;
+import javax.lang.model.element.Modifier;
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.util.ElementFilter;
+import javax.lang.model.util.Elements;
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
 import javax.tools.JavaFileObject;
@@ -17,6 +22,7 @@ import javax.tools.SimpleJavaFileObject;
 import javax.tools.StandardJavaFileManager;
 
 import org.junit.jupiter.api.Test;
+import org.objectweb.asm.Opcodes;
 
 import com.sun.source.util.JavacTask;
 import com.sun.tools.javac.api.JavacTool;
@@ -400,9 +406,10 @@ class IndexCompileTest {
                 .filter(m -> m.name().equals("hidden"))
                 .findFirst()
                 .orElseThrow();
-        assertTrue((hidden.accessFlags() & 0x0002) != 0,
-                "hidden() should remain private in indexed flags");
-        assertTrue((hidden.accessFlags() & 0x0001) == 0,
+        int hiddenFlags = IndexAccessFlags.methodFlags(api, hidden);
+        assertTrue((hiddenFlags & Opcodes.ACC_PRIVATE) != 0,
+                "hidden() should remain private after flag synthesis");
+        assertTrue((hiddenFlags & Opcodes.ACC_PUBLIC) == 0,
                 "hidden() must not be marked public");
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
@@ -434,6 +441,17 @@ class IndexCompileTest {
         }
         assertTrue(okErrors.isEmpty(), () -> "Api.exposed() should compile, got: " + okErrors);
 
+        Elements elements = okTask.getElements();
+        TypeElement apiType = elements.getTypeElement("com.example.Api");
+        assertNotNull(apiType);
+        Element hiddenMethod = ElementFilter.methodsIn(elements.getAllMembers(apiType)).stream()
+                .filter(e -> e.getSimpleName().contentEquals("hidden"))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(hiddenMethod.getModifiers().contains(Modifier.PRIVATE),
+                "hidden() symbol should be private");
+        assertTrue(!hiddenMethod.getModifiers().contains(Modifier.PUBLIC),
+                "hidden() symbol must not be public");
     }
 
     private static TypeEntry typeWithMethod(String srcUri, String jvmName, String methodName) {

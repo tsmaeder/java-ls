@@ -8,16 +8,22 @@ import java.util.List;
  * {@link TypeRef}s; for source-derived methods they may include
  * {@link TypeRef.Unresolved} leaves that the class reader resolves later
  * using the enclosing type's {@link SourceResolutionHints}.
+ *
+ * <p>{@link #varargs()} and {@link #hasBody()} are meaningful for
+ * source-derived methods; bytecode entries use defaults and rely on
+ * {@link #modifiers()} from ASM.
  */
 public record MethodEntry(
         String resourceUri,
         String jvmOwnerName,
-        int accessFlags,
+        int modifiers,
         String name,
         TypeRef returnType,
         List<TypeRef> paramTypes,
         List<TypeRef> throwsTypes,
         List<TypeParamRef> typeParams,
+        boolean varargs,
+        boolean hasBody,
         List<AnnotationRef> annotations) implements IndexEntry {
 
     public MethodEntry {
@@ -31,14 +37,29 @@ public record MethodEntry(
     public MethodEntry(
             String resourceUri,
             String jvmOwnerName,
-            int accessFlags,
+            int modifiers,
             String name,
             TypeRef returnType,
             List<TypeRef> paramTypes,
             List<TypeRef> throwsTypes,
             List<AnnotationRef> annotations) {
-        this(resourceUri, jvmOwnerName, accessFlags, name, returnType,
-                paramTypes, throwsTypes, List.of(), annotations);
+        this(resourceUri, jvmOwnerName, modifiers, name, returnType,
+                paramTypes, throwsTypes, List.of(), false, true, annotations);
+    }
+
+    /** Backward-compatible constructor without varargs/hasBody. */
+    public MethodEntry(
+            String resourceUri,
+            String jvmOwnerName,
+            int modifiers,
+            String name,
+            TypeRef returnType,
+            List<TypeRef> paramTypes,
+            List<TypeRef> throwsTypes,
+            List<TypeParamRef> typeParams,
+            List<AnnotationRef> annotations) {
+        this(resourceUri, jvmOwnerName, modifiers, name, returnType,
+                paramTypes, throwsTypes, typeParams, false, true, annotations);
     }
 
     @Override

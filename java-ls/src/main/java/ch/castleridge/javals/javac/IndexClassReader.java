@@ -102,7 +102,7 @@ public final class IndexClassReader extends ClassReader {
         ModuleSymbol module = c.packge() == null ? syms.unnamedModule : c.packge().modle;
         if (module == null) module = syms.unnamedModule;
 
-        c.flags_field = entry.accessFlags();
+        c.flags_field = IndexAccessFlags.classFlags(entry);
         c.members_field = WriteableScope.create(c);
 
         ClassType ct = (ClassType) c.type;
@@ -123,7 +123,7 @@ public final class IndexClassReader extends ClassReader {
 
         for (FieldEntry f : entry.fields()) {
             Type t = resolver.resolveField(f, module, classCtx);
-            VarSymbol v = new VarSymbol(f.accessFlags(), names.fromString(f.name()), t, c);
+            VarSymbol v = new VarSymbol(IndexAccessFlags.fieldFlags(entry, f), names.fromString(f.name()), t, c);
             c.members_field.enter(v);
         }
 
@@ -135,7 +135,7 @@ public final class IndexClassReader extends ClassReader {
             Type methodType = methodTypeParams.isEmpty()
                     ? mt
                     : new Type.ForAll(methodTypeParams, mt);
-            MethodSymbol ms = new MethodSymbol(m.accessFlags(), names.fromString(m.name()), methodType, c);
+            MethodSymbol ms = new MethodSymbol(IndexAccessFlags.methodFlags(entry, m), names.fromString(m.name()), methodType, c);
             c.members_field.enter(ms);
         }
 

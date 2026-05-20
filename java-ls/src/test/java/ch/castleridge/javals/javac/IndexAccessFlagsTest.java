@@ -1,4 +1,4 @@
-package ch.castleridge.javals.indexing.source;
+package ch.castleridge.javals.javac;
 
 import java.net.URI;
 
@@ -9,11 +9,12 @@ import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
+import ch.castleridge.javals.indexing.source.SourceIndexer;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class SourceIndexerFlagsTest {
+class IndexAccessFlagsTest {
     private static final URI RESOURCE_URI = URI.create("mem:///Test.java");
     private static final URI SOURCE_URI = URI.create("index:///source/");
 
@@ -32,31 +33,31 @@ class SourceIndexerFlagsTest {
                 "p/I");
 
         FieldEntry x = field(entry, "X");
-        assertHas(x.accessFlags(), Opcodes.ACC_PUBLIC);
-        assertHas(x.accessFlags(), Opcodes.ACC_STATIC);
-        assertHas(x.accessFlags(), Opcodes.ACC_FINAL);
+        assertHas(IndexAccessFlags.fieldFlags(entry, x), Opcodes.ACC_PUBLIC);
+        assertHas(IndexAccessFlags.fieldFlags(entry, x), Opcodes.ACC_STATIC);
+        assertHas(IndexAccessFlags.fieldFlags(entry, x), Opcodes.ACC_FINAL);
 
         MethodEntry a = method(entry, "a");
-        assertHas(a.accessFlags(), Opcodes.ACC_PUBLIC);
-        assertHas(a.accessFlags(), Opcodes.ACC_ABSTRACT);
+        assertHas(IndexAccessFlags.methodFlags(entry, a), Opcodes.ACC_PUBLIC);
+        assertHas(IndexAccessFlags.methodFlags(entry, a), Opcodes.ACC_ABSTRACT);
 
         MethodEntry d = method(entry, "d");
-        assertHas(d.accessFlags(), Opcodes.ACC_PUBLIC);
-        assertLacks(d.accessFlags(), Opcodes.ACC_ABSTRACT);
+        assertHas(IndexAccessFlags.methodFlags(entry, d), Opcodes.ACC_PUBLIC);
+        assertLacks(IndexAccessFlags.methodFlags(entry, d), Opcodes.ACC_ABSTRACT);
 
         MethodEntry s = method(entry, "s");
-        assertHas(s.accessFlags(), Opcodes.ACC_PUBLIC);
-        assertHas(s.accessFlags(), Opcodes.ACC_STATIC);
-        assertLacks(s.accessFlags(), Opcodes.ACC_ABSTRACT);
+        assertHas(IndexAccessFlags.methodFlags(entry, s), Opcodes.ACC_PUBLIC);
+        assertHas(IndexAccessFlags.methodFlags(entry, s), Opcodes.ACC_STATIC);
+        assertLacks(IndexAccessFlags.methodFlags(entry, s), Opcodes.ACC_ABSTRACT);
 
         MethodEntry p = method(entry, "p");
-        assertHas(p.accessFlags(), Opcodes.ACC_PRIVATE);
-        assertLacks(p.accessFlags(), Opcodes.ACC_PUBLIC);
+        assertHas(IndexAccessFlags.methodFlags(entry, p), Opcodes.ACC_PRIVATE);
+        assertLacks(IndexAccessFlags.methodFlags(entry, p), Opcodes.ACC_PUBLIC);
 
         MethodEntry ps = method(entry, "ps");
-        assertHas(ps.accessFlags(), Opcodes.ACC_PRIVATE);
-        assertHas(ps.accessFlags(), Opcodes.ACC_STATIC);
-        assertLacks(ps.accessFlags(), Opcodes.ACC_PUBLIC);
+        assertHas(IndexAccessFlags.methodFlags(entry, ps), Opcodes.ACC_PRIVATE);
+        assertHas(IndexAccessFlags.methodFlags(entry, ps), Opcodes.ACC_STATIC);
+        assertLacks(IndexAccessFlags.methodFlags(entry, ps), Opcodes.ACC_PUBLIC);
     }
 
     @Test
@@ -70,13 +71,13 @@ class SourceIndexerFlagsTest {
                 "p/A");
 
         FieldEntry c = field(entry, "C");
-        assertHas(c.accessFlags(), Opcodes.ACC_PUBLIC);
-        assertHas(c.accessFlags(), Opcodes.ACC_STATIC);
-        assertHas(c.accessFlags(), Opcodes.ACC_FINAL);
+        assertHas(IndexAccessFlags.fieldFlags(entry, c), Opcodes.ACC_PUBLIC);
+        assertHas(IndexAccessFlags.fieldFlags(entry, c), Opcodes.ACC_STATIC);
+        assertHas(IndexAccessFlags.fieldFlags(entry, c), Opcodes.ACC_FINAL);
 
         MethodEntry value = method(entry, "value");
-        assertHas(value.accessFlags(), Opcodes.ACC_PUBLIC);
-        assertHas(value.accessFlags(), Opcodes.ACC_ABSTRACT);
+        assertHas(IndexAccessFlags.methodFlags(entry, value), Opcodes.ACC_PUBLIC);
+        assertHas(IndexAccessFlags.methodFlags(entry, value), Opcodes.ACC_ABSTRACT);
     }
 
     @Test
@@ -91,8 +92,8 @@ class SourceIndexerFlagsTest {
 
         MethodEntry varg = method(entry, "varg");
         MethodEntry arr = method(entry, "arr");
-        assertHas(varg.accessFlags(), Opcodes.ACC_VARARGS);
-        assertLacks(arr.accessFlags(), Opcodes.ACC_VARARGS);
+        assertHas(IndexAccessFlags.methodFlags(entry, varg), Opcodes.ACC_VARARGS);
+        assertLacks(IndexAccessFlags.methodFlags(entry, arr), Opcodes.ACC_VARARGS);
     }
 
     private static TypeEntry indexSingle(String source, String jvmName) {

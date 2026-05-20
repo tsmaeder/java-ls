@@ -42,6 +42,7 @@ import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.SourceResolutionHints;
+import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.TypeRef;
@@ -155,11 +156,12 @@ public final class SourceIndexer {
             declaredTypeParams.add(TypeParamRef.of(Interner.intern(tpName)));
         }
 
-        int access = classAccessFlags(ct);
+        TypeDeclKind declKind = declKind(ct);
+        int modifiers = modifierFlags(ct.getModifiers());
         TypeRef superRef;
         if (ct.getExtendsClause() != null) {
             superRef = toTypeRef(ct.getExtendsClause(), classTypeParams);
-        } else if ((access & Opcodes.ACC_INTERFACE) == 0) {
+        } else if (declKind != TypeDeclKind.INTERFACE && declKind != TypeDeclKind.ANNOTATION) {
             superRef = TypeRef.resolved("java/lang/Object");
         } else {
             superRef = null;
@@ -176,9 +178,9 @@ public final class SourceIndexer {
 
         for (Tree member : ct.getMembers()) {
             if (member instanceof VariableTree vt) {
-                fields.add(toFieldEntry(ct, uri, localName, vt, classTypeParams));
+                fields.add(toFieldEntry(uri, localName, vt, classTypeParams));
             } else if (member instanceof MethodTree mt) {
-                methods.add(toMethodEntry(ct, uri, localName, mt, classTypeParams));
+                methods.add(toMethodEntry(uri, localName, mt, classTypeParams));
             } else if (member instanceof ClassTree inner) {
                 nested.add(inner);
                 String innerName = Interner.intern(localName + "$" + inner.getSimpleName().toString());
@@ -190,7 +192,8 @@ public final class SourceIndexer {
                 uri,
                 sourceUri,
                 localName,
-                access,
+                modifiers,
+                declKind,
                 superRef,
                 interfaceRefs,
                 declaredTypeParams,
@@ -211,19 +214,18 @@ public final class SourceIndexer {
         }
     }
 
-    private static FieldEntry toFieldEntry(ClassTree ct, String uri, String owner, VariableTree vt,
+    private static FieldEntry toFieldEntry(String uri, String owner, VariableTree vt,
                                            Set<String> typeParams) {
-        int access = fieldAccessFlags(ct, vt.getModifiers());
         return new FieldEntry(
                 uri,
                 owner,
-                access,
+                modifierFlags(vt.getModifiers()),
                 Interner.intern(vt.getName().toString()),
                 toTypeRef(vt.getType(), typeParams),
                 annotationsOf(vt.getModifiers()));
     }
 
-    private static MethodEntry toMethodEntry(ClassTree ct, String uri, String owner, MethodTree mt,
+    private static MethodEntry toMethodEntry(String uri, String owner, MethodTree mt,
                                              Set<String> classTypeParams) {
         Set<String> methodTypeParams = new HashSet<>(classTypeParams);
         for (TypeParameterTree tp : mt.getTypeParameters()) {
@@ -249,17 +251,18 @@ public final class SourceIndexer {
             declaredMethodTypeParams.add(TypeParamRef.of(Interner.intern(tp.getName().toString())));
         }
 
-        int access = methodAccessFlags(ct, mt);
         String name = Interner.intern(mt.getName().toString());
         return new MethodEntry(
                 uri,
                 owner,
-                access,
+                modifierFlags(mt.getModifiers()),
                 name,
                 returnRef,
                 paramRefs,
                 throwsRefs,
                 declaredMethodTypeParams,
+                isVarArgs(mt),
+                mt.getBody() != null,
                 annotationsOf(mt.getModifiers()));
     }
 
@@ -312,45 +315,14 @@ public final class SourceIndexer {
         return TypeRef.resolved(t.toString().replace('.', '/'));
     }
 
-    private static int classAccessFlags(ClassTree ct) {
-        int flags = modifierFlags(ct.getModifiers());
-        switch (ct.getKind()) {
-            case INTERFACE -> flags |= Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT;
-            case ENUM -> flags |= Opcodes.ACC_ENUM | Opcodes.ACC_FINAL;
-            case ANNOTATION_TYPE -> flags |= Opcodes.ACC_ANNOTATION | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT;
-            case RECORD -> flags |= Opcodes.ACC_RECORD | Opcodes.ACC_FINAL;
-            default -> { }
-        }
-        return flags;
-    }
-
-    private static int fieldAccessFlags(ClassTree ct, ModifiersTree mods) {
-        int flags = modifierFlags(mods);
-        if (isInterfaceLike(ct)) {
-            flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL;
-        }
-        return flags;
-    }
-
-    private static int methodAccessFlags(ClassTree ct, MethodTree mt) {
-        int flags = modifierFlags(mt.getModifiers());
-        if (isVarArgs(mt)) {
-            flags |= Opcodes.ACC_VARARGS;
-        }
-        if (isInterfaceLike(ct)) {
-            if ((flags & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) == 0) {
-                flags |= Opcodes.ACC_PUBLIC;
-            }
-            if (mt.getBody() == null && (flags & (Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC)) == 0) {
-                flags |= Opcodes.ACC_ABSTRACT;
-            }
-        }
-        return flags;
-    }
-
-    private static boolean isInterfaceLike(ClassTree ct) {
-        return ct.getKind() == ClassTree.Kind.INTERFACE
-                || ct.getKind() == ClassTree.Kind.ANNOTATION_TYPE;
+    private static TypeDeclKind declKind(ClassTree ct) {
+        return switch (ct.getKind()) {
+            case INTERFACE -> TypeDeclKind.INTERFACE;
+            case ENUM -> TypeDeclKind.ENUM;
+            case ANNOTATION_TYPE -> TypeDeclKind.ANNOTATION;
+            case RECORD -> TypeDeclKind.RECORD;
+            default -> TypeDeclKind.CLASS;
+        };
     }
 
     private static boolean isVarArgs(MethodTree mt) {

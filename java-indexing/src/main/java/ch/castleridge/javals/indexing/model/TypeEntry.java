@@ -25,6 +25,9 @@ import java.util.List;
  * <p>{@link #hints()} is non-{@code null} only for source-derived
  * entries; bytecode entries leave it {@code null}.
  *
+ * <p>{@link #declKind()} is set for source-derived entries;
+ * bytecode entries use {@link TypeDeclKind#UNKNOWN}.
+ *
  * <p>{@link #sourceUri()} identifies the {@link
  * ch.castleridge.javals.indexing.scan.InputSource} this entry originates
  * from. It exists to let consumers (notably the file manager) reconcile
@@ -35,7 +38,8 @@ public record TypeEntry(
         String resourceUri,
         String sourceUri,
         String jvmOwnerName,
-        int accessFlags,
+        int modifiers,
+        TypeDeclKind declKind,
         TypeRef superRef,
         List<TypeRef> interfaceRefs,
         List<TypeParamRef> typeParams,
@@ -52,6 +56,26 @@ public record TypeEntry(
         methods = methods == null ? List.of() : List.copyOf(methods);
         innerTypeJvmNames = innerTypeJvmNames == null ? List.of() : List.copyOf(innerTypeJvmNames);
         annotations = annotations == null ? List.of() : List.copyOf(annotations);
+        if (declKind == null) declKind = TypeDeclKind.UNKNOWN;
+    }
+
+    /** Backward-compatible constructor without {@link #declKind()}. */
+    public TypeEntry(
+            String resourceUri,
+            String sourceUri,
+            String jvmOwnerName,
+            int modifiers,
+            TypeRef superRef,
+            List<TypeRef> interfaceRefs,
+            List<TypeParamRef> typeParams,
+            List<FieldEntry> fields,
+            List<MethodEntry> methods,
+            List<String> innerTypeJvmNames,
+            List<AnnotationRef> annotations,
+            SourceResolutionHints hints) {
+        this(resourceUri, sourceUri, jvmOwnerName, modifiers, TypeDeclKind.UNKNOWN,
+                superRef, interfaceRefs, typeParams, fields, methods,
+                innerTypeJvmNames, annotations, hints);
     }
 
     public String jvmName() {

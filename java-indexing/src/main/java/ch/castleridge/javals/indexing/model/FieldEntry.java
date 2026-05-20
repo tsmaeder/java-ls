@@ -13,7 +13,7 @@ import java.util.List;
 public record FieldEntry(
         String resourceUri,
         String jvmOwnerName,
-        int accessFlags,
+        int modifiers,
         String name,
         TypeRef type,
         List<AnnotationRef> annotations) implements IndexEntry {
