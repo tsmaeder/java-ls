@@ -67,7 +67,7 @@ public final class ClassFileIndexer {
 
         private String jvmName;
         private int access;
-        private String superName;
+        private TypeRef superRef;
         private List<TypeRef> interfaces = List.of();
         private List<TypeParamRef> typeParams = List.of();
         private final List<FieldEntry> fields = new ArrayList<>();
@@ -91,7 +91,11 @@ public final class ClassFileIndexer {
                           String superName, String[] interfaces) {
             this.jvmName = Interner.intern(name);
             this.access = access;
-            this.superName = Interner.intern(superName);
+            if (superName == null) {
+                this.superRef = null;
+            } else {
+                this.superRef = TypeRef.resolved(superName);
+            }
             if (interfaces == null || interfaces.length == 0) {
                 this.interfaces = List.of();
             } else {
@@ -99,9 +103,20 @@ public final class ClassFileIndexer {
                 for (String i : interfaces) refs.add(TypeRef.resolved(i));
                 this.interfaces = List.copyOf(refs);
             }
-            this.typeParams = signature == null
-                    ? List.of()
-                    : SignatureRefs.parseFormalTypeParameters(signature);
+            if (signature != null) {
+                this.typeParams = SignatureRefs.parseFormalTypeParameters(signature);
+                SignatureRefs.ClassRefs classRefs = SignatureRefs.parseClass(signature);
+                if (classRefs != null) {
+                    if (classRefs.superClass() != null) {
+                        this.superRef = classRefs.superClass();
+                    }
+                    if (!classRefs.interfaces().isEmpty()) {
+                        this.interfaces = classRefs.interfaces();
+                    }
+                }
+            } else {
+                this.typeParams = List.of();
+            }
         }
 
         @Override
@@ -193,7 +208,6 @@ public final class ClassFileIndexer {
         TypeEntry toTypeEntry() {
             if (jvmName == null) return null;
             if (Index.isSkippedJvmName(jvmName)) return null;
-            TypeRef superRef = superName == null ? null : TypeRef.resolved(superName);
             return new TypeEntry(
                     uri,
                     sourceUri,

@@ -31,6 +31,12 @@ public final class SignatureRefs {
         }
     }
 
+    public record ClassRefs(TypeRef superClass, List<TypeRef> interfaces) {
+        public ClassRefs {
+            interfaces = interfaces == null ? List.of() : List.copyOf(interfaces);
+        }
+    }
+
     /**
      * Pull formal type parameter names from a signature prefix.
      */
@@ -61,6 +67,18 @@ public final class SignatureRefs {
     public static MethodRefs parseMethod(String signature) {
         if (signature == null || signature.isEmpty()) return null;
         MethodCollector collector = new MethodCollector();
+        new SignatureReader(signature).accept(collector.visitor());
+        return collector.result();
+    }
+
+    /**
+     * Parse a class {@code Signature} attribute: superclass plus implemented
+     * interfaces (with type arguments). Formal type parameters are ignored
+     * here; use {@link #parseFormalTypeParameters} for those.
+     */
+    public static ClassRefs parseClass(String signature) {
+        if (signature == null || signature.isEmpty()) return null;
+        ClassCollector collector = new ClassCollector();
         new SignatureReader(signature).accept(collector.visitor());
         return collector.result();
     }
@@ -141,6 +159,29 @@ public final class SignatureRefs {
 
         MethodRefs result() {
             return new MethodRefs(typeParams, paramTypes, returnType, throwsTypes);
+        }
+    }
+
+    private static final class ClassCollector {
+        private TypeRef superClass;
+        private final List<TypeRef> interfaces = new ArrayList<>();
+
+        SignatureVisitor visitor() {
+            return new SignatureVisitor(ASM_API) {
+                @Override
+                public SignatureVisitor visitSuperclass() {
+                    return new ClassTypeFrame(ref -> superClass = ref);
+                }
+
+                @Override
+                public SignatureVisitor visitInterface() {
+                    return new ClassTypeFrame(interfaces::add);
+                }
+            };
+        }
+
+        ClassRefs result() {
+            return new ClassRefs(superClass, interfaces);
         }
     }
 

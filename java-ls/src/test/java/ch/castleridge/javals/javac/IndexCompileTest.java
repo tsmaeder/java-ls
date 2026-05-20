@@ -39,6 +39,8 @@ import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.TypeRef;
+import ch.castleridge.javals.indexing.scan.JrtInput;
+import ch.castleridge.javals.indexing.scan.Scanner;
 import ch.castleridge.javals.indexing.source.SourceIndexer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -415,6 +417,57 @@ class IndexCompileTest {
                         }
                     });
         }
+    }
+
+    @Test
+    void completableFutureAssignableToCompletionStageWithJrtIndex() throws Exception {
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        ClasspathOrder cp = classPathOf(List.of(jrtUri));
+
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("test:///CfToCs.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        import java.util.concurrent.CompletableFuture;
+                        import java.util.concurrent.CompletionStage;
+
+                        public class CfToCs {
+                            static CompletionStage<String> f() {
+                                CompletableFuture<String> cf = new CompletableFuture<>();
+                                return cf;
+                            }
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) {
+                errors.add(d);
+            }
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "CompletableFuture should be assignable to CompletionStage; got: " + errors);
     }
 
     @Test

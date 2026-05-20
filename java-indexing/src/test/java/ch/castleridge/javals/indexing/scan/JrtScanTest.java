@@ -11,6 +11,7 @@ import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -77,6 +78,30 @@ class JrtScanTest {
             assertTrue(!jvm.endsWith("/package-info") && !jvm.equals("package-info"),
                     "package-info should not be indexed: " + jvm);
         }
+    }
+
+    @Test
+    void completableFutureImplementsParameterizedCompletionStage() {
+        Index index = new Index();
+        Scanner scanner = new Scanner();
+        List<Throwable> failures = scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
+        assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);
+
+        TypeEntry cf = index.get("java/util/concurrent/CompletableFuture");
+        assertNotNull(cf, "java.base should index CompletableFuture");
+        assertEquals(1, cf.typeParams().size());
+        String typeParam = cf.typeParams().get(0).name();
+
+        boolean hasParameterizedCompletionStage = cf.interfaceRefs().stream().anyMatch(ref -> {
+            if (!(ref instanceof TypeRef.Parameterized p)) return false;
+            if (!(p.raw() instanceof TypeRef.Resolved r)) return false;
+            if (!r.jvmBinaryName().equals("java/util/concurrent/CompletionStage")) return false;
+            if (p.typeArgs().size() != 1) return false;
+            return p.typeArgs().get(0) instanceof TypeRef.TypeVariable tv
+                    && tv.name().equals(typeParam);
+        });
+        assertTrue(hasParameterizedCompletionStage,
+                "CompletableFuture should implement CompletionStage<" + typeParam + ">");
     }
 
     @Test
