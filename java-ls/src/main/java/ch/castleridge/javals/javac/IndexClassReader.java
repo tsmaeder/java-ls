@@ -2,6 +2,7 @@ package ch.castleridge.javals.javac;
 
 import static com.sun.tools.javac.code.Flags.STATIC;
 
+import com.sun.tools.javac.code.Attribute;
 import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Scope.WriteableScope;
 import com.sun.tools.javac.code.Symbol;
@@ -16,6 +17,7 @@ import com.sun.tools.javac.code.Type.ClassType;
 import com.sun.tools.javac.code.Type.MethodType;
 import com.sun.tools.javac.code.Type.TypeVar;
 import com.sun.tools.javac.code.Types;
+import com.sun.tools.javac.comp.Annotate.AnnotationTypeMetadata;
 import com.sun.tools.javac.jvm.ClassReader;
 import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.List;
@@ -53,6 +55,16 @@ import ch.castleridge.javals.indexing.model.TypeRef;
  * the file manager is in place.
  */
 public final class IndexClassReader extends ClassReader {
+
+    /**
+     * Placeholder default value attached to {@link MethodSymbol#defaultValue}
+     * for annotation elements that have a {@code default} clause (or
+     * {@code AnnotationDefault} attribute in bytecode). The actual value
+     * is not preserved by the index because {@code Check.validateAnnotation}
+     * only checks for presence ({@code != null}); using {@link Attribute.Error}
+     * also gives a sensible "unknown value" mirror for any reflective access.
+     */
+    private static final Attribute ANNOTATION_DEFAULT_SENTINEL = new Attribute.Error(Type.noType);
 
     private final Index index;
     private final ClasspathOrder classpath;
@@ -143,7 +155,22 @@ public final class IndexClassReader extends ClassReader {
                     ? mt
                     : new Type.ForAll(methodTypeParams, mt);
             MethodSymbol ms = new MethodSymbol(IndexAccessFlags.methodFlags(entry, m), names.fromString(m.name()), methodType, c);
+            if (m.hasAnnotationDefault()) {
+                // Only the presence matters for Check.validateAnnotation;
+                // a sentinel non-null Attribute is enough to mark the
+                // element as having a default.
+                ms.defaultValue = ANNOTATION_DEFAULT_SENTINEL;
+            }
             c.members_field.enter(ms);
+        }
+
+        // Mirror ClassReader.readClassFile: annotation types need a real
+        // AnnotationTypeMetadata so Check.validateAnnotation can enumerate
+        // their element methods. Without this the class keeps the default
+        // notAnAnnotationType() metadata, which exposes an empty element
+        // set and makes every supplied argument look like a duplicate.
+        if ((c.flags_field & Flags.ANNOTATION) != 0) {
+            c.setAnnotationTypeMetadata(new AnnotationTypeMetadata(c, null));
         }
 
         c.completer = Symbol.Completer.NULL_COMPLETER;

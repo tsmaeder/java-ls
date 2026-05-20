@@ -12,6 +12,13 @@ import java.util.List;
  * <p>{@link #varargs()} and {@link #hasBody()} are meaningful for
  * source-derived methods; bytecode entries use defaults and rely on
  * {@link #modifiers()} from ASM.
+ *
+ * <p>{@link #hasAnnotationDefault()} is true when this method is an
+ * annotation element with a default value (either an
+ * {@code AnnotationDefault} attribute in bytecode or a {@code default}
+ * clause in source). The actual default value is not retained because
+ * the LSP only needs the presence flag to satisfy
+ * {@code Check.validateAnnotation}.
  */
 public record MethodEntry(
         String resourceUri,
@@ -24,6 +31,7 @@ public record MethodEntry(
         List<TypeParamRef> typeParams,
         boolean varargs,
         boolean hasBody,
+        boolean hasAnnotationDefault,
         List<AnnotationRef> annotations) implements IndexEntry {
 
     public MethodEntry {
@@ -44,7 +52,7 @@ public record MethodEntry(
             List<TypeRef> throwsTypes,
             List<AnnotationRef> annotations) {
         this(resourceUri, jvmOwnerName, modifiers, name, returnType,
-                paramTypes, throwsTypes, List.of(), false, true, annotations);
+                paramTypes, throwsTypes, List.of(), false, true, false, annotations);
     }
 
     /** Backward-compatible constructor without varargs/hasBody. */
@@ -59,7 +67,24 @@ public record MethodEntry(
             List<TypeParamRef> typeParams,
             List<AnnotationRef> annotations) {
         this(resourceUri, jvmOwnerName, modifiers, name, returnType,
-                paramTypes, throwsTypes, typeParams, false, true, annotations);
+                paramTypes, throwsTypes, typeParams, false, true, false, annotations);
+    }
+
+    /** Backward-compatible constructor without hasAnnotationDefault. */
+    public MethodEntry(
+            String resourceUri,
+            String jvmOwnerName,
+            int modifiers,
+            String name,
+            TypeRef returnType,
+            List<TypeRef> paramTypes,
+            List<TypeRef> throwsTypes,
+            List<TypeParamRef> typeParams,
+            boolean varargs,
+            boolean hasBody,
+            List<AnnotationRef> annotations) {
+        this(resourceUri, jvmOwnerName, modifiers, name, returnType,
+                paramTypes, throwsTypes, typeParams, varargs, hasBody, false, annotations);
     }
 
     @Override

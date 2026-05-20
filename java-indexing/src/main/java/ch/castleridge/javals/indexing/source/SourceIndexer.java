@@ -265,6 +265,7 @@ public final class SourceIndexer {
                 declaredMethodTypeParams,
                 isVarArgs(mt),
                 mt.getBody() != null,
+                mt.getDefaultValue() != null,
                 annotationsOf(mt.getModifiers()));
     }
 

@@ -177,6 +177,7 @@ public final class ClassFileIndexer {
             }
             boolean varargs = (mAccess & Opcodes.ACC_VARARGS) != 0;
             boolean hasBody = (mAccess & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) == 0;
+            int methodIndex = methods.size();
             MethodEntry me = new MethodEntry(
                     uri,
                     jvmName,
@@ -188,12 +189,36 @@ public final class ClassFileIndexer {
                     methodTypeParams,
                     varargs,
                     hasBody,
+                    false,
                     mAnnotations);
             methods.add(me);
             return new MethodVisitor(ASM_API) {
                 @Override
                 public AnnotationVisitor visitAnnotation(String d, boolean visible) {
                     return new CapturingAnnotationVisitor(d, mAnnotations);
+                }
+
+                @Override
+                public AnnotationVisitor visitAnnotationDefault() {
+                    // Replace the placeholder MethodEntry with one whose
+                    // hasAnnotationDefault flag is set. We don't need the
+                    // default value itself; presence is enough for
+                    // Check.validateAnnotation.
+                    MethodEntry cur = methods.get(methodIndex);
+                    methods.set(methodIndex, new MethodEntry(
+                            cur.resourceUri(),
+                            cur.jvmOwnerName(),
+                            cur.modifiers(),
+                            cur.name(),
+                            cur.returnType(),
+                            cur.paramTypes(),
+                            cur.throwsTypes(),
+                            cur.typeParams(),
+                            cur.varargs(),
+                            cur.hasBody(),
+                            true,
+                            cur.annotations()));
+                    return null;
                 }
             };
         }

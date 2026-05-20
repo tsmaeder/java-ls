@@ -536,6 +536,63 @@ class IndexCompileTest {
     }
 
     @Test
+    void annotationsOnIndexedJdkTypesAreRecognised() throws Exception {
+        // Regression: when java.lang.SuppressWarnings was loaded via the
+        // index reader its ClassSymbol kept the default notAnAnnotationType()
+        // metadata, so every supplied element looked like a duplicate.
+        // Check that the canonical "@SuppressWarnings + @Deprecated + @Override"
+        // combination compiles cleanly against a JRT-backed index.
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        ClasspathOrder cp = classPathOf(List.of(jrtUri));
+
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("test:///Utils.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        public class Utils {
+                            @SuppressWarnings("unchecked")
+                            public static <E extends Throwable> void throwAsUnchecked(Throwable t) throws E {
+                                throw (E) t;
+                            }
+
+                            @Deprecated
+                            public void old() {}
+
+                            @Override
+                            public String toString() { return "x"; }
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "@SuppressWarnings/@Deprecated/@Override on indexed JDK annotations should compile cleanly; got: " + errors);
+    }
+
+    @Test
     void genericOverrideWithSuperWildcardCompilesCleanly() throws Exception {
         Path resources = Path.of("src/test/resources/ch/castleridge/javals/test");
         if (!Files.exists(resources)) {
