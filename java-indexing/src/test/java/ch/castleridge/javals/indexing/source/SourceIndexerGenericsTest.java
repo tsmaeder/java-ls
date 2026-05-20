@@ -42,6 +42,21 @@ class SourceIndexerGenericsTest {
     }
 
     @Test
+    void varargsMethodSetsVarargsFlag() {
+        TypeEntry entry = indexSingle(
+                "package p;\n"
+                        + "class V {\n"
+                        + "    static void all(Future<?>... results) {}\n"
+                        + "}\n"
+                        + "interface Future<T> {}\n",
+                "p/V");
+
+        MethodEntry all = method(entry, "all");
+        org.junit.jupiter.api.Assertions.assertTrue(all.varargs(),
+                "Future<?>... should be indexed as a varargs method");
+    }
+
+    @Test
     void futureLikeInterfaceIndexesExpectingWithSuperWildcard() {
         TypeEntry entry = indexSingle(
                 "package ch.castleridge.javals.test;\n"

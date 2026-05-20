@@ -2,6 +2,8 @@ package ch.castleridge.javals.javac;
 
 import org.objectweb.asm.Opcodes;
 
+import com.sun.tools.javac.code.Flags;
+
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
@@ -40,13 +42,15 @@ final class IndexAccessFlags {
         return flags;
     }
 
-    static int methodFlags(TypeEntry owner, MethodEntry method) {
-        if (!owner.isSourceEntry()) {
-            return method.modifiers();
-        }
-        int flags = method.modifiers();
+    static long methodFlags(TypeEntry owner, MethodEntry method) {
+        long flags = Integer.toUnsignedLong(method.modifiers());
+        // Classfile/ASM ACC_VARARGS (0x80) differs from javac's Flags.VARARGS bit.
+        flags &= ~Opcodes.ACC_VARARGS;
         if (method.varargs()) {
-            flags |= Opcodes.ACC_VARARGS;
+            flags |= Flags.VARARGS;
+        }
+        if (!owner.isSourceEntry()) {
+            return flags;
         }
         if (isInterfaceLike(owner.declKind())) {
             if ((flags & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) == 0) {

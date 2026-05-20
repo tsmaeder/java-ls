@@ -1,5 +1,6 @@
 package ch.castleridge.javals.javac;
 
+import java.io.IOException;
 import java.io.StringWriter;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -17,9 +18,12 @@ import javax.lang.model.util.ElementFilter;
 import javax.lang.model.util.Elements;
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
+import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
 import javax.tools.SimpleJavaFileObject;
 import javax.tools.StandardJavaFileManager;
+import javax.tools.StandardLocation;
+import javax.tools.ToolProvider;
 
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.Opcodes;
@@ -28,6 +32,7 @@ import com.sun.source.util.JavacTask;
 import com.sun.tools.javac.api.JavacTool;
 import com.sun.tools.javac.util.Context;
 
+import ch.castleridge.javals.indexing.bytecode.ClassFileIndexer;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
@@ -329,6 +334,90 @@ class IndexCompileTest {
     }
 
     @Test
+    void varargsCallOnIndexedBytecodeMethodCompilesCleanly() throws Exception {
+        String varargHolder = """
+                public class VarargHolder {
+                    public static void all(int... parts) {}
+                }
+                """;
+        Path outDir = Files.createTempDirectory("vararg-holder");
+        try {
+        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+        StandardJavaFileManager compileFm = compiler.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        compileFm.setLocation(StandardLocation.CLASS_OUTPUT, List.of(outDir.toFile()));
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("mem:///VarargHolder.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return varargHolder;
+            }
+        };
+        JavaCompiler.CompilationTask compileTask = compiler.getTask(
+                null, compileFm, d -> {}, List.of(), List.of(), List.of(src));
+        assertTrue(compileTask.call(), "VarargHolder should compile");
+        byte[] bytes = Files.readAllBytes(outDir.resolve("VarargHolder.class"));
+
+        Index index = new Index();
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
+        ClassFileIndexer.index(
+                URI.create("index:///VarargHolder.class"),
+                URI.create(SOURCE_URI),
+                bytes,
+                index);
+
+        TypeEntry varargType = index.get("VarargHolder");
+        assertNotNull(varargType);
+        MethodEntry allMethod = varargType.methods().stream()
+                .filter(m -> m.name().equals("all"))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(allMethod.varargs(), "bytecode indexer should record varargs on MethodEntry");
+
+        ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject caller = new SimpleJavaFileObject(
+                URI.create("test:///Caller.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        public class Caller {
+                            void go() { VarargHolder.all(1, 2, 3); }
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(caller), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) {
+                errors.add(d);
+            }
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "varargs call should compile against indexed bytecode; got: " + errors);
+        } finally {
+            Files.walk(outDir)
+                    .sorted(java.util.Comparator.reverseOrder())
+                    .forEach(p -> {
+                        try {
+                            Files.deleteIfExists(p);
+                        } catch (IOException ignored) {
+                        }
+                    });
+        }
+    }
+
+    @Test
     void genericOverrideWithSuperWildcardCompilesCleanly() throws Exception {
         Path resources = Path.of("src/test/resources/ch/castleridge/javals/test");
         if (!Files.exists(resources)) {
@@ -406,7 +495,7 @@ class IndexCompileTest {
                 .filter(m -> m.name().equals("hidden"))
                 .findFirst()
                 .orElseThrow();
-        int hiddenFlags = IndexAccessFlags.methodFlags(api, hidden);
+        long hiddenFlags = IndexAccessFlags.methodFlags(api, hidden);
         assertTrue((hiddenFlags & Opcodes.ACC_PRIVATE) != 0,
                 "hidden() should remain private after flag synthesis");
         assertTrue((hiddenFlags & Opcodes.ACC_PUBLIC) == 0,

@@ -34,6 +34,8 @@ import com.sun.source.tree.TypeParameterTree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.tree.WildcardTree;
 import com.sun.source.util.JavacTask;
+import com.sun.tools.javac.code.Flags;
+import com.sun.tools.javac.tree.JCTree;
 
 import ch.castleridge.javals.indexing.index.InMemorySource;
 import ch.castleridge.javals.indexing.index.Index;
@@ -328,10 +330,10 @@ public final class SourceIndexer {
     private static boolean isVarArgs(MethodTree mt) {
         if (mt.getParameters().isEmpty()) return false;
         VariableTree lastParam = mt.getParameters().get(mt.getParameters().size() - 1);
-        if (lastParam.toString().contains("...")) {
-            return true;
+        if (lastParam instanceof JCTree.JCVariableDecl v) {
+            return (v.mods.flags & Flags.VARARGS) != 0;
         }
-        return false;
+        return lastParam.toString().contains("...");
     }
 
     private static int modifierFlags(ModifiersTree mods) {

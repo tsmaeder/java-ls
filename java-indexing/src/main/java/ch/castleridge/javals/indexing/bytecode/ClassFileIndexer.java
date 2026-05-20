@@ -160,6 +160,8 @@ public final class ClassFileIndexer {
                 for (String e : exceptions) ts.add(TypeRef.resolved(e));
                 throwsRefs = List.copyOf(ts);
             }
+            boolean varargs = (mAccess & Opcodes.ACC_VARARGS) != 0;
+            boolean hasBody = (mAccess & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) == 0;
             MethodEntry me = new MethodEntry(
                     uri,
                     jvmName,
@@ -169,6 +171,8 @@ public final class ClassFileIndexer {
                     paramTypes,
                     throwsRefs,
                     methodTypeParams,
+                    varargs,
+                    hasBody,
                     mAnnotations);
             methods.add(me);
             return new MethodVisitor(ASM_API) {

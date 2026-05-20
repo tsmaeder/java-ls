@@ -5,6 +5,8 @@ import java.net.URI;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.Opcodes;
 
+import com.sun.tools.javac.code.Flags;
+
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
@@ -92,8 +94,8 @@ class IndexAccessFlagsTest {
 
         MethodEntry varg = method(entry, "varg");
         MethodEntry arr = method(entry, "arr");
-        assertHas(IndexAccessFlags.methodFlags(entry, varg), Opcodes.ACC_VARARGS);
-        assertLacks(IndexAccessFlags.methodFlags(entry, arr), Opcodes.ACC_VARARGS);
+        assertHas(IndexAccessFlags.methodFlags(entry, varg), Flags.VARARGS);
+        assertLacks(IndexAccessFlags.methodFlags(entry, arr), Flags.VARARGS);
     }
 
     private static TypeEntry indexSingle(String source, String jvmName) {
@@ -118,13 +120,13 @@ class IndexAccessFlagsTest {
                 .orElseThrow();
     }
 
-    private static void assertHas(int flags, int expectedBit) {
+    private static void assertHas(long flags, long expectedBit) {
         assertTrue((flags & expectedBit) != 0,
-                () -> "Expected bit 0x" + Integer.toHexString(expectedBit) + " in flags 0x" + Integer.toHexString(flags));
+                () -> "Expected bit 0x" + Long.toHexString(expectedBit) + " in flags 0x" + Long.toHexString(flags));
     }
 
-    private static void assertLacks(int flags, int expectedAbsentBit) {
+    private static void assertLacks(long flags, long expectedAbsentBit) {
         assertTrue((flags & expectedAbsentBit) == 0,
-                () -> "Did not expect bit 0x" + Integer.toHexString(expectedAbsentBit) + " in flags 0x" + Integer.toHexString(flags));
+                () -> "Did not expect bit 0x" + Long.toHexString(expectedAbsentBit) + " in flags 0x" + Long.toHexString(flags));
     }
 }
