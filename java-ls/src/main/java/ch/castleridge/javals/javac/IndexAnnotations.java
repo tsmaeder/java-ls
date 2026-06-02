@@ -67,6 +67,27 @@ final class IndexAnnotations {
     }
 
     /**
+     * Convert indexed type-use annotations into javac
+     * {@link Attribute.TypeCompound}s. We don't have a precise
+     * {@code TypeAnnotationPosition} (the indexer encodes location
+     * structurally on the {@link TypeRef} tree via the {@code Annotated}
+     * decorator, not via the JVMS path), so each compound is built with
+     * {@code TypeAnnotationPosition.unknown}. Callers attach the result
+     * with {@code Type.annotatedType(...)}.
+     */
+    List<Attribute.TypeCompound> toTypeCompounds(java.util.List<AnnotationRef> refs, ModuleSymbol module) {
+        if (refs == null || refs.isEmpty()) return List.nil();
+        ListBuffer<Attribute.TypeCompound> out = new ListBuffer<>();
+        for (AnnotationRef ref : refs) {
+            Attribute.Compound base = toCompound(ref, module);
+            if (base == null) continue;
+            out.add(new Attribute.TypeCompound(base,
+                    com.sun.tools.javac.code.TypeAnnotationPosition.unknown));
+        }
+        return out.toList();
+    }
+
+    /**
      * Build a single {@link Attribute.Compound}. Returns {@code null} if
      * the annotation type cannot be resolved at all (e.g. the
      * {@code jvmName} is a stub like a raw descriptor). Elements that

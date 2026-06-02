@@ -1,5 +1,6 @@
 package ch.castleridge.javals.indexing.model;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -29,7 +30,7 @@ public record MethodEntry(
         int modifiers,
         String name,
         TypeRef returnType,
-        List<TypeRef> paramTypes,
+        List<ParameterEntry> parameters,
         List<TypeRef> throwsTypes,
         List<TypeParamRef> typeParams,
         boolean varargs,
@@ -38,7 +39,7 @@ public record MethodEntry(
         List<AnnotationRef> annotations) implements IndexEntry {
 
     public MethodEntry {
-        paramTypes = paramTypes == null ? List.of() : List.copyOf(paramTypes);
+        parameters = parameters == null ? List.of() : List.copyOf(parameters);
         throwsTypes = throwsTypes == null ? List.of() : List.copyOf(throwsTypes);
         typeParams = typeParams == null ? List.of() : List.copyOf(typeParams);
         annotations = annotations == null ? List.of() : List.copyOf(annotations);
@@ -54,6 +55,18 @@ public record MethodEntry(
         return annotationDefault != null;
     }
 
+    /**
+     * Derived projection: the parameter types in declaration order, for
+     * callers that only need {@link TypeRef}s and don't care about names,
+     * modifiers or per-parameter annotations.
+     */
+    public List<TypeRef> paramTypes() {
+        if (parameters.isEmpty()) return List.of();
+        List<TypeRef> out = new ArrayList<>(parameters.size());
+        for (ParameterEntry p : parameters) out.add(p.type());
+        return List.copyOf(out);
+    }
+
     /** Backward-compatible constructor without method type parameters. */
     public MethodEntry(
             String resourceUri,
@@ -65,7 +78,7 @@ public record MethodEntry(
             List<TypeRef> throwsTypes,
             List<AnnotationRef> annotations) {
         this(resourceUri, jvmOwnerName, modifiers, name, returnType,
-                paramTypes, throwsTypes, List.of(), false, true, null, annotations);
+                paramTypesOf(paramTypes), throwsTypes, List.of(), false, true, null, annotations);
     }
 
     /** Backward-compatible constructor without varargs/hasBody. */
@@ -80,11 +93,19 @@ public record MethodEntry(
             List<TypeParamRef> typeParams,
             List<AnnotationRef> annotations) {
         this(resourceUri, jvmOwnerName, modifiers, name, returnType,
-                paramTypes, throwsTypes, typeParams, false, true, null, annotations);
+                paramTypesOf(paramTypes), throwsTypes, typeParams, false, true, null, annotations);
     }
 
-    /** Backward-compatible constructor without annotationDefault. */
-    public MethodEntry(
+    /**
+     * Factory for callers that only know about parameter types (no
+     * names, modifiers or per-parameter annotations). Each
+     * {@link TypeRef} is wrapped in an empty {@link ParameterEntry}.
+     * Used by tests and any consumer that doesn't have a richer source
+     * of parameter data; richer producers (the bytecode and source
+     * indexers) build proper {@link ParameterEntry}s and call the
+     * canonical constructor directly.
+     */
+    public static MethodEntry ofTypes(
             String resourceUri,
             String jvmOwnerName,
             int modifiers,
@@ -95,9 +116,20 @@ public record MethodEntry(
             List<TypeParamRef> typeParams,
             boolean varargs,
             boolean hasBody,
+            AnnotationValue annotationDefault,
             List<AnnotationRef> annotations) {
-        this(resourceUri, jvmOwnerName, modifiers, name, returnType,
-                paramTypes, throwsTypes, typeParams, varargs, hasBody, null, annotations);
+        return new MethodEntry(resourceUri, jvmOwnerName, modifiers, name, returnType,
+                paramTypesOf(paramTypes), throwsTypes, typeParams, varargs, hasBody,
+                annotationDefault, annotations);
+    }
+
+    private static List<ParameterEntry> paramTypesOf(List<TypeRef> types) {
+        if (types == null || types.isEmpty()) return List.of();
+        List<ParameterEntry> out = new ArrayList<>(types.size());
+        for (TypeRef t : types) {
+            out.add(new ParameterEntry(null, 0, t, List.of()));
+        }
+        return List.copyOf(out);
     }
 
     @Override

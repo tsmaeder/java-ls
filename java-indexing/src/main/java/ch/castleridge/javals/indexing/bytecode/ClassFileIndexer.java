@@ -14,7 +14,11 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.ModuleVisitor;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.RecordComponentVisitor;
+import org.objectweb.asm.TypePath;
+import org.objectweb.asm.TypeReference;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.intern.Interner;
@@ -23,7 +27,11 @@ import ch.castleridge.javals.indexing.model.AnnotationValue;
 import ch.castleridge.javals.indexing.model.Descriptors;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
+import ch.castleridge.javals.indexing.model.ModuleEntry;
+import ch.castleridge.javals.indexing.model.ParameterEntry;
+import ch.castleridge.javals.indexing.model.RecordComponentEntry;
 import ch.castleridge.javals.indexing.model.SignatureRefs;
+import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.TypeRef;
@@ -42,8 +50,13 @@ import ch.castleridge.javals.indexing.model.TypeRef;
 public final class ClassFileIndexer {
 
     private static final int ASM_API = Opcodes.ASM9;
+    // ClassReader.SKIP_DEBUG would discard the SourceFile, LVT *and*
+    // MethodParameters attributes; we want MethodParameters to flow
+    // through so MethodEntry can carry parameter names. Method bodies
+    // (where LVT lives) are still skipped via SKIP_CODE, so the extra
+    // attributes parsed here are only the small per-class/per-method
+    // metadata blobs.
     private static final int PARSING_OPTIONS = ClassReader.SKIP_CODE
-            | ClassReader.SKIP_DEBUG
             | ClassReader.SKIP_FRAMES;
 
     private ClassFileIndexer() {}
@@ -57,6 +70,14 @@ public final class ClassFileIndexer {
         ClassReader reader = new ClassReader(bytes);
         CollectingVisitor visitor = new CollectingVisitor(uri, sourceUri);
         reader.accept(visitor, PARSING_OPTIONS);
+        ModuleEntry module = visitor.toModuleEntry();
+        if (module != null) {
+            // A module-info.class never has any useful TypeEntry payload
+            // (no fields, no methods, no superclass beyond Object), so
+            // route it to the module store and stop here.
+            into.addModule(module);
+            return;
+        }
         TypeEntry entry = visitor.toTypeEntry();
         if (entry != null) {
             into.add(entry);
@@ -75,7 +96,15 @@ public final class ClassFileIndexer {
         private final List<FieldEntry> fields = new ArrayList<>();
         private final List<MethodEntry> methods = new ArrayList<>();
         private final List<String> innerTypes = new ArrayList<>();
+        private final List<TypeRef> permittedSubclasses = new ArrayList<>();
+        private final List<RecordComponentEntry> recordComponents = new ArrayList<>();
         private final List<AnnotationRef> annotations = new ArrayList<>();
+
+        // Populated when this is a module-info class file. Only one of
+        // toTypeEntry / toModuleEntry yields a non-null result.
+        private ModuleEntry moduleEntry;
+        private String mainClass;
+        private final List<String> modulePackages = new ArrayList<>();
 
         CollectingVisitor(URI uri, URI sourceUri) {
             super(ASM_API);
@@ -136,8 +165,14 @@ public final class ClassFileIndexer {
             if (parsedFieldType == null) {
                 parsedFieldType = Descriptors.parseField(descriptor);
             }
-            final TypeRef fieldType = parsedFieldType;
+            final TypeRef[] fieldTypeSlot = new TypeRef[]{parsedFieldType};
             final String fieldName = Interner.intern(name);
+            // ASM hands us the ConstantValue attribute's payload directly:
+            // boxed Integer / Long / Float / Double for primitives, String
+            // for string constants, or null when there is no ConstantValue.
+            // Pass it through unchanged so IndexClassReader can call
+            // VarSymbol.setData() and let javac constant-fold use sites.
+            final Object constantValue = value;
             // Defer FieldEntry construction until visitEnd so the
             // annotations list captured by the visitor below is
             // complete - MethodEntry / FieldEntry copy the list
@@ -149,13 +184,25 @@ public final class ClassFileIndexer {
                 }
 
                 @Override
+                public AnnotationVisitor visitTypeAnnotation(int typeRef, TypePath typePath,
+                                                             String d, boolean visible) {
+                    // Only handle the top-level position (typePath == null);
+                    // deeper paths inside generic structure are dropped on
+                    // the first cut.
+                    if (typePath != null) return null;
+                    return CapturingAnnotationVisitor.forDeclaration(d, ann ->
+                            fieldTypeSlot[0] = TypeRef.Annotated.wrap(fieldTypeSlot[0], List.of(ann)));
+                }
+
+                @Override
                 public void visitEnd() {
                     fields.add(new FieldEntry(
                             uri,
                             jvmName,
                             fAccess,
                             fieldName,
-                            fieldType,
+                            fieldTypeSlot[0],
+                            constantValue,
                             fAnnotations));
                 }
             };
@@ -192,6 +239,25 @@ public final class ClassFileIndexer {
             // Box so the inner visitor can update the annotation default
             // value asynchronously before visitEnd builds the MethodEntry.
             final AnnotationValue[] annotationDefaultSlot = new AnnotationValue[1];
+            // MethodParameters and Runtime{Visible,Invisible}ParameterAnnotations
+            // arrive through visitParameter / visitParameterAnnotation in
+            // declaration order, but their indices line up with paramTypes
+            // (signature-style parameter slots, not LVT slots) only after
+            // ASM has cancelled out implicit synthetic parameters.
+            // We capture them per parameter and zip with paramTypes at
+            // visitEnd; if MethodParameters is absent we leave the name
+            // null and IndexClassReader synthesises "arg<i>".
+            final String[] parameterNames = new String[paramTypes.size()];
+            final int[] parameterModifiers = new int[paramTypes.size()];
+            final List<AnnotationRef>[] parameterAnnotations = newAnnotationLists(paramTypes.size());
+            final int[] parameterCursor = new int[]{0};
+            // Mutable slots so visitTypeAnnotation can wrap the relevant
+            // TypeRef in TypeRef.Annotated decorators as type-use
+            // annotations arrive. Only the top-level position
+            // (typePath == null) is handled in this first cut.
+            final TypeRef[] returnTypeSlot = new TypeRef[]{returnType};
+            final TypeRef[] paramTypeSlots = paramTypes.toArray(new TypeRef[0]);
+            final TypeRef[] throwsSlots = throwsRefs.toArray(new TypeRef[0]);
             return new MethodVisitor(ASM_API) {
                 @Override
                 public AnnotationVisitor visitAnnotation(String d, boolean visible) {
@@ -209,15 +275,64 @@ public final class ClassFileIndexer {
                 }
 
                 @Override
+                public void visitParameter(String pName, int pAccess) {
+                    int idx = parameterCursor[0]++;
+                    if (idx >= 0 && idx < parameterNames.length) {
+                        parameterNames[idx] = pName == null ? null : Interner.intern(pName);
+                        parameterModifiers[idx] = pAccess;
+                    }
+                }
+
+                @Override
+                public AnnotationVisitor visitParameterAnnotation(int parameter, String d, boolean visible) {
+                    if (parameter < 0 || parameter >= parameterAnnotations.length) {
+                        return null;
+                    }
+                    return CapturingAnnotationVisitor.forDeclaration(d, parameterAnnotations[parameter]::add);
+                }
+
+                @Override
+                public AnnotationVisitor visitTypeAnnotation(int typeRef, TypePath typePath,
+                                                             String d, boolean visible) {
+                    if (typePath != null) return null;
+                    int sort = new TypeReference(typeRef).getSort();
+                    return switch (sort) {
+                        case TypeReference.METHOD_RETURN -> CapturingAnnotationVisitor.forDeclaration(d, ann ->
+                                returnTypeSlot[0] = TypeRef.Annotated.wrap(returnTypeSlot[0], List.of(ann)));
+                        case TypeReference.METHOD_FORMAL_PARAMETER -> {
+                            int idx = new TypeReference(typeRef).getFormalParameterIndex();
+                            if (idx < 0 || idx >= paramTypeSlots.length) yield null;
+                            yield CapturingAnnotationVisitor.forDeclaration(d, ann ->
+                                    paramTypeSlots[idx] = TypeRef.Annotated.wrap(paramTypeSlots[idx], List.of(ann)));
+                        }
+                        case TypeReference.THROWS -> {
+                            int idx = new TypeReference(typeRef).getExceptionIndex();
+                            if (idx < 0 || idx >= throwsSlots.length) yield null;
+                            yield CapturingAnnotationVisitor.forDeclaration(d, ann ->
+                                    throwsSlots[idx] = TypeRef.Annotated.wrap(throwsSlots[idx], List.of(ann)));
+                        }
+                        default -> null;
+                    };
+                }
+
+                @Override
                 public void visitEnd() {
+                    List<ParameterEntry> params = new ArrayList<>(paramTypes.size());
+                    for (int i = 0; i < paramTypes.size(); i++) {
+                        params.add(new ParameterEntry(
+                                parameterNames[i],
+                                parameterModifiers[i],
+                                paramTypeSlots[i],
+                                parameterAnnotations[i]));
+                    }
                     methods.add(new MethodEntry(
                             uri,
                             jvmName,
                             mAccess,
                             methodName,
-                            returnType,
-                            paramTypes,
-                            throwsRefs,
+                            returnTypeSlot[0],
+                            List.copyOf(params),
+                            List.of(throwsSlots),
                             methodTypeParams,
                             varargs,
                             hasBody,
@@ -227,6 +342,13 @@ public final class ClassFileIndexer {
             };
         }
 
+        @SuppressWarnings("unchecked")
+        private static List<AnnotationRef>[] newAnnotationLists(int n) {
+            List<AnnotationRef>[] arr = new List[n];
+            for (int i = 0; i < n; i++) arr[i] = new ArrayList<>();
+            return arr;
+        }
+
         @Override
         public void visitInnerClass(String name, String outerName, String innerName, int access) {
             if (outerName != null && outerName.equals(jvmName)) {
@@ -234,20 +356,158 @@ public final class ClassFileIndexer {
             }
         }
 
+        @Override
+        public ModuleVisitor visitModule(String name, int moduleAccess, String version) {
+            final String modName = Interner.intern(name);
+            final String modVersion = version == null ? null : Interner.intern(version);
+            final int modFlags = moduleAccess;
+            final List<ModuleEntry.Requires> requires = new ArrayList<>();
+            final List<ModuleEntry.Exports> exports = new ArrayList<>();
+            final List<ModuleEntry.Opens> opens = new ArrayList<>();
+            final List<String> uses = new ArrayList<>();
+            final List<ModuleEntry.Provides> provides = new ArrayList<>();
+            return new ModuleVisitor(ASM_API) {
+                @Override
+                public void visitMainClass(String main) {
+                    if (main != null && !main.isEmpty()) {
+                        mainClass = Interner.intern(main);
+                    }
+                }
+
+                @Override
+                public void visitPackage(String packaze) {
+                    if (packaze != null && !packaze.isEmpty()) {
+                        modulePackages.add(Interner.intern(packaze));
+                    }
+                }
+
+                @Override
+                public void visitRequire(String reqModule, int access, String reqVersion) {
+                    if (reqModule == null || reqModule.isEmpty()) return;
+                    requires.add(new ModuleEntry.Requires(
+                            Interner.intern(reqModule),
+                            access,
+                            reqVersion == null ? null : Interner.intern(reqVersion)));
+                }
+
+                @Override
+                public void visitExport(String packaze, int access, String... modules) {
+                    if (packaze == null) return;
+                    exports.add(new ModuleEntry.Exports(
+                            Interner.intern(packaze),
+                            modules == null ? List.of() : asInternedList(modules),
+                            access));
+                }
+
+                @Override
+                public void visitOpen(String packaze, int access, String... modules) {
+                    if (packaze == null) return;
+                    opens.add(new ModuleEntry.Opens(
+                            Interner.intern(packaze),
+                            modules == null ? List.of() : asInternedList(modules),
+                            access));
+                }
+
+                @Override
+                public void visitUse(String service) {
+                    if (service == null) return;
+                    uses.add(Interner.intern(service));
+                }
+
+                @Override
+                public void visitProvide(String service, String... providers) {
+                    if (service == null) return;
+                    provides.add(new ModuleEntry.Provides(
+                            Interner.intern(service),
+                            providers == null ? List.of() : asInternedList(providers)));
+                }
+
+                @Override
+                public void visitEnd() {
+                    moduleEntry = new ModuleEntry(
+                            uri,
+                            sourceUri,
+                            modName,
+                            modVersion,
+                            modFlags,
+                            requires,
+                            exports,
+                            opens,
+                            uses,
+                            provides,
+                            List.copyOf(modulePackages),
+                            mainClass);
+                }
+            };
+        }
+
+        private static List<String> asInternedList(String[] arr) {
+            if (arr.length == 0) return List.of();
+            List<String> out = new ArrayList<>(arr.length);
+            for (String s : arr) {
+                if (s != null) out.add(Interner.intern(s));
+            }
+            return List.copyOf(out);
+        }
+
+        @Override
+        public void visitPermittedSubclass(String permittedSubclass) {
+            if (permittedSubclass != null && !permittedSubclass.isEmpty()) {
+                permittedSubclasses.add(TypeRef.resolved(permittedSubclass));
+            }
+        }
+
+        @Override
+        public RecordComponentVisitor visitRecordComponent(String name, String descriptor,
+                                                           String signature) {
+            TypeRef componentType = signature != null
+                    ? SignatureRefs.parseType(signature)
+                    : Descriptors.parseField(descriptor);
+            if (componentType == null) {
+                componentType = Descriptors.parseField(descriptor);
+            }
+            final String componentName = Interner.intern(name);
+            final TypeRef finalComponentType = componentType;
+            final List<AnnotationRef> componentAnnotations = new ArrayList<>();
+            return new RecordComponentVisitor(ASM_API) {
+                @Override
+                public AnnotationVisitor visitAnnotation(String d, boolean visible) {
+                    return CapturingAnnotationVisitor.forDeclaration(d, componentAnnotations::add);
+                }
+
+                @Override
+                public void visitEnd() {
+                    recordComponents.add(new RecordComponentEntry(
+                            componentName, finalComponentType, componentAnnotations));
+                }
+            };
+        }
+
+        ModuleEntry toModuleEntry() {
+            return moduleEntry;
+        }
+
         TypeEntry toTypeEntry() {
             if (jvmName == null) return null;
+            // Module-info pseudo-classes round-trip through toModuleEntry();
+            // their JVM owner name is "module-info" which we want to keep
+            // off the type index altogether.
+            if (moduleEntry != null) return null;
             if (Index.isSkippedJvmName(jvmName)) return null;
             return new TypeEntry(
                     uri,
                     sourceUri,
                     jvmName,
                     access,
+                    TypeDeclKind.UNKNOWN,
                     superRef,
                     interfaces,
                     typeParams,
                     fields,
                     methods,
                     innerTypes,
+                    permittedSubclasses,
+                    recordComponents,
                     annotations,
                     null);
         }

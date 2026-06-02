@@ -47,6 +47,8 @@ public record TypeEntry(
         List<FieldEntry> fields,
         List<MethodEntry> methods,
         List<String> innerTypeJvmNames,
+        List<TypeRef> permittedSubclasses,
+        List<RecordComponentEntry> recordComponents,
         List<AnnotationRef> annotations,
         SourceResolutionHints hints) implements IndexEntry {
 
@@ -56,6 +58,8 @@ public record TypeEntry(
         fields = fields == null ? List.of() : List.copyOf(fields);
         methods = methods == null ? List.of() : List.copyOf(methods);
         innerTypeJvmNames = innerTypeJvmNames == null ? List.of() : List.copyOf(innerTypeJvmNames);
+        permittedSubclasses = permittedSubclasses == null ? List.of() : List.copyOf(permittedSubclasses);
+        recordComponents = recordComponents == null ? List.of() : List.copyOf(recordComponents);
         annotations = annotations == null ? List.of() : List.copyOf(annotations);
         if (declKind == null) declKind = TypeDeclKind.UNKNOWN;
     }
@@ -76,7 +80,48 @@ public record TypeEntry(
             SourceResolutionHints hints) {
         this(resourceUri, sourceUri, jvmOwnerName, modifiers, TypeDeclKind.UNKNOWN,
                 superRef, interfaceRefs, typeParams, fields, methods,
-                innerTypeJvmNames, annotations, hints);
+                innerTypeJvmNames, List.of(), List.of(), annotations, hints);
+    }
+
+    /** Backward-compatible constructor without {@link #permittedSubclasses()}. */
+    public TypeEntry(
+            String resourceUri,
+            String sourceUri,
+            String jvmOwnerName,
+            int modifiers,
+            TypeDeclKind declKind,
+            TypeRef superRef,
+            List<TypeRef> interfaceRefs,
+            List<TypeParamRef> typeParams,
+            List<FieldEntry> fields,
+            List<MethodEntry> methods,
+            List<String> innerTypeJvmNames,
+            List<AnnotationRef> annotations,
+            SourceResolutionHints hints) {
+        this(resourceUri, sourceUri, jvmOwnerName, modifiers, declKind,
+                superRef, interfaceRefs, typeParams, fields, methods,
+                innerTypeJvmNames, List.of(), List.of(), annotations, hints);
+    }
+
+    /** Backward-compatible constructor without {@link #recordComponents()}. */
+    public TypeEntry(
+            String resourceUri,
+            String sourceUri,
+            String jvmOwnerName,
+            int modifiers,
+            TypeDeclKind declKind,
+            TypeRef superRef,
+            List<TypeRef> interfaceRefs,
+            List<TypeParamRef> typeParams,
+            List<FieldEntry> fields,
+            List<MethodEntry> methods,
+            List<String> innerTypeJvmNames,
+            List<TypeRef> permittedSubclasses,
+            List<AnnotationRef> annotations,
+            SourceResolutionHints hints) {
+        this(resourceUri, sourceUri, jvmOwnerName, modifiers, declKind,
+                superRef, interfaceRefs, typeParams, fields, methods,
+                innerTypeJvmNames, permittedSubclasses, List.of(), annotations, hints);
     }
 
     public String jvmName() {

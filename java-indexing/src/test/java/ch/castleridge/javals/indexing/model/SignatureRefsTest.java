@@ -68,6 +68,46 @@ class SignatureRefsTest {
     }
 
     @Test
+    void parseFormalTypeParametersCapturesBounds() {
+        var params = SignatureRefs.parseFormalTypeParameters(
+                "<T:Ljava/lang/Comparable<TT;>;:Ljava/io/Serializable;U:Ljava/lang/Object;>Ljava/lang/Object;");
+        assertEquals(2, params.size());
+
+        TypeParamRef t = params.get(0);
+        assertEquals("T", t.name());
+        assertEquals(2, t.bounds().size());
+        TypeRef.Parameterized comparable = assertInstanceOf(TypeRef.Parameterized.class, t.bounds().get(0));
+        assertEquals("java/lang/Comparable",
+                assertInstanceOf(TypeRef.Resolved.class, comparable.raw()).jvmBinaryName());
+        TypeRef.TypeVariable comparableArg =
+                assertInstanceOf(TypeRef.TypeVariable.class, comparable.typeArgs().get(0));
+        assertEquals("T", comparableArg.name());
+        assertEquals("java/io/Serializable",
+                assertInstanceOf(TypeRef.Resolved.class, t.bounds().get(1)).jvmBinaryName());
+
+        TypeParamRef u = params.get(1);
+        assertEquals("U", u.name());
+        // Object-only bound is normalised by TypeParamRef back to the
+        // canonical singleton list - nothing fancy required from callers.
+        assertEquals(1, u.bounds().size());
+        assertEquals("java/lang/Object",
+                assertInstanceOf(TypeRef.Resolved.class, u.bounds().get(0)).jvmBinaryName());
+    }
+
+    @Test
+    void parseMethodCapturesMethodTypeParameterBounds() {
+        SignatureRefs.MethodRefs refs = SignatureRefs.parseMethod(
+                "<E:Ljava/lang/Throwable;>(Ljava/lang/Throwable;)TE;");
+        assertNotNull(refs);
+        assertEquals(1, refs.typeParams().size());
+        TypeParamRef e = refs.typeParams().get(0);
+        assertEquals("E", e.name());
+        assertEquals(1, e.bounds().size());
+        assertEquals("java/lang/Throwable",
+                assertInstanceOf(TypeRef.Resolved.class, e.bounds().get(0)).jvmBinaryName());
+    }
+
+    @Test
     void classFileIndexerUsesMethodSignatureAttribute() {
         ClassWriter cw = new ClassWriter(0);
         cw.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE,

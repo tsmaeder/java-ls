@@ -3,7 +3,7 @@ package ch.castleridge.javals.javac;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -19,6 +19,7 @@ import javax.tools.StandardLocation;
 import com.sun.tools.javac.api.ClientCodeWrapper;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**
@@ -60,7 +61,18 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
                                          Set<Kind> kinds,
                                          boolean recurse) throws IOException {
 
-                                            
+        // Synthetic per-module location: the only file we expose is
+        // module-info.class (at the unnamed package root). Everything
+        // else returns empty - the actual member types live on the
+        // regular CLASS_PATH/MODULE_PATH and are looked up through the
+        // existing path below.
+        if (location instanceof IndexedModuleLocation iml) {
+            if (!kinds.contains(Kind.CLASS)) return List.of();
+            if (packageName != null && !packageName.isEmpty()) return List.of();
+            IndexModuleFileObject mf = moduleFile(iml.moduleName());
+            return mf == null ? List.of() : List.of(mf);
+        }
+
         if (!kinds.contains(Kind.CLASS)) {
             return super.list(location, packageName, kinds, recurse);
         }
@@ -85,12 +97,22 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
         if (file instanceof IndexClassFileObject icfo) {
             return icfo.binaryName();
         }
+        if (file instanceof IndexModuleFileObject) {
+            return "module-info";
+        }
         return super.inferBinaryName(location, file);
     }
 
 
     @Override
     public JavaFileObject getJavaFileForInput(Location location, String className, Kind kind) throws IOException {
+        // A synthetic per-module location: the only file javac asks for
+        // is "module-info" (CLASS), which we materialise on demand.
+        if (location instanceof IndexedModuleLocation iml && kind == Kind.CLASS
+                && "module-info".equals(className)) {
+            IndexModuleFileObject mf = moduleFile(iml.moduleName());
+            if (mf != null) return mf;
+        }
         if (kind == Kind.CLASS) {
             String jvm = className.replace('.', '/');
             List<TypeEntry> all = index.getAll(jvm);
@@ -104,8 +126,144 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
         return super.getJavaFileForInput(location, className, kind);
     }
 
+    @Override
+    public Iterable<Set<Location>> listLocationsForModules(Location location) throws IOException {
+        Iterable<Set<Location>> delegated = super.listLocationsForModules(location);
+        // Expose indexed user modules on MODULE_PATH so a compilation
+        // can `requires` them without writing module-info.class to
+        // disk. SYSTEM_MODULES is intentionally left alone: jrt-fs
+        // already exposes the JDK modules to the standard file manager.
+        if (location != StandardLocation.MODULE_PATH) {
+            return delegated;
+        }
+        Set<Set<Location>> result = new LinkedHashSet<>();
+        if (delegated != null) {
+            for (Set<Location> existing : delegated) {
+                result.add(existing);
+            }
+        }
+        for (ModuleEntry me : index.allModules()) {
+            if (me.sourceUri() != null && !classpath.contains(me.sourceUri())) continue;
+            result.add(Set.of(new IndexedModuleLocation(me.name())));
+        }
+        return result;
+    }
+
+    @Override
+    public String inferModuleName(Location location) throws IOException {
+        if (location instanceof IndexedModuleLocation iml) {
+            return iml.moduleName();
+        }
+        return super.inferModuleName(location);
+    }
+
+    @Override
+    public boolean hasLocation(Location location) {
+        if (location instanceof IndexedModuleLocation) return true;
+        return super.hasLocation(location);
+    }
+
+    @Override
+    public Location getLocationForModule(Location location, String moduleName) throws IOException {
+        if (location == StandardLocation.MODULE_PATH && moduleName != null) {
+            if (index.getModule(moduleName) != null) {
+                return new IndexedModuleLocation(moduleName);
+            }
+        }
+        return super.getLocationForModule(location, moduleName);
+    }
+
     /** Convenience: cast and extract the backing entry, or null. */
     public static TypeEntry asEntry(JavaFileObject file) {
         return file instanceof IndexClassFileObject icfo ? icfo.entry() : null;
+    }
+
+    /**
+     * Materialise the indexed module {@code moduleName} as a synthetic
+     * {@link IndexModuleFileObject} backed by ASM-generated
+     * {@code module-info.class} bytes, or {@code null} if no indexed
+     * {@link ModuleEntry} matches (or none of its candidates pass the
+     * classpath filter).
+     *
+     * <p>Returned independently of {@link #getJavaFileForInput} so
+     * consumers that drive their own module discovery (LSP module
+     * symbol search, completion proposers) can fetch synthesised
+     * module-info files without going through the full file-manager
+     * dance.
+     */
+    /**
+     * Synthetic {@link Location} that pins a single indexed module
+     * inside an enclosing module-oriented location.
+     *
+     * <p>{@link #getName()} follows javac's convention of
+     * {@code <enclosing>[<moduleName>]} so the strings show up
+     * readable in diagnostics. Equality is structural so the file
+     * manager can recreate locations on demand without having to
+     * memoise them.
+     */
+    static final class IndexedModuleLocation implements Location {
+        private final String moduleName;
+
+        IndexedModuleLocation(String moduleName) {
+            this.moduleName = Objects.requireNonNull(moduleName);
+        }
+
+        String moduleName() {
+            return moduleName;
+        }
+
+        @Override
+        public String getName() {
+            return "MODULE_PATH[" + moduleName + "]";
+        }
+
+        @Override
+        public boolean isOutputLocation() {
+            return false;
+        }
+
+        @Override
+        public boolean isModuleOrientedLocation() {
+            return false;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof IndexedModuleLocation other
+                    && other.moduleName.equals(moduleName);
+        }
+
+        @Override
+        public int hashCode() {
+            return moduleName.hashCode();
+        }
+
+        @Override
+        public String toString() {
+            return getName();
+        }
+    }
+
+    public IndexModuleFileObject moduleFile(String moduleName) {
+        if (moduleName == null) return null;
+        List<ModuleEntry> candidates = index.getAllModules(moduleName);
+        if (candidates.isEmpty()) return null;
+        // Apply the same classpath filter we apply to TypeEntry buckets
+        // so that build-system module shadowing is honoured. Modules
+        // whose backing module-info isn't on the active classpath are
+        // skipped. If the classpath is UNRESTRICTED, every module
+        // qualifies and ClasspathOrder.pick will return null - fall back
+        // to the first observation in that case (matching the
+        // "first one encountered wins" docstring).
+        List<ModuleEntry> filtered = new ArrayList<>();
+        for (ModuleEntry me : candidates) {
+            if (me.sourceUri() == null || classpath.contains(me.sourceUri())) {
+                filtered.add(me);
+            }
+        }
+        if (filtered.isEmpty()) return null;
+        ModuleEntry winner = classpath.pick(filtered, ModuleEntry::sourceUri);
+        if (winner == null) winner = filtered.get(0);
+        return new IndexModuleFileObject(winner);
     }
 }

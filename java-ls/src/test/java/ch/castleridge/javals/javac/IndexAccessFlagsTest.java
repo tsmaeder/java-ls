@@ -1,6 +1,7 @@
 package ch.castleridge.javals.javac;
 
 import java.net.URI;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.Opcodes;
@@ -10,6 +11,7 @@ import com.sun.tools.javac.code.Flags;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
+import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.source.SourceIndexer;
 
@@ -46,11 +48,14 @@ class IndexAccessFlagsTest {
         MethodEntry d = method(entry, "d");
         assertHas(IndexAccessFlags.methodFlags(entry, d), Opcodes.ACC_PUBLIC);
         assertLacks(IndexAccessFlags.methodFlags(entry, d), Opcodes.ACC_ABSTRACT);
+        assertHas(IndexAccessFlags.methodFlags(entry, d), Flags.DEFAULT);
 
         MethodEntry s = method(entry, "s");
         assertHas(IndexAccessFlags.methodFlags(entry, s), Opcodes.ACC_PUBLIC);
         assertHas(IndexAccessFlags.methodFlags(entry, s), Opcodes.ACC_STATIC);
         assertLacks(IndexAccessFlags.methodFlags(entry, s), Opcodes.ACC_ABSTRACT);
+        // Static interface methods are not "default" methods.
+        assertLacks(IndexAccessFlags.methodFlags(entry, s), Flags.DEFAULT);
 
         MethodEntry p = method(entry, "p");
         assertHas(IndexAccessFlags.methodFlags(entry, p), Opcodes.ACC_PRIVATE);
@@ -80,6 +85,74 @@ class IndexAccessFlagsTest {
         MethodEntry value = method(entry, "value");
         assertHas(IndexAccessFlags.methodFlags(entry, value), Opcodes.ACC_PUBLIC);
         assertHas(IndexAccessFlags.methodFlags(entry, value), Opcodes.ACC_ABSTRACT);
+    }
+
+    @Test
+    void classFlagsStripAccSuperBitForBytecodeEntries() {
+        TypeEntry bytecode = new TypeEntry(
+                "index:///p/C.class",
+                "index:///bytecode/",
+                "p/C",
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_SUPER,
+                TypeDeclKind.UNKNOWN,
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                null);
+        long flags = IndexAccessFlags.classFlags(bytecode);
+        assertLacks(flags, Opcodes.ACC_SUPER);
+        assertHas(flags, Opcodes.ACC_PUBLIC);
+    }
+
+    @Test
+    void classFlagsStripAccSuperBitForSourceEntries() {
+        TypeEntry entry = indexSingle(
+                "package p;\n"
+                        + "public class C {}\n",
+                "p/C");
+        // Source modifiers don't normally include ACC_SUPER, but make
+        // sure the masking still applies if it ever slips through.
+        TypeEntry tampered = new TypeEntry(
+                entry.resourceUri(),
+                entry.sourceUri(),
+                entry.jvmOwnerName(),
+                entry.modifiers() | Opcodes.ACC_SUPER,
+                entry.declKind(),
+                entry.superRef(),
+                entry.interfaceRefs(),
+                entry.typeParams(),
+                entry.fields(),
+                entry.methods(),
+                entry.innerTypeJvmNames(),
+                entry.annotations(),
+                entry.hints());
+        long flags = IndexAccessFlags.classFlags(tampered);
+        assertLacks(flags, Opcodes.ACC_SUPER);
+    }
+
+    @Test
+    void classFlagsMapAccModuleToFlagsModule() {
+        TypeEntry moduleInfo = new TypeEntry(
+                "index:///module-info.class",
+                "index:///bytecode/",
+                "io/example/module-info",
+                Opcodes.ACC_MODULE,
+                TypeDeclKind.UNKNOWN,
+                null,
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                null);
+        long flags = IndexAccessFlags.classFlags(moduleInfo);
+        assertHas(flags, Flags.MODULE);
+        assertLacks(flags, Opcodes.ACC_MODULE);
     }
 
     @Test

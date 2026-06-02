@@ -14,6 +14,8 @@ import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.ListBuffer;
 import com.sun.tools.javac.util.Names;
 
+import com.sun.tools.javac.code.Attribute;
+
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
@@ -48,12 +50,15 @@ final class TypeRefResolver {
     private final Names names;
     private final Index index;
     private final ClasspathOrder classpath;
+    private final IndexAnnotations annotations;
 
-    TypeRefResolver(Symtab syms, Names names, Index index, ClasspathOrder classpath) {
+    TypeRefResolver(Symtab syms, Names names, Index index, ClasspathOrder classpath,
+                    IndexAnnotations annotations) {
         this.syms = syms;
         this.names = names;
         this.index = index;
         this.classpath = classpath;
+        this.annotations = annotations;
     }
 
     Type resolve(TypeRef ref, ModuleSymbol module, TypeEntry enclosing) {
@@ -62,6 +67,14 @@ final class TypeRefResolver {
 
     Type resolve(TypeRef ref, ModuleSymbol module, ResolutionContext ctx) {
         if (ref == null) return syms.errType;
+        if (ref instanceof TypeRef.Annotated annotated) {
+            Type inner = resolve(annotated.inner(), module, ctx);
+            if (annotations == null) return inner;
+            List<Attribute.TypeCompound> compounds =
+                    annotations.toTypeCompounds(annotated.annotations(), module);
+            if (compounds.isEmpty()) return inner;
+            return inner.annotatedType(compounds);
+        }
         if (ref instanceof TypeRef.Primitive p) return primitive(p);
         if (ref instanceof TypeRef.Array a) {
             return new ArrayType(resolve(a.element(), module, ctx), syms.arrayClass);

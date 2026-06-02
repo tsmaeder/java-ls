@@ -39,11 +39,65 @@ public sealed interface TypeRef
                 TypeRef.Unresolved,
                 TypeRef.TypeVariable,
                 TypeRef.Wildcard,
-                TypeRef.Parameterized {
+                TypeRef.Parameterized,
+                TypeRef.Annotated {
 
     /** The nine primitive forms, plus {@code void}. */
     enum Primitive implements TypeRef {
         VOID, BOOLEAN, BYTE, CHAR, SHORT, INT, LONG, FLOAT, DOUBLE
+    }
+
+    /**
+     * A decorator that attaches type-use annotations to an inner
+     * {@link TypeRef} without forcing every variant to carry an
+     * annotations list itself (which would balloon the canonical
+     * constructors and force {@link Primitive} to stop being an enum).
+     *
+     * <p>The inner TypeRef may itself be another {@code Annotated}; the
+     * outermost annotations are the ones that apply at this position in
+     * the type tree. {@link Annotated#annotations()} is always non-empty
+     * (callers should use the bare inner {@link TypeRef} when the list
+     * would be empty).
+     *
+     * <p>{@link Annotated#unwrap()} strips any annotation wrappers and
+     * returns the underlying inner type, which is what symbol-level
+     * resolution typically cares about.
+     */
+    record Annotated(TypeRef inner, List<AnnotationRef> annotations) implements TypeRef {
+        public Annotated {
+            if (inner == null) {
+                throw new IllegalArgumentException("inner must not be null");
+            }
+            annotations = annotations == null ? List.of() : List.copyOf(annotations);
+            if (annotations.isEmpty()) {
+                throw new IllegalArgumentException("annotations must be non-empty - "
+                        + "use the bare inner TypeRef when there are no annotations");
+            }
+        }
+
+        /**
+         * Convenience factory that returns {@code inner} directly when
+         * {@code annotations} is empty, avoiding pointless wrapping.
+         */
+        public static TypeRef wrap(TypeRef inner, List<AnnotationRef> annotations) {
+            if (annotations == null || annotations.isEmpty()) return inner;
+            if (inner instanceof Annotated a) {
+                List<AnnotationRef> merged = new java.util.ArrayList<>(a.annotations().size() + annotations.size());
+                merged.addAll(a.annotations());
+                merged.addAll(annotations);
+                return new Annotated(a.inner(), List.copyOf(merged));
+            }
+            return new Annotated(inner, annotations);
+        }
+
+        /** Strip every nested {@link Annotated} wrapper and return the underlying TypeRef. */
+        public TypeRef unwrap() {
+            TypeRef cur = inner;
+            while (cur instanceof Annotated a) {
+                cur = a.inner();
+            }
+            return cur;
+        }
     }
 
     /** An array type; {@code element} may itself be any {@link TypeRef}. */

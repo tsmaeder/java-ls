@@ -4,6 +4,7 @@ import static com.sun.tools.javac.code.Flags.STATIC;
 
 import com.sun.tools.javac.code.Attribute;
 import com.sun.tools.javac.code.Flags;
+import com.sun.tools.javac.code.Kinds;
 import com.sun.tools.javac.code.Scope.WriteableScope;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
@@ -27,6 +28,8 @@ import com.sun.tools.javac.util.Names;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
+import ch.castleridge.javals.indexing.model.ParameterEntry;
+import ch.castleridge.javals.indexing.model.RecordComponentEntry;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
@@ -80,8 +83,8 @@ public final class IndexClassReader extends ClassReader {
         this.syms = Symtab.instance(context);
         this.names = Names.instance(context);
         this.types = Types.instance(context);
-        this.resolver = new TypeRefResolver(syms, names, index, classpath);
         this.annotations = new IndexAnnotations(syms, names, types);
+        this.resolver = new TypeRefResolver(syms, names, index, classpath, annotations);
     }
 
     /**
@@ -131,6 +134,12 @@ public final class IndexClassReader extends ClassReader {
         TypeRefResolver.ResolutionContext classCtx =
                 TypeRefResolver.ResolutionContext.of(entry, classTypeParams);
 
+        // Phase 2 of the type-parameter setup: now that the sibling
+        // TypeVars are visible through `classCtx`, resolve each declared
+        // bound (F-bounded generics like `<T extends Comparable<T>>` need
+        // to see T while resolving T's own bound).
+        applyTypeParamBounds(classTypeParams, entry.typeParams(), module, classCtx);
+
         ct.supertype_field = entry.superRef() == null
                 ? Type.noType
                 : resolver.resolve(entry.superRef(), module, classCtx);
@@ -141,19 +150,59 @@ public final class IndexClassReader extends ClassReader {
         }
         ct.interfaces_field = interfaces.reverse();
 
+        // Sealed types: capture PermittedSubclasses attribute (bytecode)
+        // or `permits` clause (source) so Check.checkSealed and Resolve's
+        // class hierarchy walks see the closed set.
+        if (!entry.permittedSubclasses().isEmpty()) {
+            ListBuffer<Symbol> permitted = new ListBuffer<>();
+            for (TypeRef pr : entry.permittedSubclasses()) {
+                Type pt = resolver.resolve(pr, module, classCtx);
+                if (pt != null && pt.tsym instanceof ClassSymbol cs) {
+                    permitted.add(cs);
+                }
+            }
+            if (permitted.nonEmpty()) {
+                c.setPermittedSubclasses(permitted.toList());
+                c.flags_field |= Flags.SEALED;
+            }
+        }
+
         for (FieldEntry f : entry.fields()) {
             Type t = resolver.resolveField(f, module, classCtx);
             VarSymbol v = new VarSymbol(IndexAccessFlags.fieldFlags(entry, f), names.fromString(f.name()), t, c);
             List<Attribute.Compound> fAttrs = annotations.toCompounds(f.annotations(), module);
             v.setDeclarationAttributes(fAttrs);
             v.flags_field |= deprecationFlags(fAttrs);
+            // Mirror ClassReader's ConstantValue handling so javac can
+            // constant-fold use sites of static final primitives and
+            // String constants exposed by indexed classes.
+            if (f.constantValue() != null && (v.flags_field & Flags.FINAL) != 0) {
+                v.setData(coerceConstantValue(f.constantValue(), t));
+            }
             c.members_field.enter(v);
+        }
+
+        // Materialise record components before methods so that the
+        // accessor-wiring loop below sees the canonical list and we can
+        // mirror javac's "RC.accessor = method(rc.name, ())" linkage.
+        ListBuffer<ClassSymbol.RecordComponent> recordComponentSyms = null;
+        if (!entry.recordComponents().isEmpty()) {
+            recordComponentSyms = new ListBuffer<>();
+            for (RecordComponentEntry rce : entry.recordComponents()) {
+                Type rcType = resolver.resolve(rce.type(), module, classCtx);
+                ClassSymbol.RecordComponent rc = new ClassSymbol.RecordComponent(
+                        names.fromString(rce.name()), rcType, c);
+                rc.setDeclarationAttributes(annotations.toCompounds(rce.annotations(), module));
+                recordComponentSyms.add(rc);
+            }
+            c.setRecordComponents(recordComponentSyms.toList());
         }
 
         for (MethodEntry m : entry.methods()) {
             List<Type> methodTypeParams = synthesizeMethodTypeParams(c, m);
             TypeRefResolver.ResolutionContext methodCtx =
                     TypeRefResolver.ResolutionContext.of(entry, classTypeParams, methodTypeParams);
+            applyTypeParamBounds(methodTypeParams, m.typeParams(), module, methodCtx);
             MethodType mt = resolver.resolveMethod(m, module, methodCtx);
             Type methodType = methodTypeParams.isEmpty()
                     ? mt
@@ -162,11 +211,26 @@ public final class IndexClassReader extends ClassReader {
             List<Attribute.Compound> mAttrs = annotations.toCompounds(m.annotations(), module);
             ms.setDeclarationAttributes(mAttrs);
             ms.flags_field |= deprecationFlags(mAttrs);
+            // Mirror javac: an interface owning a default method also
+            // carries the DEFAULT flag, which downstream phases consult.
+            if ((ms.flags_field & Flags.DEFAULT) != 0) {
+                c.flags_field |= Flags.DEFAULT;
+            }
+            populateMethodParameters(ms, m, mt, module);
             if (m.annotationDefault() != null) {
                 Attribute defaultAttr = annotations.toAttribute(m.annotationDefault(), mt.getReturnType(), module);
                 ms.defaultValue = defaultAttr != null ? defaultAttr : ANNOTATION_DEFAULT_SENTINEL;
             }
             c.members_field.enter(ms);
+        }
+
+        // Wire the canonical accessor (the no-arg method named after the
+        // component) for each record component, matching ClassReader's
+        // post-pass.
+        if (recordComponentSyms != null) {
+            for (ClassSymbol.RecordComponent rc : recordComponentSyms) {
+                rc.accessor = lookupNoArgMethod(c, rc.name);
+            }
         }
 
         // Class-level annotations must be attached before the
@@ -328,5 +392,119 @@ public final class IndexClassReader extends ClassReader {
         tv.setUpperBound(syms.objectType);
         ((TypeVariableSymbol) tv.tsym).type = tv;
         return tv;
+    }
+
+    /**
+     * Populate {@code ms.params} from {@link MethodEntry#parameters()}.
+     * If the indexer didn't record parameter information (e.g. a class
+     * file without a {@code MethodParameters} attribute and no source
+     * available), we fall back to the descriptor-derived parameter types
+     * and synthesise {@code "arg<i>"} names matching javac's own
+     * fallback. Per-parameter declaration annotations from
+     * {@code Runtime{Visible,Invisible}ParameterAnnotations} are attached
+     * via {@code setDeclarationAttributes}.
+     */
+    private void populateMethodParameters(MethodSymbol ms, MethodEntry m,
+                                          MethodType mt, ModuleSymbol module) {
+        com.sun.tools.javac.util.List<Type> jvmParamTypes = mt.getParameterTypes();
+        if (jvmParamTypes == null || jvmParamTypes.isEmpty()) {
+            ms.params = List.nil();
+            return;
+        }
+        java.util.List<ParameterEntry> indexed = m.parameters();
+        ListBuffer<VarSymbol> params = new ListBuffer<>();
+        int idx = 0;
+        for (Type pt : jvmParamTypes) {
+            ParameterEntry pe = idx < indexed.size() ? indexed.get(idx) : null;
+            String pName = pe == null || pe.name() == null
+                    ? "arg" + idx
+                    : pe.name();
+            long pflags = Flags.PARAMETER;
+            if (pe != null) {
+                pflags |= Integer.toUnsignedLong(pe.modifiers());
+            }
+            VarSymbol psym = new VarSymbol(pflags, names.fromString(pName), pt, ms);
+            if (pe != null && !pe.annotations().isEmpty()) {
+                psym.setDeclarationAttributes(annotations.toCompounds(pe.annotations(), module));
+            }
+            params.add(psym);
+            idx++;
+        }
+        ms.params = params.toList();
+    }
+
+    private MethodSymbol lookupNoArgMethod(ClassSymbol owner, com.sun.tools.javac.util.Name name) {
+        for (Symbol s : owner.members().getSymbolsByName(name, sym -> sym.kind == Kinds.Kind.MTH)) {
+            if (s instanceof MethodSymbol ms && ms.type.getParameterTypes().isEmpty()) {
+                return ms;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Coerce an indexer-supplied {@code constantValue} into the boxed
+     * representation javac expects on {@code VarSymbol.data}. The
+     * indexer already stores boolean/char/byte/short as {@link Integer}
+     * (matching {@code ClassReader}'s convention), but a source-side
+     * scalar of unexpected shape is conservatively dropped to {@code null}
+     * so we never feed {@code VarSymbol.setData} a value javac will
+     * reject when constant-folding the use site.
+     */
+    private static Object coerceConstantValue(Object raw, Type fieldType) {
+        if (raw == null) return null;
+        return switch (fieldType.getTag()) {
+            case BOOLEAN, BYTE, CHAR, SHORT, INT ->
+                    raw instanceof Integer ? raw : (raw instanceof Number n ? n.intValue() : null);
+            case LONG -> raw instanceof Long ? raw : (raw instanceof Number n ? n.longValue() : null);
+            case FLOAT -> raw instanceof Float ? raw : (raw instanceof Number n ? n.floatValue() : null);
+            case DOUBLE -> raw instanceof Double ? raw : (raw instanceof Number n ? n.doubleValue() : null);
+            default -> raw instanceof String ? raw : null;
+        };
+    }
+
+    /**
+     * Second pass over {@code formals} (the TypeVars previously
+     * allocated with a placeholder {@code Object} upper bound): resolve
+     * each {@link TypeParamRef#bounds()} against the supplied
+     * {@code ctx} and call {@link Types#setBounds(TypeVar, List, boolean)}
+     * so generic constraints (including F-bounds and intersection types)
+     * are enforced at use sites of indexed types.
+     */
+    private void applyTypeParamBounds(List<Type> formals,
+                                      java.util.List<TypeParamRef> refs,
+                                      ModuleSymbol module,
+                                      TypeRefResolver.ResolutionContext ctx) {
+        if (formals.isEmpty() || refs.isEmpty()) return;
+        int idx = 0;
+        for (Type formal : formals) {
+            if (idx >= refs.size()) break;
+            TypeParamRef ref = refs.get(idx++);
+            if (!(formal instanceof TypeVar tv)) continue;
+            if (ref.bounds().isEmpty()) continue;
+
+            ListBuffer<Type> resolved = new ListBuffer<>();
+            boolean allInterfaces = !ref.bounds().isEmpty();
+            for (TypeRef b : ref.bounds()) {
+                Type bound = resolver.resolve(b, module, ctx);
+                if (bound == null || bound.isErroneous()) {
+                    allInterfaces = false;
+                    continue;
+                }
+                resolved.add(bound);
+                if (!bound.isInterface()) {
+                    allInterfaces = false;
+                }
+            }
+            List<Type> boundsList = resolved.toList();
+            if (boundsList.isEmpty()) continue;
+            // A single Object bound is the no-op normalisation already
+            // applied by TypeParamRef; skip it so we don't unnecessarily
+            // wrap the TypeVar in an intersection bound.
+            if (boundsList.size() == 1 && boundsList.head.tsym == syms.objectType.tsym) {
+                continue;
+            }
+            types.setBounds(tv, boundsList, allInterfaces);
+        }
     }
 }

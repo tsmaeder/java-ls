@@ -38,23 +38,19 @@ public final class SignatureRefs {
     }
 
     /**
-     * Pull formal type parameter names from a signature prefix.
+     * Pull formal type parameter names <em>and bounds</em> from a
+     * signature prefix. Each declared bound is captured as a
+     * {@link TypeRef}; if a parameter has no declared bound the result is
+     * the canonical {@code [java/lang/Object]} list (see
+     * {@link TypeParamRef}).
      */
     public static List<TypeParamRef> parseFormalTypeParameters(String signature) {
         if (signature == null || signature.isEmpty() || signature.charAt(0) != '<') {
             return List.of();
         }
-        List<TypeParamRef> collected = new ArrayList<>();
-        SignatureVisitor sv = new SignatureVisitor(ASM_API) {
-            @Override
-            public void visitFormalTypeParameter(String name) {
-                if (name != null && !name.isEmpty()) {
-                    collected.add(TypeParamRef.of(Interner.intern(name)));
-                }
-            }
-        };
-        new SignatureReader(signature).accept(sv);
-        return collected.isEmpty() ? List.of() : List.copyOf(collected);
+        FormalTypeParameterCollector collector = new FormalTypeParameterCollector();
+        new SignatureReader(signature).accept(collector);
+        return collector.result();
     }
 
     public static TypeRef parseType(String signature) {
@@ -126,27 +122,37 @@ public final class SignatureRefs {
     }
 
     private static final class MethodCollector {
-        private final List<TypeParamRef> typeParams = new ArrayList<>();
         private final List<TypeRef> paramTypes = new ArrayList<>();
         private final List<TypeRef> throwsTypes = new ArrayList<>();
         private TypeRef returnType;
+        private final FormalTypeParameterCollector typeParamCollector = new FormalTypeParameterCollector();
 
         SignatureVisitor visitor() {
             return new SignatureVisitor(ASM_API) {
                 @Override
                 public void visitFormalTypeParameter(String name) {
-                    if (name != null && !name.isEmpty()) {
-                        typeParams.add(TypeParamRef.of(Interner.intern(name)));
-                    }
+                    typeParamCollector.visitFormalTypeParameter(name);
+                }
+
+                @Override
+                public SignatureVisitor visitClassBound() {
+                    return typeParamCollector.visitClassBound();
+                }
+
+                @Override
+                public SignatureVisitor visitInterfaceBound() {
+                    return typeParamCollector.visitInterfaceBound();
                 }
 
                 @Override
                 public SignatureVisitor visitParameterType() {
+                    typeParamCollector.flush();
                     return new ClassTypeFrame(paramTypes::add);
                 }
 
                 @Override
                 public SignatureVisitor visitReturnType() {
+                    typeParamCollector.flush();
                     return new ClassTypeFrame(ref -> returnType = ref);
                 }
 
@@ -158,7 +164,87 @@ public final class SignatureRefs {
         }
 
         MethodRefs result() {
-            return new MethodRefs(typeParams, paramTypes, returnType, throwsTypes);
+            return new MethodRefs(typeParamCollector.result(), paramTypes, returnType, throwsTypes);
+        }
+    }
+
+    /**
+     * Streams formal type parameters into a list of {@link TypeParamRef}s,
+     * collecting class and interface bounds emitted between
+     * {@link SignatureVisitor#visitFormalTypeParameter} calls.
+     *
+     * <p>Must be {@link #flush()}ed once after the last formal parameter
+     * (typically right before a {@code visitSuperclass} /
+     * {@code visitParameterType} / {@code visitReturnType} transition)
+     * so the trailing parameter is materialised.
+     */
+    private static final class FormalTypeParameterCollector extends SignatureVisitor {
+        private final List<TypeParamRef> collected = new ArrayList<>();
+        private String currentName;
+        private List<TypeRef> currentBounds;
+
+        FormalTypeParameterCollector() {
+            super(ASM_API);
+        }
+
+        @Override
+        public void visitFormalTypeParameter(String name) {
+            flush();
+            if (name != null && !name.isEmpty()) {
+                currentName = Interner.intern(name);
+                currentBounds = new ArrayList<>();
+            }
+        }
+
+        @Override
+        public SignatureVisitor visitClassBound() {
+            return new ClassTypeFrame(ref -> {
+                if (currentBounds != null) currentBounds.add(ref);
+            });
+        }
+
+        @Override
+        public SignatureVisitor visitInterfaceBound() {
+            return new ClassTypeFrame(ref -> {
+                if (currentBounds != null) currentBounds.add(ref);
+            });
+        }
+
+        @Override
+        public SignatureVisitor visitSuperclass() {
+            flush();
+            return new ClassTypeFrame(ref -> { });
+        }
+
+        @Override
+        public SignatureVisitor visitInterface() {
+            flush();
+            return new ClassTypeFrame(ref -> { });
+        }
+
+        @Override
+        public SignatureVisitor visitParameterType() {
+            flush();
+            return new ClassTypeFrame(ref -> { });
+        }
+
+        @Override
+        public SignatureVisitor visitReturnType() {
+            flush();
+            return new ClassTypeFrame(ref -> { });
+        }
+
+        void flush() {
+            if (currentName != null) {
+                collected.add(new TypeParamRef(currentName, currentBounds));
+                currentName = null;
+                currentBounds = null;
+            }
+        }
+
+        List<TypeParamRef> result() {
+            flush();
+            return collected.isEmpty() ? List.of() : List.copyOf(collected);
         }
     }
 

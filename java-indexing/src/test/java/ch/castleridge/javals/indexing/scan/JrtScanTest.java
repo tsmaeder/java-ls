@@ -7,11 +7,11 @@ import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.MethodEntry;
+import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -102,6 +102,42 @@ class JrtScanTest {
         });
         assertTrue(hasParameterizedCompletionStage,
                 "CompletableFuture should implement CompletionStage<" + typeParam + ">");
+    }
+
+    @Test
+    void scanCapturesJavaBaseModuleEntry() {
+        Index index = new Index();
+        Scanner scanner = new Scanner();
+        List<Throwable> failures = scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
+        assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);
+
+        ModuleEntry javaBase = index.getModule("java.base");
+        assertNotNull(javaBase, "java.base ModuleEntry should be in the index");
+        assertEquals("java.base", javaBase.name());
+
+        // java.base exports java.lang to everyone unconditionally.
+        assertTrue(javaBase.exports().stream().anyMatch(e ->
+                        e.packageJvm().equals("java/lang") && e.toModules().isEmpty()),
+                () -> "java.base should unconditionally export java/lang; got: " + javaBase.exports());
+
+        // java.base never `requires` anything else - it's the root.
+        assertTrue(javaBase.requires().isEmpty(),
+                () -> "java.base should have no requires; got: " + javaBase.requires());
+    }
+
+    @Test
+    void scanCapturesNonRootModuleRequires() {
+        Index index = new Index();
+        Scanner scanner = new Scanner();
+        List<Throwable> failures = scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
+        assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);
+
+        ModuleEntry sql = index.getModule("java.sql");
+        assertNotNull(sql, "java.sql ModuleEntry should be in the index");
+        assertTrue(sql.requires().stream().anyMatch(r -> r.moduleName().equals("java.base")),
+                () -> "java.sql should require java.base; got: " + sql.requires());
+        assertTrue(sql.exports().stream().anyMatch(e -> e.packageJvm().equals("java/sql")),
+                () -> "java.sql should export java/sql; got: " + sql.exports());
     }
 
     @Test

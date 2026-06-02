@@ -4,6 +4,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**
@@ -36,6 +37,10 @@ public final class Index {
 
     private final ConcurrentMap<String, Object> byJvmName = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Object> byPackage = new ConcurrentHashMap<>();
+    // Modules are addressed by module name, not by JVM binary name, and
+    // duplicates across classpath sources are resolved by classpath
+    // ordering at lookup time (mirroring the TypeEntry bucket strategy).
+    private final ConcurrentMap<String, Object> byModuleName = new ConcurrentHashMap<>();
 
     public void add(TypeEntry entry) {
         if (entry == null) return;
@@ -153,6 +158,72 @@ public final class Index {
     }
 
     /**
+     * Add a {@link ModuleEntry} keyed by its module name. Multiple
+     * entries for the same name (jrt + classpath jar with module-info,
+     * shadowing module-path) are kept and disambiguated by classpath
+     * order at lookup time, identical to the {@link TypeEntry} bucket
+     * strategy.
+     */
+    public void addModule(ModuleEntry module) {
+        if (module == null) return;
+        byModuleName.compute(module.name(), (k, prior) -> appendModuleBucket(prior, module));
+    }
+
+    private static Object appendModuleBucket(Object prior, ModuleEntry entry) {
+        if (prior == null) return entry;
+        if (prior instanceof ModuleEntry only) {
+            return new ModuleEntry[]{only, entry};
+        }
+        ModuleEntry[] arr = (ModuleEntry[]) prior;
+        ModuleEntry[] grown = new ModuleEntry[arr.length + 1];
+        System.arraycopy(arr, 0, grown, 0, arr.length);
+        grown[arr.length] = entry;
+        return grown;
+    }
+
+    /**
+     * Return every {@link ModuleEntry} indexed under {@code moduleName}.
+     * Order is observation-order; consumers impose deterministic
+     * picking via {@link ModuleEntry#sourceUri()}.
+     */
+    public List<ModuleEntry> getAllModules(String moduleName) {
+        return toModuleList(byModuleName.get(moduleName));
+    }
+
+    /** Convenience: pick an arbitrary {@link ModuleEntry} for the name, or null. */
+    public ModuleEntry getModule(String moduleName) {
+        Object bucket = byModuleName.get(moduleName);
+        if (bucket == null) return null;
+        if (bucket instanceof ModuleEntry only) return only;
+        ModuleEntry[] arr = (ModuleEntry[]) bucket;
+        return arr.length == 0 ? null : arr[0];
+    }
+
+    /** Every {@link ModuleEntry} currently stored, including duplicates. */
+    public Collection<ModuleEntry> allModules() {
+        List<ModuleEntry> out = new ArrayList<>();
+        for (Object bucket : byModuleName.values()) {
+            if (bucket instanceof ModuleEntry only) out.add(only);
+            else if (bucket != null) {
+                for (ModuleEntry m : (ModuleEntry[]) bucket) out.add(m);
+            }
+        }
+        return Collections.unmodifiableCollection(out);
+    }
+
+    /** Distinct number of module names indexed (ignoring duplicates). */
+    public int moduleCount() {
+        return byModuleName.size();
+    }
+
+    private static List<ModuleEntry> toModuleList(Object bucket) {
+        if (bucket == null) return List.of();
+        if (bucket instanceof ModuleEntry only) return List.of(only);
+        ModuleEntry[] arr = (ModuleEntry[]) bucket;
+        return arr.length == 0 ? List.of() : List.of(arr);
+    }
+
+    /**
      * Returns true for simple names that should never be indexed:
      * {@code module-info} and {@code package-info}. Accepts either a plain
      * simple name or a full JVM binary name (slashes allowed).
@@ -167,13 +238,26 @@ public final class Index {
 
     /**
      * Returns true for file names (e.g. {@code Foo.java}, {@code Bar.class})
-     * that map onto skipped declarations.
+     * that walkers should silently drop entirely. {@code module-info}
+     * files are <em>not</em> in this list: the bytecode indexer routes
+     * them through a separate {@link ModuleEntry} path and they must
+     * therefore reach it via the normal walker pipeline.
      */
     public static boolean isSkippedFileName(String fileName) {
         if (fileName == null) return true;
-        return fileName.equals("module-info.java")
-                || fileName.equals("module-info.class")
-                || fileName.equals("package-info.java")
+        return fileName.equals("package-info.java")
                 || fileName.equals("package-info.class");
+    }
+
+    /**
+     * Returns true if {@code fileName} is a JVMS module descriptor file
+     * (source or compiled). Walkers still pass these files through to
+     * the indexer; the indexer routes them to {@link #addModule} rather
+     * than treating them as a {@link TypeEntry}.
+     */
+    public static boolean isModuleInfoFileName(String fileName) {
+        if (fileName == null) return false;
+        return fileName.equals("module-info.java")
+                || fileName.equals("module-info.class");
     }
 }

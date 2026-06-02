@@ -49,6 +49,7 @@ import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
+import ch.castleridge.javals.indexing.model.ParameterEntry;
 import ch.castleridge.javals.indexing.model.SourceResolutionHints;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -157,11 +158,15 @@ public final class SourceIndexer {
         localName = Interner.intern(localName);
 
         Set<String> classTypeParams = new HashSet<>(outerTypeParams);
+        // Two-phase: enter the names first so bounds that reference
+        // sibling type parameters (F-bounded generics like
+        // <T extends Comparable<T>>) resolve.
+        for (TypeParameterTree tp : ct.getTypeParameters()) {
+            classTypeParams.add(tp.getName().toString());
+        }
         List<TypeParamRef> declaredTypeParams = new ArrayList<>();
         for (TypeParameterTree tp : ct.getTypeParameters()) {
-            String tpName = tp.getName().toString();
-            classTypeParams.add(tpName);
-            declaredTypeParams.add(TypeParamRef.of(Interner.intern(tpName)));
+            declaredTypeParams.add(toTypeParamRef(tp, classTypeParams, localName));
         }
 
         TypeDeclKind declKind = declKind(ct);
@@ -177,6 +182,14 @@ public final class SourceIndexer {
         List<TypeRef> interfaceRefs = new ArrayList<>();
         for (Tree intf : ct.getImplementsClause()) {
             interfaceRefs.add(toTypeRef(intf, classTypeParams, localName));
+        }
+
+        List<TypeRef> permittedSubclasses = new ArrayList<>();
+        List<? extends Tree> permits = ct.getPermitsClause();
+        if (permits != null) {
+            for (Tree p : permits) {
+                permittedSubclasses.add(toTypeRef(p, classTypeParams, localName));
+            }
         }
 
         List<FieldEntry> fields = new ArrayList<>();
@@ -208,6 +221,8 @@ public final class SourceIndexer {
                 fields,
                 methods,
                 innerTypes,
+                permittedSubclasses,
+                List.of(),
                 annotationsOf(ct.getModifiers()),
                 hints);
         into.add(entry);
@@ -224,13 +239,51 @@ public final class SourceIndexer {
 
     private static FieldEntry toFieldEntry(String uri, String owner, VariableTree vt,
                                            Set<String> typeParams, String ownerJvm) {
+        int flags = modifierFlags(vt.getModifiers());
+        Object constantValue = null;
+        if ((flags & (Opcodes.ACC_STATIC | Opcodes.ACC_FINAL)) == (Opcodes.ACC_STATIC | Opcodes.ACC_FINAL)) {
+            constantValue = literalConstantValue(vt.getInitializer());
+        }
         return new FieldEntry(
                 uri,
                 owner,
-                modifierFlags(vt.getModifiers()),
+                flags,
                 Interner.intern(vt.getName().toString()),
                 toTypeRef(vt.getType(), typeParams, ownerJvm),
+                constantValue,
                 annotationsOf(vt.getModifiers()));
+    }
+
+    /**
+     * Best-effort literal-initializer extraction for {@code static final}
+     * fields. Only direct literal expressions (and unary +/- over a
+     * numeric literal) qualify - anything more elaborate would require a
+     * symbol table the source indexer doesn't have. Returning {@code null}
+     * simply means "no compile-time constant known" downstream.
+     */
+    private static Object literalConstantValue(ExpressionTree initializer) {
+        if (initializer instanceof LiteralTree lit) {
+            Object v = lit.getValue();
+            if (v == null) return null;
+            // javac stores boolean/char constants as Integer (0/1 and the
+            // unboxed code unit) in VarSymbol; mirror that convention here
+            // so IndexClassReader can hand it to setData() unchanged.
+            if (v instanceof Boolean b) return b ? 1 : 0;
+            if (v instanceof Character c) return (int) c.charValue();
+            if (v instanceof Byte b) return b.intValue();
+            if (v instanceof Short s) return s.intValue();
+            return v;
+        }
+        if (initializer instanceof UnaryTree unary
+                && unary.getExpression() instanceof LiteralTree lit
+                && lit.getValue() instanceof Number n) {
+            return switch (unary.getKind()) {
+                case UNARY_MINUS -> negateNumber(n);
+                case UNARY_PLUS -> n;
+                default -> null;
+            };
+        }
+        return null;
     }
 
     private static MethodEntry toMethodEntry(String uri, String owner, MethodTree mt,
@@ -240,9 +293,13 @@ public final class SourceIndexer {
             methodTypeParams.add(tp.getName().toString());
         }
 
-        List<TypeRef> paramRefs = new ArrayList<>();
+        List<ParameterEntry> paramEntries = new ArrayList<>();
         for (VariableTree p : mt.getParameters()) {
-            paramRefs.add(toTypeRef(p.getType(), methodTypeParams, ownerJvm));
+            paramEntries.add(new ParameterEntry(
+                    Interner.intern(p.getName().toString()),
+                    modifierFlags(p.getModifiers()),
+                    toTypeRef(p.getType(), methodTypeParams, ownerJvm),
+                    annotationsOf(p.getModifiers())));
         }
 
         TypeRef returnRef = mt.getReturnType() == null
@@ -256,7 +313,7 @@ public final class SourceIndexer {
 
         List<TypeParamRef> declaredMethodTypeParams = new ArrayList<>();
         for (TypeParameterTree tp : mt.getTypeParameters()) {
-            declaredMethodTypeParams.add(TypeParamRef.of(Interner.intern(tp.getName().toString())));
+            declaredMethodTypeParams.add(toTypeParamRef(tp, methodTypeParams, ownerJvm));
         }
 
         String name = Interner.intern(mt.getName().toString());
@@ -270,7 +327,7 @@ public final class SourceIndexer {
                 modifierFlags(mt.getModifiers()),
                 name,
                 returnRef,
-                paramRefs,
+                paramEntries,
                 throwsRefs,
                 declaredMethodTypeParams,
                 isVarArgs(mt),
@@ -279,8 +336,32 @@ public final class SourceIndexer {
                 annotationsOf(mt.getModifiers()));
     }
 
+    private static TypeParamRef toTypeParamRef(TypeParameterTree tp,
+                                               Set<String> visibleTypeParams,
+                                               String ownerJvm) {
+        String name = Interner.intern(tp.getName().toString());
+        List<? extends Tree> boundTrees = tp.getBounds();
+        if (boundTrees == null || boundTrees.isEmpty()) {
+            return TypeParamRef.of(name);
+        }
+        List<TypeRef> bounds = new ArrayList<>(boundTrees.size());
+        for (Tree b : boundTrees) {
+            bounds.add(toTypeRef(b, visibleTypeParams, ownerJvm));
+        }
+        return new TypeParamRef(name, bounds);
+    }
+
     private static TypeRef toTypeRef(Tree t, Set<String> typeParams, String ownerJvm) {
         if (t == null) return TypeRef.Primitive.VOID;
+        if (t instanceof com.sun.source.tree.AnnotatedTypeTree annotated) {
+            TypeRef inner = toTypeRef(annotated.getUnderlyingType(), typeParams, ownerJvm);
+            List<AnnotationRef> typeUseAnnotations = new ArrayList<>();
+            for (AnnotationTree a : annotated.getAnnotations()) {
+                AnnotationRef ref = toAnnotationRef(a);
+                if (ref != null) typeUseAnnotations.add(ref);
+            }
+            return TypeRef.Annotated.wrap(inner, typeUseAnnotations);
+        }
         if (t instanceof PrimitiveTypeTree pt) {
             return switch (pt.getPrimitiveTypeKind()) {
                 case BOOLEAN -> TypeRef.Primitive.BOOLEAN;
