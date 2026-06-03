@@ -658,6 +658,54 @@ class IndexCompileTest {
     }
 
     @Test
+    void mapEntryTypeArgumentsCompileCleanlyWithJrtIndex() throws Exception {
+        // Regression: indexed nested static members (java.util.Map.Entry)
+        // must not be treated as non-static/raw-outers by Attr.
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        ClasspathOrder cp = classPathOf(List.of(jrtUri));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("test:///MapEntryUse.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        import java.lang.Object;
+
+                        class MapEntryUse {
+                            static void fromJson(Iterable<java.util.Map.Entry<String, Object>> json) {}
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) {
+                errors.add(d);
+            }
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "Map.Entry<String,Object> should compile cleanly with indexed JRT classes; got: " + errors);
+    }
+
+    @Test
     void annotationsOnIndexedJdkTypesAreRecognised() throws Exception {
         // Regression: when java.lang.SuppressWarnings was loaded via the
         // index reader its ClassSymbol kept the default notAnAnnotationType()

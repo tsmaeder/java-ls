@@ -65,4 +65,62 @@ class ClassFileIndexerVarargsTest {
                     });
         }
     }
+
+    @Test
+    void nestedStaticTypeRetainsAccStaticFromInnerClasses() throws Exception {
+        Path outDir = Files.createTempDirectory("inner-static-index");
+        try {
+            JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+            StandardJavaFileManager fm = compiler.getStandardFileManager(null, Locale.getDefault(), java.nio.charset.StandardCharsets.UTF_8);
+            fm.setLocation(StandardLocation.CLASS_OUTPUT, List.of(outDir.toFile()));
+            JavaFileObject src = new SimpleJavaFileObject(
+                    URI.create("mem:///Outer.java"), JavaFileObject.Kind.SOURCE) {
+                @Override
+                public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                    return """
+                            class Outer {
+                                static class StaticNested {}
+                                class Inner {}
+                            }
+                            """;
+                }
+            };
+            assertTrue(compiler.getTask(null, fm, d -> {}, List.of(), List.of(), List.of(src)).call());
+
+            Index index = new Index();
+            ClassFileIndexer.index(
+                    URI.create("index:///Outer.class"),
+                    URI.create("index:///cp/"),
+                    Files.readAllBytes(outDir.resolve("Outer.class")),
+                    index);
+            ClassFileIndexer.index(
+                    URI.create("index:///Outer$StaticNested.class"),
+                    URI.create("index:///cp/"),
+                    Files.readAllBytes(outDir.resolve("Outer$StaticNested.class")),
+                    index);
+            ClassFileIndexer.index(
+                    URI.create("index:///Outer$Inner.class"),
+                    URI.create("index:///cp/"),
+                    Files.readAllBytes(outDir.resolve("Outer$Inner.class")),
+                    index);
+
+            TypeEntry staticNested = index.get("Outer$StaticNested");
+            TypeEntry inner = index.get("Outer$Inner");
+            assertNotNull(staticNested);
+            assertNotNull(inner);
+            assertTrue((staticNested.modifiers() & Opcodes.ACC_STATIC) != 0,
+                    "static nested class must retain ACC_STATIC from InnerClasses");
+            assertTrue((inner.modifiers() & Opcodes.ACC_STATIC) == 0,
+                    "non-static inner class must not be marked static");
+        } finally {
+            Files.walk(outDir)
+                    .sorted(java.util.Comparator.reverseOrder())
+                    .forEach(p -> {
+                        try {
+                            Files.deleteIfExists(p);
+                        } catch (Exception ignored) {
+                        }
+                    });
+        }
+    }
 }

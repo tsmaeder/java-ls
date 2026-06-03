@@ -129,6 +129,7 @@ public final class IndexClassReader extends ClassReader {
         registerInnerTypes(c, entry, module);
 
         ClassType ct = (ClassType) c.type;
+        normalizeEnclosingType(c, entry, ct);
         List<Type> classTypeParams = synthesizeTypeParams(c, entry);
         ct.typarams_field = classTypeParams;
         TypeRefResolver.ResolutionContext classCtx =
@@ -348,6 +349,17 @@ public final class IndexClassReader extends ClassReader {
                 if (inner.erasure_field != null) {
                     ((ClassType) inner.erasure_field).setEnclosingType(types.erasure(outer.type));
                 }
+            } else {
+                // javac's Symtab.defineClass initialises outer_field to owner.type for
+                // every nested type. For static members it must be Type.noType; leaving
+                // it as the raw owner causes Attr to reject parameterised uses like
+                // Map.Entry<K,V> with "improperly formed type, type arguments given on
+                // a raw type".
+                ClassType innerCt = (ClassType) inner.type;
+                innerCt.setEnclosingType(Type.noType);
+                if (inner.erasure_field != null) {
+                    ((ClassType) inner.erasure_field).setEnclosingType(Type.noType);
+                }
             }
 
             if ((flags & (Flags.SYNTHETIC | Flags.BRIDGE)) != Flags.SYNTHETIC
@@ -359,9 +371,37 @@ public final class IndexClassReader extends ClassReader {
 
     private static boolean isImplicitlyStaticNested(TypeEntry inner) {
         TypeDeclKind kind = inner.declKind();
-        return kind == TypeDeclKind.INTERFACE
+        if (kind == TypeDeclKind.INTERFACE
                 || kind == TypeDeclKind.ENUM
-                || kind == TypeDeclKind.ANNOTATION;
+                || kind == TypeDeclKind.ANNOTATION) {
+            return true;
+        }
+        // Bytecode-derived entries keep declKind UNKNOWN; infer the same
+        // implicit-static semantics from access flags.
+        long mods = Integer.toUnsignedLong(inner.modifiers());
+        return (mods & (Flags.INTERFACE | Flags.ENUM | Flags.ANNOTATION)) != 0;
+    }
+
+    /**
+     * Ensure a completed indexed class symbol has a stable enclosing type:
+     * static members must use {@link Type#noType}; non-static members keep
+     * the owning class as enclosing type. This mirrors the invariants javac's
+     * ClassReader establishes from real bytecode.
+     */
+    private void normalizeEnclosingType(ClassSymbol c, TypeEntry entry, ClassType ct) {
+        if (!(c.owner instanceof ClassSymbol ownerClass)) return;
+        boolean staticMember = (c.flags_field & STATIC) != 0 || isImplicitlyStaticNested(entry);
+        if (staticMember) {
+            ct.setEnclosingType(Type.noType);
+            if (c.erasure_field instanceof ClassType erasureCt) {
+                erasureCt.setEnclosingType(Type.noType);
+            }
+            return;
+        }
+        ct.setEnclosingType(ownerClass.type);
+        if (c.erasure_field instanceof ClassType erasureCt) {
+            erasureCt.setEnclosingType(types.erasure(ownerClass.type));
+        }
     }
 
     /**

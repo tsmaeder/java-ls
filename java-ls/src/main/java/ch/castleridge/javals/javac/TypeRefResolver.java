@@ -1,6 +1,7 @@
 package ch.castleridge.javals.javac;
 
 import com.sun.tools.javac.code.BoundKind;
+import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.ModuleSymbol;
 import com.sun.tools.javac.code.Symtab;
@@ -128,7 +129,16 @@ final class TypeRefResolver {
             args.add(resolve(arg, module, ctx));
         }
         if (raw instanceof ClassType ct) {
-            return new ClassType(ct.getEnclosingType(), args.toList(), ct.tsym);
+            // Static nested types must not carry the raw outer type: propagating it
+            // causes Attr to reject uses like Map.Entry<K,V> with "improperly formed
+            // type, type arguments given on a raw type". Top-level types already have
+            // outer_field == Type.noType, so this is only a correction for static
+            // members whose outer_field was initialised to the raw owner by
+            // Symtab.defineClass.
+            Type outer = (ct.tsym.flags_field & Flags.STATIC) != 0
+                    ? Type.noType
+                    : ct.getEnclosingType();
+            return new ClassType(outer, args.toList(), ct.tsym);
         }
         return raw;
     }

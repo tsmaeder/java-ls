@@ -50,6 +50,20 @@ import ch.castleridge.javals.indexing.model.TypeRef;
 public final class ClassFileIndexer {
 
     private static final int ASM_API = Opcodes.ASM9;
+    // Bits carried by InnerClasses entries that materially affect
+    // nested-member symbol shape (including ACC_STATIC for member
+    // interfaces/classes like java.util.Map$Entry).
+    private static final int INNER_CLASS_ACCESS_MASK =
+            Opcodes.ACC_PUBLIC
+                    | Opcodes.ACC_PRIVATE
+                    | Opcodes.ACC_PROTECTED
+                    | Opcodes.ACC_STATIC
+                    | Opcodes.ACC_FINAL
+                    | Opcodes.ACC_INTERFACE
+                    | Opcodes.ACC_ABSTRACT
+                    | Opcodes.ACC_SYNTHETIC
+                    | Opcodes.ACC_ANNOTATION
+                    | Opcodes.ACC_ENUM;
     // ClassReader.SKIP_DEBUG would discard the SourceFile, LVT *and*
     // MethodParameters attributes; we want MethodParameters to flow
     // through so MethodEntry can carry parameter names. Method bodies
@@ -351,6 +365,14 @@ public final class ClassFileIndexer {
 
         @Override
         public void visitInnerClass(String name, String outerName, String innerName, int access) {
+            // For nested/member types, the InnerClasses attribute is the
+            // source of truth for ACC_STATIC (and related nested metadata).
+            // Merge the self-entry bits into this class's access flags so
+            // downstream symbol synthesis can correctly distinguish static
+            // members from non-static inners.
+            if (name != null && name.equals(jvmName)) {
+                this.access |= (access & INNER_CLASS_ACCESS_MASK);
+            }
             if (outerName != null && outerName.equals(jvmName)) {
                 innerTypes.add(Interner.intern(name));
             }
