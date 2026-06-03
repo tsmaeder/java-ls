@@ -106,7 +106,7 @@ public final class Index {
             List<TypeEntry> entries = new ArrayList<>();
             for (Map.Entry<String, Object> entry : byPackage.entrySet()) {
                 String packageName = entry.getKey();
-                if (packageJvm.startsWith(packageName)) {
+                if (packageName.startsWith(packageJvm)) {
                     addBucketTo(entry.getValue(), entries);
                 }
             }

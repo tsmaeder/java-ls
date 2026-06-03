@@ -221,8 +221,15 @@ public class JavaTextDocumentService implements TextDocumentService {
 
         WorkspaceCompiler.Result compiled = compileCache.get(uri).result();
 
+        if (compiled == null) {
+            return List.of();
+        }
+
         CompilationUnitTree cu = compiled.cu();
-        if (cu == null) return List.of();
+        if (cu == null) {
+            refreshCompile(uri); // might not be ready yet
+            return List.of();
+        }
 
         long offset = positionToOffset(cu.getLineMap(), position);
         if (offset < 0) return List.of();
