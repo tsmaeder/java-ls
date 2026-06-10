@@ -22,6 +22,7 @@ import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ArrayType;
 import com.sun.tools.javac.code.TypeTag;
 import com.sun.tools.javac.code.Type.ClassType;
+import com.sun.tools.javac.code.Type.ForAll;
 import com.sun.tools.javac.code.Type.MethodType;
 import com.sun.tools.javac.code.Type.TypeVar;
 import com.sun.tools.javac.code.Type.WildcardType;
@@ -116,6 +117,9 @@ public final class IndexClassReader2 extends ClassReader {
     }
 
     private void readFromIndex(ClassSymbol c, TypeEntry entry) {
+        currentOwner = c;
+        currentModule = c.packge() == null ? syms.unnamedModule : c.packge().modle;
+        if (currentModule == null) currentModule = syms.unnamedModule;
         ClassType ct = (ClassType)c.type;
 
         // allocate scope for members
@@ -126,12 +130,13 @@ public final class IndexClassReader2 extends ClassReader {
         if (ct.getEnclosingType().hasTag(TypeTag.CLASS))
             enterTypevars(c.owner, ct.getEnclosingType());
 
+        List<Type> classTypeParams = enterTypeParams(entry.typeParams(), c, currentModule, entry);
+        ct.typarams_field = classTypeParams;
+
         // read flags, or skip if this is an inner class
         long flags = IndexAccessFlags.classFlags(entry);
         if ((flags & MODULE) == 0) {
             if (c.owner.kind == Kinds.Kind.PCK || c.owner.kind == Kinds.Kind.ERR) c.flags_field = flags;
-            // read own class name and check that it matches
-            currentModule = c.packge().modle;
         } else {
            throw new UnsupportedOperationException("module info not supported");
         }
@@ -213,11 +218,15 @@ public final class IndexClassReader2 extends ClassReader {
 
     private MethodSymbol readMethod(MethodEntry method, TypeEntry entry) {
         try {
-            typevars=typevars.dup();
+            typevars = typevars.dup();
+            List<Type> methodTypeParams = enterTypeParams(method.typeParams(), currentOwner, currentModule, entry);
             long flags = IndexAccessFlags.methodFlags(entry, method);
             Name name = names.fromString(method.name());
             MethodType methodType = resolveMethodType(method, currentModule, entry);
-            MethodSymbol m = new MethodSymbol(flags, name, methodType, currentOwner);
+            Type sig = methodTypeParams.isEmpty()
+                    ? methodType
+                    : new ForAll(methodTypeParams, methodType);
+            MethodSymbol m = new MethodSymbol(flags, name, sig, currentOwner);
             m.setDeclarationAttributes(annotations.toCompounds(method.annotations(), currentModule, entry));
             return m;
         } finally {
@@ -311,18 +320,59 @@ public final class IndexClassReader2 extends ClassReader {
         };
     }
 
-    private Type lookupTypeVar(String name, IndexClassReader.ResolutionContext ctx) {
-        for (Type t : ctx.methodTypeParams()) {
-            if (t instanceof TypeVar tv && tv.tsym.name.contentEquals(name)) {
-                return t;
-            }
+    /**
+     * Build javac {@link TypeVar}s for each formal type parameter,
+     * enter them into the {@code typevars} scope, and resolve their
+     * declared bounds. Two internal passes are required so forward
+     * references (e.g. {@code <T extends Comparable<U>, U>}) resolve
+     * through {@link #lookupTypeVar(String)}.
+     */
+    private List<Type> enterTypeParams(java.util.List<TypeParamRef> refs,
+                                       Symbol owner,
+                                       ModuleSymbol module,
+                                       TypeEntry entry) {
+        if (refs.isEmpty()) return List.nil();
+        ListBuffer<Type> out = new ListBuffer<>();
+        for (TypeParamRef tp : refs) {
+            TypeVar tv = newTypeVar(tp.name(), owner);
+            typevars.enter(tv.tsym);
+            out.add(tv);
         }
-        for (Type t : ctx.classTypeParams()) {
-            if (t instanceof TypeVar tv && tv.tsym.name.contentEquals(name)) {
-                return t;
+        List<Type> formals = out.toList();
+        int idx = 0;
+        for (Type formal : formals) {
+            TypeParamRef ref = refs.get(idx++);
+            if (!(formal instanceof TypeVar tv)) continue;
+            if (ref.bounds().isEmpty()) continue;
+
+            ListBuffer<Type> resolved = new ListBuffer<>();
+            boolean allInterfaces = true;
+            for (ch.castleridge.javals.indexing.model.Type b : ref.bounds()) {
+                Type bound = resolveType(b, module, entry);
+                if (bound == null || bound.isErroneous()) {
+                    allInterfaces = false;
+                    continue;
+                }
+                resolved.add(bound);
+                if (!bound.isInterface()) {
+                    allInterfaces = false;
+                }
             }
+            List<Type> boundsList = resolved.toList();
+            if (boundsList.isEmpty()) continue;
+            if (boundsList.size() == 1 && boundsList.head.tsym == syms.objectType.tsym) {
+                continue;
+            }
+            types.setBounds(tv, boundsList, allInterfaces);
         }
-        return syms.objectType;
+        return formals;
+    }
+
+    private TypeVar newTypeVar(String name, Symbol owner) {
+        TypeVar tv = new TypeVar(names.fromString(name), owner, syms.botType);
+        tv.setUpperBound(syms.objectType);
+        ((TypeVariableSymbol) tv.tsym).type = tv;
+        return tv;
     }
 
     private Type primitive(Primitive p) {

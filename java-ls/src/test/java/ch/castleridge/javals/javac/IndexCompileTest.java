@@ -37,6 +37,7 @@ import ch.castleridge.javals.indexing.bytecode.ClassFileIndexer;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
+import ch.castleridge.javals.indexing.model.ParameterEntry;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -382,6 +383,80 @@ class IndexCompileTest {
         assertTrue(errors.isEmpty(),
                 () -> "Box<...> should be accepted because Box has one formal "
                         + "type parameter; got errors: " + errors);
+    }
+
+    @Test
+    void indexClassReader2ResolvesClassAndMethodTypeVariables() throws Exception {
+        Index index = new Index();
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/String", "<init>"));
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Number", "<init>"));
+        index.add(new TypeEntry(
+                "index:///com/example/Box.class",
+                SOURCE_URI,
+                "com/example/Box",
+                0x0001 /* ACC_PUBLIC */,
+                new TypeRef.Resolved("java/lang/Object"),
+                List.of(),
+                List.of(TypeParamRef.of("T")),
+                List.of(new FieldEntry(
+                        "index:///com/example/Box.class#value",
+                        "com/example/Box",
+                        0x0001,
+                        "value",
+                        Type.typeVariable("T"),
+                        null,
+                        List.of())),
+                List.of(new MethodEntry(
+                        "index:///com/example/Box.class#get",
+                        "com/example/Box",
+                        0x0009 /* ACC_PUBLIC | ACC_STATIC */,
+                        "get",
+                        Type.typeVariable("R"),
+                        List.of(new ParameterEntry("x", 0, Type.typeVariable("R"), List.of())),
+                        List.of(),
+                        List.of(TypeParamRef.of("R")),
+                        false,
+                        false,
+                        null,
+                        List.of())),
+                List.of(),
+                List.of(),
+                null));
+
+        ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
+
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader2.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("test:///UseGenerics2.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        import com.example.Box;
+                        public class UseGenerics2 {
+                            Box<String> stringBox;
+                            String s = Box.<String>get(null);
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "IndexClassReader2 should resolve class and method type variables; got: " + errors);
     }
 
     @Test
