@@ -16,12 +16,15 @@ import com.sun.tools.javac.code.Symbol.ModuleSymbol;
 import com.sun.tools.javac.code.Symbol.TypeVariableSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Symbol.RecordComponent;
+import com.sun.tools.javac.code.BoundKind;
 import com.sun.tools.javac.code.Symtab;
 import com.sun.tools.javac.code.Type;
+import com.sun.tools.javac.code.Type.ArrayType;
 import com.sun.tools.javac.code.TypeTag;
 import com.sun.tools.javac.code.Type.ClassType;
 import com.sun.tools.javac.code.Type.MethodType;
 import com.sun.tools.javac.code.Type.TypeVar;
+import com.sun.tools.javac.code.Type.WildcardType;
 import com.sun.tools.javac.code.Types;
 import com.sun.tools.javac.comp.Annotate.AnnotationTypeMetadata;
 import com.sun.tools.javac.jvm.ClassReader;
@@ -29,6 +32,8 @@ import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.ListBuffer;
 import com.sun.tools.javac.util.Names;
+import com.sun.tools.javac.util.Name;
+import com.sun.tools.javac.code.Flags;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
@@ -40,6 +45,13 @@ import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeRef;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
+import ch.castleridge.javals.indexing.model.Type.Annotated;
+import ch.castleridge.javals.indexing.model.Type.Array;
+import ch.castleridge.javals.indexing.model.Type.Parameterized;
+import ch.castleridge.javals.indexing.model.Type.Primitive;
+import ch.castleridge.javals.indexing.model.Type.TypeVariable;
+import ch.castleridge.javals.indexing.model.Type.Wildcard;
+
 
 public final class IndexClassReader2 extends ClassReader {
 
@@ -131,13 +143,21 @@ public final class IndexClassReader2 extends ClassReader {
         }
 
         if (ct.supertype_field == null) {
-            Type superType = resolver.resolve(entry.superRef(), currentModule, entry);
-            ct.supertype_field = superType;
+            if (entry.superRef() instanceof TypeRef r) {
+                Type superType = resolver.resolve(r, currentModule, entry);
+                ct.supertype_field = superType;  
+            } else {
+                ct.supertype_field = syms.errType;
+            }
         }
         List<Type> is = List.nil();
-        for (TypeRef interfaceRef : entry.interfaceRefs()) {
-            Type interfaceType = resolver.resolve(interfaceRef, currentModule, entry);
-            is = is.prepend(interfaceType);
+        for (ch.castleridge.javals.indexing.model.Type interfaceRef : entry.interfaceRefs()) {
+            if (interfaceRef instanceof TypeRef r) {
+                Type interfaceType = resolver.resolve(r, currentModule, entry);
+                is = is.prepend(interfaceType);
+            } else {
+                is = is.prepend(syms.errType);
+            }
         }
         if (ct.interfaces_field == null)
             ct.interfaces_field = is.reverse();
@@ -146,7 +166,7 @@ public final class IndexClassReader2 extends ClassReader {
             enterMember(c, readField(field, entry));
         }
         for (MethodEntry method : entry.methods()) {
-            enterMember(c, readMethod(method));
+            enterMember(c, readMethod(method, entry));
         }
         if (c.isRecord()) {
             for (RecordComponent rc: c.getRecordComponents()) {
@@ -156,8 +176,166 @@ public final class IndexClassReader2 extends ClassReader {
         typevars = typevars.leave();
     }
 
+        private MethodSymbol lookupMethod(ClassSymbol c, Name name, List<Type> argtypes) {
+        for (Symbol s : c.members().getSymbolsByName(name, sym -> sym.kind == Kinds.Kind.MTH)) {
+            if (types.isSameTypes(s.type.getParameterTypes(), argtypes)) {
+                return (MethodSymbol) s;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Add member to class unless it is synthetic.
+     */
+    private void enterMember(ClassSymbol c, Symbol sym) {
+        // Synthetic members are not entered -- reason lost to history (optimization?).
+        // Lambda methods must be entered because they may have inner classes (which reference them)
+        if ((sym.flags_field & (Flags.SYNTHETIC|Flags.BRIDGE)) != Flags.SYNTHETIC || sym.name.startsWith(names.lambda))
+            c.members_field.enter(sym);
+    }
+
+    private VarSymbol readField(FieldEntry field, TypeEntry entry) {
+        long flags = IndexAccessFlags.fieldFlags(entry, field);
+        Name name = names.fromString(field.name());
+        Type type = resolveType(field.type(), currentModule, entry);
+        VarSymbol v = new VarSymbol(flags, name, type, currentOwner);
+        v.setDeclarationAttributes(annotations.toCompounds(field.annotations(), currentModule, entry));
+        if (field.constantValue() != null && (v.flags_field & Flags.FINAL) != 0) {
+            v.setData(field.constantValue());
+        }
+        return v;
+    }
+
     private void readClassAttrs(ClassSymbol c, TypeEntry entry) {
         c.setDeclarationAttributes(annotations.toCompounds(entry.annotations(), currentModule, entry));
     }
 
+    private MethodSymbol readMethod(MethodEntry method, TypeEntry entry) {
+        try {
+            typevars=typevars.dup();
+            long flags = IndexAccessFlags.methodFlags(entry, method);
+            Name name = names.fromString(method.name());
+            MethodType methodType = resolveMethodType(method, currentModule, entry);
+            MethodSymbol m = new MethodSymbol(flags, name, methodType, currentOwner);
+            m.setDeclarationAttributes(annotations.toCompounds(method.annotations(), currentModule, entry));
+            return m;
+        } finally {
+            typevars = typevars.leave();
+        }
+    }
+
+    private MethodType resolveMethodType(MethodEntry m, ModuleSymbol module, TypeEntry entry) {
+        ListBuffer<Type> params = new ListBuffer<>();
+        for (ch.castleridge.javals.indexing.model.Type pr : m.paramTypes()) {
+            params.add(resolveType(pr, module, entry));
+        }
+        ListBuffer<Type> thrown = new ListBuffer<>();
+        for (ch.castleridge.javals.indexing.model.Type tr : m.throwsTypes()) {
+            thrown.add(resolveType(tr, module, entry));
+        }
+        Type ret = resolveType(m.returnType(), module, entry);
+        return new MethodType(params.toList(), ret, thrown.toList(), syms.methodClass);
+    }
+
+
+ /**
+     * Resolve an indexed {@link ch.castleridge.javals.indexing.model.Type}
+     * tree into a javac {@link Type}. Structural shapes are handled here;
+     * the class-reference leaves ({@link TypeRef}) are delegated to
+     * {@link TypeRefResolver}.
+     */
+    private Type resolveType(ch.castleridge.javals.indexing.model.Type ref,
+                             ModuleSymbol module, TypeEntry entry) {
+        if (ref == null) return syms.errType;
+        if (ref instanceof Annotated annotated) {
+            Type inner = resolveType(annotated.inner(), module, entry);
+            List<Attribute.TypeCompound> compounds =
+                    annotations.toTypeCompounds(annotated.annotations(), module, entry);
+            if (compounds.isEmpty()) return inner;
+            return inner.annotatedType(compounds);
+        }
+        if (ref instanceof Primitive p) return primitive(p);
+        if (ref instanceof Array a) {
+            return new ArrayType(resolveType(a.element(), module, entry), syms.arrayClass);
+        }
+        if (ref instanceof TypeVariable tv) {
+            return lookupTypeVar(tv.name());
+        }
+        if (ref instanceof Wildcard w) {
+            return resolveWildcard(w, module, entry);
+        }
+        if (ref instanceof Parameterized p) {
+            return resolveParameterized(p, module, entry);
+        }
+        if (ref instanceof TypeRef tr) {
+            return resolver.resolve(tr, module, entry);
+        }
+        return syms.errType;
+    }
+
+    private Type lookupTypeVar(String name) {
+        Symbol sym = typevars.findFirst(names.fromString(name));
+        if (sym == null) return syms.objectType;
+        return sym.type;
+    }
+
+    private Type resolveParameterized(Parameterized p, ModuleSymbol module, TypeEntry entry) {
+        Type raw = resolver.resolve(p.raw(), module, entry);
+        ListBuffer<Type> args = new ListBuffer<>();
+        for (ch.castleridge.javals.indexing.model.Type arg : p.typeArgs()) {
+            args.add(resolveType(arg, module, entry));
+        }
+        if (raw instanceof ClassType ct) {
+            // Static nested types must not carry the raw outer type: propagating it
+            // causes Attr to reject uses like Map.Entry<K,V> with "improperly formed
+            // type, type arguments given on a raw type". Top-level types already have
+            // outer_field == Type.noType, so this is only a correction for static
+            // members whose outer_field was initialised to the raw owner by
+            // Symtab.defineClass.
+            Type outer = (ct.tsym.flags_field & Flags.STATIC) != 0
+                    ? Type.noType
+                    : ct.getEnclosingType();
+            return new ClassType(outer, args.toList(), ct.tsym);
+        }
+        return raw;
+    }
+
+    private Type resolveWildcard(Wildcard w, ModuleSymbol module, TypeEntry entry) {
+        return switch (w.kind()) {
+            case UNBOUNDED -> new WildcardType(syms.objectType, BoundKind.UNBOUND, syms.boundClass);
+            case EXTENDS -> new WildcardType(
+                    resolveType(w.bound(), module, entry), BoundKind.EXTENDS, syms.boundClass);
+            case SUPER -> new WildcardType(
+                    resolveType(w.bound(), module, entry), BoundKind.SUPER, syms.boundClass);
+        };
+    }
+
+    private Type lookupTypeVar(String name, IndexClassReader.ResolutionContext ctx) {
+        for (Type t : ctx.methodTypeParams()) {
+            if (t instanceof TypeVar tv && tv.tsym.name.contentEquals(name)) {
+                return t;
+            }
+        }
+        for (Type t : ctx.classTypeParams()) {
+            if (t instanceof TypeVar tv && tv.tsym.name.contentEquals(name)) {
+                return t;
+            }
+        }
+        return syms.objectType;
+    }
+
+    private Type primitive(Primitive p) {
+        return switch (p) {
+            case VOID -> syms.voidType;
+            case BOOLEAN -> syms.booleanType;
+            case BYTE -> syms.byteType;
+            case CHAR -> syms.charType;
+            case SHORT -> syms.shortType;
+            case INT -> syms.intType;
+            case LONG -> syms.longType;
+            case FLOAT -> syms.floatType;
+            case DOUBLE -> syms.doubleType;
+        };
+    }
 }
