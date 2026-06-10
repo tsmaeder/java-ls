@@ -92,8 +92,8 @@ public final class IndexClassReader extends ClassReader {
         this.syms = Symtab.instance(context);
         this.names = Names.instance(context);
         this.types = Types.instance(context);
-        this.annotations = new IndexAnnotations(syms, names, types);
         this.resolver = new TypeRefResolver(syms, names, index, classpath);
+        this.annotations = new IndexAnnotations(syms, names, types, resolver);
     }
 
     /**
@@ -179,7 +179,7 @@ public final class IndexClassReader extends ClassReader {
         for (FieldEntry f : entry.fields()) {
             Type t = resolveField(f, module, classCtx);
             VarSymbol v = new VarSymbol(IndexAccessFlags.fieldFlags(entry, f), names.fromString(f.name()), t, c);
-            List<Attribute.Compound> fAttrs = annotations.toCompounds(f.annotations(), module);
+            List<Attribute.Compound> fAttrs = annotations.toCompounds(f.annotations(), module, entry);
             v.setDeclarationAttributes(fAttrs);
             v.flags_field |= deprecationFlags(fAttrs);
             // Mirror ClassReader's ConstantValue handling so javac can
@@ -201,7 +201,7 @@ public final class IndexClassReader extends ClassReader {
                 Type rcType = resolveType(rce.type(), module, classCtx);
                 ClassSymbol.RecordComponent rc = new ClassSymbol.RecordComponent(
                         names.fromString(rce.name()), rcType, c);
-                rc.setDeclarationAttributes(annotations.toCompounds(rce.annotations(), module));
+                rc.setDeclarationAttributes(annotations.toCompounds(rce.annotations(), module, entry));
                 recordComponentSyms.add(rc);
             }
             c.setRecordComponents(recordComponentSyms.toList());
@@ -217,7 +217,7 @@ public final class IndexClassReader extends ClassReader {
                     ? mt
                     : new Type.ForAll(methodTypeParams, mt);
             MethodSymbol ms = new MethodSymbol(IndexAccessFlags.methodFlags(entry, m), names.fromString(m.name()), methodType, c);
-            List<Attribute.Compound> mAttrs = annotations.toCompounds(m.annotations(), module);
+            List<Attribute.Compound> mAttrs = annotations.toCompounds(m.annotations(), module, entry);
             ms.setDeclarationAttributes(mAttrs);
             ms.flags_field |= deprecationFlags(mAttrs);
             // Mirror javac: an interface owning a default method also
@@ -225,9 +225,10 @@ public final class IndexClassReader extends ClassReader {
             if ((ms.flags_field & Flags.DEFAULT) != 0) {
                 c.flags_field |= Flags.DEFAULT;
             }
-            populateMethodParameters(ms, m, mt, module);
+            populateMethodParameters(ms, m, mt, module, entry);
             if (m.annotationDefault() != null) {
-                Attribute defaultAttr = annotations.toAttribute(m.annotationDefault(), mt.getReturnType(), module);
+                Attribute defaultAttr = annotations.toAttribute(
+                        m.annotationDefault(), mt.getReturnType(), module, entry);
                 ms.defaultValue = defaultAttr != null ? defaultAttr : ANNOTATION_DEFAULT_SENTINEL;
             }
             c.members_field.enter(ms);
@@ -245,7 +246,7 @@ public final class IndexClassReader extends ClassReader {
         // Class-level annotations must be attached before the
         // AnnotationTypeMetadata is built so the metadata can pick up
         // @Target and @Repeatable from the same compounds.
-        List<Attribute.Compound> classAttrs = annotations.toCompounds(entry.annotations(), module);
+        List<Attribute.Compound> classAttrs = annotations.toCompounds(entry.annotations(), module, entry);
         c.setDeclarationAttributes(classAttrs);
         c.flags_field |= deprecationFlags(classAttrs);
 
@@ -300,7 +301,7 @@ public final class IndexClassReader extends ClassReader {
         if (ref instanceof Annotated annotated) {
             Type inner = resolveType(annotated.inner(), module, ctx);
             List<Attribute.TypeCompound> compounds =
-                    annotations.toTypeCompounds(annotated.annotations(), module);
+                    annotations.toTypeCompounds(annotated.annotations(), module, ctx.enclosing());
             if (compounds.isEmpty()) return inner;
             return inner.annotatedType(compounds);
         }
@@ -587,7 +588,8 @@ public final class IndexClassReader extends ClassReader {
      * via {@code setDeclarationAttributes}.
      */
     private void populateMethodParameters(MethodSymbol ms, MethodEntry m,
-                                          MethodType mt, ModuleSymbol module) {
+                                          MethodType mt, ModuleSymbol module,
+                                          TypeEntry enclosing) {
         com.sun.tools.javac.util.List<Type> jvmParamTypes = mt.getParameterTypes();
         if (jvmParamTypes == null || jvmParamTypes.isEmpty()) {
             ms.params = List.nil();
@@ -607,7 +609,8 @@ public final class IndexClassReader extends ClassReader {
             }
             VarSymbol psym = new VarSymbol(pflags, names.fromString(pName), pt, ms);
             if (pe != null && !pe.annotations().isEmpty()) {
-                psym.setDeclarationAttributes(annotations.toCompounds(pe.annotations(), module));
+                psym.setDeclarationAttributes(
+                        annotations.toCompounds(pe.annotations(), module, enclosing));
             }
             params.add(psym);
             idx++;

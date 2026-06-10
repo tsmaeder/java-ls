@@ -224,7 +224,7 @@ public final class SourceIndexer {
                 innerTypes,
                 permittedSubclasses,
                 List.of(),
-                annotationsOf(ct.getModifiers()),
+                annotationsOf(ct.getModifiers(), localName),
                 hints);
         into.add(entry);
 
@@ -252,7 +252,7 @@ public final class SourceIndexer {
                 Interner.intern(vt.getName().toString()),
                 toTypeRef(vt.getType(), typeParams, ownerJvm),
                 constantValue,
-                annotationsOf(vt.getModifiers()));
+                annotationsOf(vt.getModifiers(), ownerJvm));
     }
 
     /**
@@ -300,7 +300,7 @@ public final class SourceIndexer {
                     Interner.intern(p.getName().toString()),
                     modifierFlags(p.getModifiers()),
                     toTypeRef(p.getType(), methodTypeParams, ownerJvm),
-                    annotationsOf(p.getModifiers())));
+                    annotationsOf(p.getModifiers(), ownerJvm)));
         }
 
         Type returnRef = mt.getReturnType() == null
@@ -320,7 +320,7 @@ public final class SourceIndexer {
         String name = Interner.intern(mt.getName().toString());
         Tree defaultTree = mt.getDefaultValue();
         AnnotationValue defaultValue = defaultTree instanceof ExpressionTree dt
-                ? toAnnotationValue(dt)
+                ? toAnnotationValue(dt, ownerJvm)
                 : null;
         return new MethodEntry(
                 uri,
@@ -334,7 +334,7 @@ public final class SourceIndexer {
                 isVarArgs(mt),
                 mt.getBody() != null,
                 defaultValue,
-                annotationsOf(mt.getModifiers()));
+                annotationsOf(mt.getModifiers(), ownerJvm));
     }
 
     private static TypeParamRef toTypeParamRef(TypeParameterTree tp,
@@ -358,7 +358,7 @@ public final class SourceIndexer {
             Type inner = toTypeRef(annotated.getUnderlyingType(), typeParams, ownerJvm);
             List<AnnotationRef> typeUseAnnotations = new ArrayList<>();
             for (AnnotationTree a : annotated.getAnnotations()) {
-                AnnotationRef ref = toAnnotationRef(a);
+                AnnotationRef ref = toAnnotationRef(a, ownerJvm);
                 if (ref != null) typeUseAnnotations.add(ref);
             }
             return Type.Annotated.wrap(inner, typeUseAnnotations);
@@ -518,11 +518,11 @@ public final class SourceIndexer {
         return f;
     }
 
-    private static List<AnnotationRef> annotationsOf(ModifiersTree mods) {
+    private static List<AnnotationRef> annotationsOf(ModifiersTree mods, String ownerJvm) {
         if (mods == null || mods.getAnnotations().isEmpty()) return List.of();
         List<AnnotationRef> out = new ArrayList<>();
         for (AnnotationTree a : mods.getAnnotations()) {
-            out.add(toAnnotationRef(a));
+            out.add(toAnnotationRef(a, ownerJvm));
         }
         return out;
     }
@@ -534,11 +534,11 @@ public final class SourceIndexer {
      * back to the {@code value} element per Java's single-element
      * annotation shorthand.
      */
-    private static AnnotationRef toAnnotationRef(AnnotationTree a) {
-        String name = Interner.intern(a.getAnnotationType().toString().replace('.', '/'));
+    private static AnnotationRef toAnnotationRef(AnnotationTree a, String ownerJvm) {
+        TypeRef annotationType = toClassRef(a.getAnnotationType(), Set.of(), ownerJvm);
         List<? extends ExpressionTree> args = a.getArguments();
         if (args == null || args.isEmpty()) {
-            return new AnnotationRef(name, Map.of());
+            return new AnnotationRef(annotationType, Map.of());
         }
         Map<String, AnnotationValue> values = new HashMap<>();
         for (ExpressionTree arg : args) {
@@ -551,10 +551,10 @@ public final class SourceIndexer {
                 elementName = "value";
                 valueExpr = arg;
             }
-            AnnotationValue value = toAnnotationValue(valueExpr);
+            AnnotationValue value = toAnnotationValue(valueExpr, ownerJvm);
             values.put(Interner.intern(elementName), value);
         }
-        return new AnnotationRef(name, values);
+        return new AnnotationRef(annotationType, values);
     }
 
     /**
@@ -566,7 +566,7 @@ public final class SourceIndexer {
      * then drops the element from the attribute map, which is the right
      * semantic for "value not known".
      */
-    private static AnnotationValue toAnnotationValue(ExpressionTree expr) {
+    private static AnnotationValue toAnnotationValue(ExpressionTree expr, String ownerJvm) {
         if (expr == null) {
             return new AnnotationValue.Unsupported("missing expression");
         }
@@ -606,12 +606,12 @@ public final class SourceIndexer {
             }
             List<AnnotationValue> elements = new ArrayList<>(inits.size());
             for (ExpressionTree e : inits) {
-                elements.add(toAnnotationValue(e));
+                elements.add(toAnnotationValue(e, ownerJvm));
             }
             return new AnnotationValue.Arr(elements);
         }
         if (expr instanceof AnnotationTree nested) {
-            return new AnnotationValue.Nested(toAnnotationRef(nested));
+            return new AnnotationValue.Nested(toAnnotationRef(nested, ownerJvm));
         }
         // Foo.class -> ClassRef; Foo.BAR / Foo.Bar.BAZ -> tentative EnumConst; bare Identifier -> tentative EnumConst.
         if (expr instanceof MemberSelectTree ms) {

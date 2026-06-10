@@ -48,6 +48,8 @@ import ch.castleridge.javals.indexing.scan.Scanner;
 import ch.castleridge.javals.indexing.source.SourceIndexer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -771,6 +773,114 @@ class IndexCompileTest {
                 () -> "@SuppressWarnings/@Deprecated/@Override on indexed JDK annotations should compile cleanly; got: " + errors);
         assertTrue(uncheckedWarnings.isEmpty(),
                 () -> "@SuppressWarnings(\"unchecked\") must suppress the unchecked cast warning, got: " + uncheckedWarnings);
+    }
+
+    @Test
+    void sourceIndexedSimpleNamedAnnotationIsResolved() throws Exception {
+        // Source-indexed @Pin on Marked stores Unresolved("Pin"); the
+        // class reader must resolve it via SourceResolutionHints imports.
+        // Pin itself is bytecode-indexed (like a dependency on the CP).
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        Path outDir = Files.createTempDirectory("pin-anno");
+        try {
+            JavaCompiler bootstrap = ToolProvider.getSystemJavaCompiler();
+            StandardJavaFileManager bfm = bootstrap.getStandardFileManager(
+                    null, Locale.getDefault(), StandardCharsets.UTF_8);
+            bfm.setLocation(StandardLocation.CLASS_OUTPUT, List.of(outDir.toFile()));
+            JavaFileObject pinSrc = new SimpleJavaFileObject(
+                    URI.create("mem:///Pin.java"), JavaFileObject.Kind.SOURCE) {
+                @Override
+                public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                    return """
+                            package com.example;
+                            public @interface Pin {
+                                String value() default "";
+                            }
+                            """;
+                }
+            };
+            assertTrue(bootstrap.getTask(null, bfm, d -> {}, List.of(), List.of(), List.of(pinSrc)).call(),
+                    "Pin should compile");
+            byte[] pinBytes = Files.readAllBytes(outDir.resolve("com").resolve("example").resolve("Pin.class"));
+
+            String pinUri = "index:///cp/pin/";
+            ClassFileIndexer.index(
+                    URI.create("index:///Pin.class"),
+                    URI.create(pinUri),
+                    pinBytes,
+                    index);
+
+            SourceIndexer.index(
+                    URI.create("mem:///Marked.java"),
+                    URI.create(SOURCE_URI),
+                    """
+                    package com.example;
+                    import com.example.Pin;
+                    @Pin("marked")
+                    public class Marked {}
+                    """,
+                    index);
+
+            TypeEntry markedEntry = index.get("com/example/Marked");
+            assertNotNull(markedEntry);
+            assertFalse(markedEntry.annotations().isEmpty());
+            assertInstanceOf(TypeRef.Unresolved.class, markedEntry.annotations().get(0).annotationType());
+
+            ClasspathOrder cp = classPathOf(List.of(pinUri, SOURCE_URI, jrtUri));
+            JavacTool tool = JavacTool.create();
+            Context context = new Context();
+            IndexClassReader.preRegister(context, index, cp);
+            StandardJavaFileManager std = tool.getStandardFileManager(
+                    null, Locale.getDefault(), StandardCharsets.UTF_8);
+            IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+            JavaFileObject src = new SimpleJavaFileObject(
+                    URI.create("test:///UseMarked.java"), JavaFileObject.Kind.SOURCE) {
+                @Override
+                public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                    return "import com.example.Marked;\n"
+                            + "public class UseMarked {\n"
+                            + "    Marked m;\n"
+                            + "}\n";
+                }
+            };
+
+            DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+            JavacTask task = (JavacTask) tool.getTask(
+                    null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+            task.analyze();
+
+            List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+            for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+                if (d.getKind() == Diagnostic.Kind.ERROR) {
+                    errors.add(d);
+                }
+            }
+            assertTrue(errors.isEmpty(),
+                    () -> "UseMarked should compile against indexed Marked; got: " + errors);
+
+            Elements elements = task.getElements();
+            TypeElement marked = elements.getTypeElement("com.example.Marked");
+            assertNotNull(marked);
+            boolean hasPin = marked.getAnnotationMirrors().stream()
+                    .anyMatch(am -> am.getAnnotationType().toString().equals("com.example.Pin"));
+            assertTrue(hasPin,
+                    "Indexed Marked must materialize @Pin resolved from a simple name");
+        } finally {
+            try (var paths = Files.walk(outDir)) {
+                paths.sorted(java.util.Comparator.reverseOrder())
+                        .forEach(p -> {
+                            try { Files.deleteIfExists(p); } catch (Exception ignored) {}
+                        });
+            }
+        }
     }
 
     @Test

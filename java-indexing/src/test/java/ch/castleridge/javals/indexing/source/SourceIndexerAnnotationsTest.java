@@ -44,6 +44,8 @@ class SourceIndexerAnnotationsTest {
         MethodEntry m = methodNamed(t, "m");
         AnnotationRef suppress = findAnnotation(m.annotations(), "SuppressWarnings");
         assertNotNull(suppress);
+        assertInstanceOf(TypeRef.Unresolved.class, suppress.annotationType());
+        assertEquals("SuppressWarnings", ((TypeRef.Unresolved) suppress.annotationType()).simpleName());
         AnnotationValue value = suppress.values().get("value");
         assertInstanceOf(AnnotationValue.Str.class, value);
         assertEquals("unchecked", ((AnnotationValue.Str) value).value());

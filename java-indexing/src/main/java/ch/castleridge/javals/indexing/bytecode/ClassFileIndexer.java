@@ -625,9 +625,10 @@ public final class ClassFileIndexer {
         @Override
         public void visitEnd() {
             switch (mode) {
-                case DECLARATION -> annotationSink.accept(new AnnotationRef(jvmNameFor(descriptor), values));
+                case DECLARATION -> annotationSink.accept(
+                        new AnnotationRef(TypeRef.resolved(jvmNameFor(descriptor)), values));
                 case NESTED -> valueSink.accept(new AnnotationValue.Nested(
-                        new AnnotationRef(jvmNameFor(descriptor), values)));
+                        new AnnotationRef(TypeRef.resolved(jvmNameFor(descriptor)), values)));
                 case ARRAY -> valueSink.accept(new AnnotationValue.Arr(arrayElements));
                 case SINGLE_VALUE -> {
                     // AnnotationDefault may have zero or one captured value.

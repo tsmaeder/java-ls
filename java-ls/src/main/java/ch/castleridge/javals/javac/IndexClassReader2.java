@@ -67,8 +67,8 @@ public final class IndexClassReader2 extends ClassReader {
         this.syms = Symtab.instance(context);
         this.names = Names.instance(context);
         this.types = Types.instance(context);
-        this.annotations = new IndexAnnotations(syms, names, types);
         this.resolver = new TypeRefResolver(syms, names, index, classpath);
+        this.annotations = new IndexAnnotations(syms, names, types, resolver);
     }
 
     /**
@@ -157,9 +157,7 @@ public final class IndexClassReader2 extends ClassReader {
     }
 
     private void readClassAttrs(ClassSymbol c, TypeEntry entry) {
-        for (AnnotationRef annotation : entry.annotations()) {
-            c.setDeclarationAttributes(annotations.toCompounds(annotation, currentModule));
-        }
+        c.setDeclarationAttributes(annotations.toCompounds(entry.annotations(), currentModule, entry));
     }
 
 }
