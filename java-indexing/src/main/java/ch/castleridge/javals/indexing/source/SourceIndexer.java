@@ -54,6 +54,7 @@ import ch.castleridge.javals.indexing.model.SourceResolutionHints;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
+import ch.castleridge.javals.indexing.model.Type;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
 /**
@@ -171,7 +172,7 @@ public final class SourceIndexer {
 
         TypeDeclKind declKind = declKind(ct);
         int modifiers = modifierFlags(ct.getModifiers());
-        TypeRef superRef;
+        Type superRef;
         if (ct.getExtendsClause() != null) {
             superRef = toTypeRef(ct.getExtendsClause(), classTypeParams, localName);
         } else if (declKind != TypeDeclKind.INTERFACE && declKind != TypeDeclKind.ANNOTATION) {
@@ -179,7 +180,7 @@ public final class SourceIndexer {
         } else {
             superRef = null;
         }
-        List<TypeRef> interfaceRefs = new ArrayList<>();
+        List<Type> interfaceRefs = new ArrayList<>();
         for (Tree intf : ct.getImplementsClause()) {
             interfaceRefs.add(toTypeRef(intf, classTypeParams, localName));
         }
@@ -188,7 +189,7 @@ public final class SourceIndexer {
         List<? extends Tree> permits = ct.getPermitsClause();
         if (permits != null) {
             for (Tree p : permits) {
-                permittedSubclasses.add(toTypeRef(p, classTypeParams, localName));
+                permittedSubclasses.add(toClassRef(p, classTypeParams, localName));
             }
         }
 
@@ -302,11 +303,11 @@ public final class SourceIndexer {
                     annotationsOf(p.getModifiers())));
         }
 
-        TypeRef returnRef = mt.getReturnType() == null
-                ? TypeRef.Primitive.VOID
+        Type returnRef = mt.getReturnType() == null
+                ? Type.Primitive.VOID
                 : toTypeRef(mt.getReturnType(), methodTypeParams, ownerJvm);
 
-        List<TypeRef> throwsRefs = new ArrayList<>();
+        List<Type> throwsRefs = new ArrayList<>();
         for (Tree th : mt.getThrows()) {
             throwsRefs.add(toTypeRef(th, methodTypeParams, ownerJvm));
         }
@@ -344,62 +345,62 @@ public final class SourceIndexer {
         if (boundTrees == null || boundTrees.isEmpty()) {
             return TypeParamRef.of(name);
         }
-        List<TypeRef> bounds = new ArrayList<>(boundTrees.size());
+        List<Type> bounds = new ArrayList<>(boundTrees.size());
         for (Tree b : boundTrees) {
             bounds.add(toTypeRef(b, visibleTypeParams, ownerJvm));
         }
         return new TypeParamRef(name, bounds);
     }
 
-    private static TypeRef toTypeRef(Tree t, Set<String> typeParams, String ownerJvm) {
-        if (t == null) return TypeRef.Primitive.VOID;
+    private static Type toTypeRef(Tree t, Set<String> typeParams, String ownerJvm) {
+        if (t == null) return Type.Primitive.VOID;
         if (t instanceof com.sun.source.tree.AnnotatedTypeTree annotated) {
-            TypeRef inner = toTypeRef(annotated.getUnderlyingType(), typeParams, ownerJvm);
+            Type inner = toTypeRef(annotated.getUnderlyingType(), typeParams, ownerJvm);
             List<AnnotationRef> typeUseAnnotations = new ArrayList<>();
             for (AnnotationTree a : annotated.getAnnotations()) {
                 AnnotationRef ref = toAnnotationRef(a);
                 if (ref != null) typeUseAnnotations.add(ref);
             }
-            return TypeRef.Annotated.wrap(inner, typeUseAnnotations);
+            return Type.Annotated.wrap(inner, typeUseAnnotations);
         }
         if (t instanceof PrimitiveTypeTree pt) {
             return switch (pt.getPrimitiveTypeKind()) {
-                case BOOLEAN -> TypeRef.Primitive.BOOLEAN;
-                case BYTE -> TypeRef.Primitive.BYTE;
-                case CHAR -> TypeRef.Primitive.CHAR;
-                case DOUBLE -> TypeRef.Primitive.DOUBLE;
-                case FLOAT -> TypeRef.Primitive.FLOAT;
-                case INT -> TypeRef.Primitive.INT;
-                case LONG -> TypeRef.Primitive.LONG;
-                case SHORT -> TypeRef.Primitive.SHORT;
-                case VOID -> TypeRef.Primitive.VOID;
-                default -> new TypeRef.Resolved("java/lang/Object");
+                case BOOLEAN -> Type.Primitive.BOOLEAN;
+                case BYTE -> Type.Primitive.BYTE;
+                case CHAR -> Type.Primitive.CHAR;
+                case DOUBLE -> Type.Primitive.DOUBLE;
+                case FLOAT -> Type.Primitive.FLOAT;
+                case INT -> Type.Primitive.INT;
+                case LONG -> Type.Primitive.LONG;
+                case SHORT -> Type.Primitive.SHORT;
+                case VOID -> Type.Primitive.VOID;
+                default -> TypeRef.resolved("java/lang/Object");
             };
         }
         if (t instanceof ArrayTypeTree at) {
-            return new TypeRef.Array(toTypeRef(at.getType(), typeParams, ownerJvm));
+            return new Type.Array(toTypeRef(at.getType(), typeParams, ownerJvm));
         }
         if (t instanceof WildcardTree wt) {
             Tree bound = wt.getBound();
             return switch (wt.getKind()) {
-                case UNBOUNDED_WILDCARD -> TypeRef.Wildcard.unbounded();
-                case EXTENDS_WILDCARD -> TypeRef.Wildcard.extendsBound(toTypeRef(bound, typeParams, ownerJvm));
-                case SUPER_WILDCARD -> TypeRef.Wildcard.superBound(toTypeRef(bound, typeParams, ownerJvm));
-                default -> TypeRef.Wildcard.unbounded();
+                case UNBOUNDED_WILDCARD -> Type.Wildcard.unbounded();
+                case EXTENDS_WILDCARD -> Type.Wildcard.extendsBound(toTypeRef(bound, typeParams, ownerJvm));
+                case SUPER_WILDCARD -> Type.Wildcard.superBound(toTypeRef(bound, typeParams, ownerJvm));
+                default -> Type.Wildcard.unbounded();
             };
         }
         if (t instanceof ParameterizedTypeTree pt) {
-            TypeRef raw = toTypeRef(pt.getType(), typeParams, ownerJvm);
-            List<TypeRef> args = new ArrayList<>();
+            TypeRef raw = toClassRef(pt.getType(), typeParams, ownerJvm);
+            List<Type> args = new ArrayList<>();
             for (Tree arg : pt.getTypeArguments()) {
                 args.add(toTypeRef(arg, typeParams, ownerJvm));
             }
-            return new TypeRef.Parameterized(raw, args);
+            return new Type.Parameterized(raw, args);
         }
         if (t instanceof IdentifierTree id) {
             String name = id.getName().toString();
             if (typeParams.contains(name)) {
-                return TypeRef.typeVariable(name);
+                return Type.typeVariable(name);
             }
             return TypeRef.unresolved(name);
         }
@@ -407,6 +408,17 @@ public final class SourceIndexer {
             return typeRefForMemberSelect(ms, ownerJvm);
         }
         return TypeRef.resolved(t.toString().replace('.', '/'));
+    }
+
+    /**
+     * Narrow a type tree to a {@link TypeRef} for positions that only
+     * accept class types (e.g. {@code permits} clauses and parameterized
+     * raw types).
+     */
+    private static TypeRef toClassRef(Tree t, Set<String> typeParams, String ownerJvm) {
+        Type type = toTypeRef(t, typeParams, ownerJvm);
+        if (type instanceof TypeRef tr) return tr;
+        return TypeRef.resolved("java/lang/Object");
     }
 
     private static TypeRef typeRefForMemberSelect(MemberSelectTree ms, String ownerJvm) {
@@ -622,13 +634,13 @@ public final class SourceIndexer {
     }
 
     /**
-     * Build a {@link TypeRef} suitable for a class-literal qualifier or
+     * Build a {@link Type} suitable for a class-literal qualifier or
      * an enum-constant qualifier. Only {@link IdentifierTree} and
      * {@link MemberSelectTree} chains are supported - everything else
      * yields {@link TypeRef.Unresolved} sentinel "?" so the symbol-side
      * converter can fall back gracefully.
      */
-    private static TypeRef typeRefForExpression(ExpressionTree e) {
+    private static Type typeRefForExpression(ExpressionTree e) {
         if (e instanceof IdentifierTree id) {
             return TypeRef.unresolved(id.getName().toString());
         }
@@ -637,19 +649,19 @@ public final class SourceIndexer {
             return jvm == null ? TypeRef.unresolved("?") : TypeRef.resolved(jvm);
         }
         if (e instanceof ArrayTypeTree at) {
-            return new TypeRef.Array(typeRefForExpression((ExpressionTree) at.getType()));
+            return new Type.Array(typeRefForExpression((ExpressionTree) at.getType()));
         }
         if (e instanceof PrimitiveTypeTree pt) {
             return switch (pt.getPrimitiveTypeKind()) {
-                case BOOLEAN -> TypeRef.Primitive.BOOLEAN;
-                case BYTE -> TypeRef.Primitive.BYTE;
-                case CHAR -> TypeRef.Primitive.CHAR;
-                case DOUBLE -> TypeRef.Primitive.DOUBLE;
-                case FLOAT -> TypeRef.Primitive.FLOAT;
-                case INT -> TypeRef.Primitive.INT;
-                case LONG -> TypeRef.Primitive.LONG;
-                case SHORT -> TypeRef.Primitive.SHORT;
-                case VOID -> TypeRef.Primitive.VOID;
+                case BOOLEAN -> Type.Primitive.BOOLEAN;
+                case BYTE -> Type.Primitive.BYTE;
+                case CHAR -> Type.Primitive.CHAR;
+                case DOUBLE -> Type.Primitive.DOUBLE;
+                case FLOAT -> Type.Primitive.FLOAT;
+                case INT -> Type.Primitive.INT;
+                case LONG -> Type.Primitive.LONG;
+                case SHORT -> Type.Primitive.SHORT;
+                case VOID -> Type.Primitive.VOID;
                 default -> TypeRef.resolved("java/lang/Object");
             };
         }

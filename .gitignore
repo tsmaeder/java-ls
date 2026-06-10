@@ -42,6 +42,8 @@ bin/
 /nbdist/
 /.nb-gradle/
 
+.metals/
+
 # IDE — VS Code (local overrides; commit shared launch/tasks if you want)
 .vscode/*
 !.vscode/extensions.json

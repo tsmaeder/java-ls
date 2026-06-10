@@ -9,6 +9,7 @@ import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
+import ch.castleridge.javals.indexing.model.Type;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -93,11 +94,11 @@ class JrtScanTest {
         String typeParam = cf.typeParams().get(0).name();
 
         boolean hasParameterizedCompletionStage = cf.interfaceRefs().stream().anyMatch(ref -> {
-            if (!(ref instanceof TypeRef.Parameterized p)) return false;
+            if (!(ref instanceof Type.Parameterized p)) return false;
             if (!(p.raw() instanceof TypeRef.Resolved r)) return false;
             if (!r.jvmBinaryName().equals("java/util/concurrent/CompletionStage")) return false;
             if (p.typeArgs().size() != 1) return false;
-            return p.typeArgs().get(0) instanceof TypeRef.TypeVariable tv
+            return p.typeArgs().get(0) instanceof Type.TypeVariable tv
                     && tv.name().equals(typeParam);
         });
         assertTrue(hasParameterizedCompletionStage,
@@ -158,7 +159,7 @@ class JrtScanTest {
         MethodEntry size = arrayList.methods().stream()
                 .filter(m -> m.name().equals("size"))
                 .findFirst().orElseThrow();
-        assertEquals(TypeRef.Primitive.INT, size.returnType());
+        assertEquals(Type.Primitive.INT, size.returnType());
         assertTrue(size.paramTypes().isEmpty(), "size() takes no parameters");
     }
 }

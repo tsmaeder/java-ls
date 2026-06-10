@@ -59,7 +59,7 @@ public sealed interface AnnotationValue {
      * symbol-side converter resolves it before constructing
      * {@code Attribute.Class}.
      */
-    record ClassRef(TypeRef type) implements AnnotationValue {
+    record ClassRef(Type type) implements AnnotationValue {
         public ClassRef {
             if (type == null) {
                 throw new IllegalArgumentException("type must not be null");
@@ -75,7 +75,7 @@ public sealed interface AnnotationValue {
      * {@link Unsupported} if it cannot bind it to an enum
      * {@code VarSymbol}.
      */
-    record EnumConst(TypeRef enumType, String constant) implements AnnotationValue {
+    record EnumConst(Type enumType, String constant) implements AnnotationValue {
         public EnumConst {
             if (enumType == null) {
                 throw new IllegalArgumentException("enumType must not be null");

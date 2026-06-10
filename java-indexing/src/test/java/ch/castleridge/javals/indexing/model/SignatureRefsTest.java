@@ -20,10 +20,10 @@ class SignatureRefsTest {
                 "(Lpkg/Expectation<-TT;>;)Lpkg/Future<TT;>;");
         assertNotNull(refs);
         assertEquals(1, refs.paramTypes().size());
-        TypeRef.Parameterized param = assertInstanceOf(TypeRef.Parameterized.class, refs.paramTypes().get(0));
-        TypeRef.Wildcard wildcard = assertInstanceOf(TypeRef.Wildcard.class, param.typeArgs().get(0));
-        assertEquals(TypeRef.Wildcard.BoundKind.SUPER, wildcard.kind());
-        assertInstanceOf(TypeRef.TypeVariable.class, wildcard.bound());
+        Type.Parameterized param = assertInstanceOf(Type.Parameterized.class, refs.paramTypes().get(0));
+        Type.Wildcard wildcard = assertInstanceOf(Type.Wildcard.class, param.typeArgs().get(0));
+        assertEquals(Type.Wildcard.BoundKind.SUPER, wildcard.kind());
+        assertInstanceOf(Type.TypeVariable.class, wildcard.bound());
     }
 
     @Test
@@ -35,11 +35,11 @@ class SignatureRefsTest {
         assertNotNull(refs);
         assertInstanceOf(TypeRef.Resolved.class, refs.superClass());
         assertEquals(2, refs.interfaces().size());
-        TypeRef.Parameterized completionStage =
-                assertInstanceOf(TypeRef.Parameterized.class, refs.interfaces().get(1));
+        Type.Parameterized completionStage =
+                assertInstanceOf(Type.Parameterized.class, refs.interfaces().get(1));
         TypeRef.Resolved raw = assertInstanceOf(TypeRef.Resolved.class, completionStage.raw());
         assertEquals("java/util/concurrent/CompletionStage", raw.jvmBinaryName());
-        TypeRef.TypeVariable typeArg = assertInstanceOf(TypeRef.TypeVariable.class, completionStage.typeArgs().get(0));
+        Type.TypeVariable typeArg = assertInstanceOf(Type.TypeVariable.class, completionStage.typeArgs().get(0));
         assertEquals("U", typeArg.name());
     }
 
@@ -61,10 +61,10 @@ class SignatureRefsTest {
         TypeEntry cf = index.get("pkg/Cf");
         assertNotNull(cf);
         assertEquals(1, cf.interfaceRefs().size());
-        TypeRef.Parameterized cs = assertInstanceOf(TypeRef.Parameterized.class, cf.interfaceRefs().get(0));
+        Type.Parameterized cs = assertInstanceOf(Type.Parameterized.class, cf.interfaceRefs().get(0));
         assertEquals("java/util/concurrent/CompletionStage",
                 assertInstanceOf(TypeRef.Resolved.class, cs.raw()).jvmBinaryName());
-        assertEquals("T", assertInstanceOf(TypeRef.TypeVariable.class, cs.typeArgs().get(0)).name());
+        assertEquals("T", assertInstanceOf(Type.TypeVariable.class, cs.typeArgs().get(0)).name());
     }
 
     @Test
@@ -76,11 +76,11 @@ class SignatureRefsTest {
         TypeParamRef t = params.get(0);
         assertEquals("T", t.name());
         assertEquals(2, t.bounds().size());
-        TypeRef.Parameterized comparable = assertInstanceOf(TypeRef.Parameterized.class, t.bounds().get(0));
+        Type.Parameterized comparable = assertInstanceOf(Type.Parameterized.class, t.bounds().get(0));
         assertEquals("java/lang/Comparable",
                 assertInstanceOf(TypeRef.Resolved.class, comparable.raw()).jvmBinaryName());
-        TypeRef.TypeVariable comparableArg =
-                assertInstanceOf(TypeRef.TypeVariable.class, comparable.typeArgs().get(0));
+        Type.TypeVariable comparableArg =
+                assertInstanceOf(Type.TypeVariable.class, comparable.typeArgs().get(0));
         assertEquals("T", comparableArg.name());
         assertEquals("java/io/Serializable",
                 assertInstanceOf(TypeRef.Resolved.class, t.bounds().get(1)).jvmBinaryName());
@@ -133,8 +133,8 @@ class SignatureRefsTest {
                 .filter(m -> m.name().equals("expecting"))
                 .findFirst()
                 .orElseThrow();
-        TypeRef.Parameterized param = assertInstanceOf(TypeRef.Parameterized.class, expecting.paramTypes().get(0));
-        TypeRef.Wildcard wildcard = assertInstanceOf(TypeRef.Wildcard.class, param.typeArgs().get(0));
-        assertEquals(TypeRef.Wildcard.BoundKind.SUPER, wildcard.kind());
+        Type.Parameterized param = assertInstanceOf(Type.Parameterized.class, expecting.paramTypes().get(0));
+        Type.Wildcard wildcard = assertInstanceOf(Type.Wildcard.class, param.typeArgs().get(0));
+        assertEquals(Type.Wildcard.BoundKind.SUPER, wildcard.kind());
     }
 }

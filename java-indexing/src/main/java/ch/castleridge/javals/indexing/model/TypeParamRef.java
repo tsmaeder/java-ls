@@ -17,7 +17,7 @@ import java.util.List;
  * declared bound is normalised to {@code [java/lang/Object]} so callers
  * can synthesize a {@code TypeVar} unconditionally.
  */
-public record TypeParamRef(String name, List<TypeRef> bounds) {
+public record TypeParamRef(String name, List<Type> bounds) {
 
     public TypeParamRef {
         if (name == null || name.isEmpty()) {

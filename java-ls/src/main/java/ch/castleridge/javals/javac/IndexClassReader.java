@@ -3,6 +3,7 @@ package ch.castleridge.javals.javac;
 import static com.sun.tools.javac.code.Flags.STATIC;
 
 import com.sun.tools.javac.code.Attribute;
+import com.sun.tools.javac.code.BoundKind;
 import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Kinds;
 import com.sun.tools.javac.code.Scope.WriteableScope;
@@ -14,9 +15,11 @@ import com.sun.tools.javac.code.Symbol.TypeVariableSymbol;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Symtab;
 import com.sun.tools.javac.code.Type;
+import com.sun.tools.javac.code.Type.ArrayType;
 import com.sun.tools.javac.code.Type.ClassType;
 import com.sun.tools.javac.code.Type.MethodType;
 import com.sun.tools.javac.code.Type.TypeVar;
+import com.sun.tools.javac.code.Type.WildcardType;
 import com.sun.tools.javac.code.Types;
 import com.sun.tools.javac.comp.Annotate.AnnotationTypeMetadata;
 import com.sun.tools.javac.jvm.ClassReader;
@@ -30,6 +33,12 @@ import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ParameterEntry;
 import ch.castleridge.javals.indexing.model.RecordComponentEntry;
+import ch.castleridge.javals.indexing.model.Type.Annotated;
+import ch.castleridge.javals.indexing.model.Type.Array;
+import ch.castleridge.javals.indexing.model.Type.Parameterized;
+import ch.castleridge.javals.indexing.model.Type.Primitive;
+import ch.castleridge.javals.indexing.model.Type.TypeVariable;
+import ch.castleridge.javals.indexing.model.Type.Wildcard;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
@@ -42,7 +51,7 @@ import ch.castleridge.javals.indexing.model.TypeRef;
  * {@link IndexClassFileObject}, the reader builds the symbol's members, type
  * parameters, supertype and interfaces directly from the backing
  * {@link TypeEntry} without ever touching bytecode - using the
- * {@link TypeRefResolver} to turn the {@link TypeRef}s emitted by the
+ * {@link TypeRefResolver} to turn the indexed {@link ch.castleridge.javals.indexing.model.Type}s emitted by the
  * indexer (which may still carry {@link TypeRef.Unresolved} simple names)
  * into javac {@link Type}s. For any other file object the call falls
  * through to the standard implementation.
@@ -84,7 +93,7 @@ public final class IndexClassReader extends ClassReader {
         this.names = Names.instance(context);
         this.types = Types.instance(context);
         this.annotations = new IndexAnnotations(syms, names, types);
-        this.resolver = new TypeRefResolver(syms, names, index, classpath, annotations);
+        this.resolver = new TypeRefResolver(syms, names, index, classpath);
     }
 
     /**
@@ -132,8 +141,7 @@ public final class IndexClassReader extends ClassReader {
         normalizeEnclosingType(c, entry, ct);
         List<Type> classTypeParams = synthesizeTypeParams(c, entry);
         ct.typarams_field = classTypeParams;
-        TypeRefResolver.ResolutionContext classCtx =
-                TypeRefResolver.ResolutionContext.of(entry, classTypeParams);
+        ResolutionContext classCtx = ResolutionContext.of(entry, classTypeParams);
 
         // Phase 2 of the type-parameter setup: now that the sibling
         // TypeVars are visible through `classCtx`, resolve each declared
@@ -143,11 +151,11 @@ public final class IndexClassReader extends ClassReader {
 
         ct.supertype_field = entry.superRef() == null
                 ? Type.noType
-                : resolver.resolve(entry.superRef(), module, classCtx);
+                : resolveType(entry.superRef(), module, classCtx);
 
         List<Type> interfaces = List.nil();
-        for (TypeRef iref : entry.interfaceRefs()) {
-            interfaces = interfaces.prepend(resolver.resolve(iref, module, classCtx));
+        for (ch.castleridge.javals.indexing.model.Type iref : entry.interfaceRefs()) {
+            interfaces = interfaces.prepend(resolveType(iref, module, classCtx));
         }
         ct.interfaces_field = interfaces.reverse();
 
@@ -157,7 +165,7 @@ public final class IndexClassReader extends ClassReader {
         if (!entry.permittedSubclasses().isEmpty()) {
             ListBuffer<Symbol> permitted = new ListBuffer<>();
             for (TypeRef pr : entry.permittedSubclasses()) {
-                Type pt = resolver.resolve(pr, module, classCtx);
+                Type pt = resolver.resolve(pr, module, entry);
                 if (pt != null && pt.tsym instanceof ClassSymbol cs) {
                     permitted.add(cs);
                 }
@@ -169,7 +177,7 @@ public final class IndexClassReader extends ClassReader {
         }
 
         for (FieldEntry f : entry.fields()) {
-            Type t = resolver.resolveField(f, module, classCtx);
+            Type t = resolveField(f, module, classCtx);
             VarSymbol v = new VarSymbol(IndexAccessFlags.fieldFlags(entry, f), names.fromString(f.name()), t, c);
             List<Attribute.Compound> fAttrs = annotations.toCompounds(f.annotations(), module);
             v.setDeclarationAttributes(fAttrs);
@@ -190,7 +198,7 @@ public final class IndexClassReader extends ClassReader {
         if (!entry.recordComponents().isEmpty()) {
             recordComponentSyms = new ListBuffer<>();
             for (RecordComponentEntry rce : entry.recordComponents()) {
-                Type rcType = resolver.resolve(rce.type(), module, classCtx);
+                Type rcType = resolveType(rce.type(), module, classCtx);
                 ClassSymbol.RecordComponent rc = new ClassSymbol.RecordComponent(
                         names.fromString(rce.name()), rcType, c);
                 rc.setDeclarationAttributes(annotations.toCompounds(rce.annotations(), module));
@@ -201,10 +209,10 @@ public final class IndexClassReader extends ClassReader {
 
         for (MethodEntry m : entry.methods()) {
             List<Type> methodTypeParams = synthesizeMethodTypeParams(c, m);
-            TypeRefResolver.ResolutionContext methodCtx =
-                    TypeRefResolver.ResolutionContext.of(entry, classTypeParams, methodTypeParams);
+            ResolutionContext methodCtx =
+                    ResolutionContext.of(entry, classTypeParams, methodTypeParams);
             applyTypeParamBounds(methodTypeParams, m.typeParams(), module, methodCtx);
-            MethodType mt = resolver.resolveMethod(m, module, methodCtx);
+            MethodType mt = resolveMethod(m, module, methodCtx);
             Type methodType = methodTypeParams.isEmpty()
                     ? mt
                     : new Type.ForAll(methodTypeParams, mt);
@@ -255,6 +263,140 @@ public final class IndexClassReader extends ClassReader {
         }
 
         c.completer = Symbol.Completer.NULL_COMPLETER;
+    }
+
+    /**
+     * The context needed to resolve indexed types into javac types: the
+     * enclosing {@link TypeEntry} (for simple-name class resolution) plus
+     * the formal type parameters visible to a type variable at this
+     * position (class-level and, when inside a method, method-level).
+     */
+    record ResolutionContext(
+            TypeEntry enclosing,
+            List<Type> classTypeParams,
+            List<Type> methodTypeParams) {
+
+        static ResolutionContext of(TypeEntry enclosing, List<Type> classTypeParams) {
+            return new ResolutionContext(enclosing, classTypeParams, List.nil());
+        }
+
+        static ResolutionContext of(
+                TypeEntry enclosing,
+                List<Type> classTypeParams,
+                List<Type> methodTypeParams) {
+            return new ResolutionContext(enclosing, classTypeParams, methodTypeParams);
+        }
+    }
+
+    /**
+     * Resolve an indexed {@link ch.castleridge.javals.indexing.model.Type}
+     * tree into a javac {@link Type}. Structural shapes are handled here;
+     * the class-reference leaves ({@link TypeRef}) are delegated to
+     * {@link TypeRefResolver}.
+     */
+    private Type resolveType(ch.castleridge.javals.indexing.model.Type ref,
+                             ModuleSymbol module, ResolutionContext ctx) {
+        if (ref == null) return syms.errType;
+        if (ref instanceof Annotated annotated) {
+            Type inner = resolveType(annotated.inner(), module, ctx);
+            List<Attribute.TypeCompound> compounds =
+                    annotations.toTypeCompounds(annotated.annotations(), module);
+            if (compounds.isEmpty()) return inner;
+            return inner.annotatedType(compounds);
+        }
+        if (ref instanceof Primitive p) return primitive(p);
+        if (ref instanceof Array a) {
+            return new ArrayType(resolveType(a.element(), module, ctx), syms.arrayClass);
+        }
+        if (ref instanceof TypeVariable tv) {
+            return lookupTypeVar(tv.name(), ctx);
+        }
+        if (ref instanceof Wildcard w) {
+            return resolveWildcard(w, module, ctx);
+        }
+        if (ref instanceof Parameterized p) {
+            return resolveParameterized(p, module, ctx);
+        }
+        if (ref instanceof TypeRef tr) {
+            return resolver.resolve(tr, module, ctx.enclosing());
+        }
+        return syms.errType;
+    }
+
+    private MethodType resolveMethod(MethodEntry m, ModuleSymbol module, ResolutionContext ctx) {
+        ListBuffer<Type> params = new ListBuffer<>();
+        for (ch.castleridge.javals.indexing.model.Type pr : m.paramTypes()) {
+            params.add(resolveType(pr, module, ctx));
+        }
+        ListBuffer<Type> thrown = new ListBuffer<>();
+        for (ch.castleridge.javals.indexing.model.Type tr : m.throwsTypes()) {
+            thrown.add(resolveType(tr, module, ctx));
+        }
+        Type ret = resolveType(m.returnType(), module, ctx);
+        return new MethodType(params.toList(), ret, thrown.toList(), syms.methodClass);
+    }
+
+    private Type resolveField(FieldEntry f, ModuleSymbol module, ResolutionContext ctx) {
+        return resolveType(f.type(), module, ctx);
+    }
+
+    private Type resolveParameterized(Parameterized p, ModuleSymbol module, ResolutionContext ctx) {
+        Type raw = resolver.resolve(p.raw(), module, ctx.enclosing());
+        ListBuffer<Type> args = new ListBuffer<>();
+        for (ch.castleridge.javals.indexing.model.Type arg : p.typeArgs()) {
+            args.add(resolveType(arg, module, ctx));
+        }
+        if (raw instanceof ClassType ct) {
+            // Static nested types must not carry the raw outer type: propagating it
+            // causes Attr to reject uses like Map.Entry<K,V> with "improperly formed
+            // type, type arguments given on a raw type". Top-level types already have
+            // outer_field == Type.noType, so this is only a correction for static
+            // members whose outer_field was initialised to the raw owner by
+            // Symtab.defineClass.
+            Type outer = (ct.tsym.flags_field & Flags.STATIC) != 0
+                    ? Type.noType
+                    : ct.getEnclosingType();
+            return new ClassType(outer, args.toList(), ct.tsym);
+        }
+        return raw;
+    }
+
+    private Type resolveWildcard(Wildcard w, ModuleSymbol module, ResolutionContext ctx) {
+        return switch (w.kind()) {
+            case UNBOUNDED -> new WildcardType(syms.objectType, BoundKind.UNBOUND, syms.boundClass);
+            case EXTENDS -> new WildcardType(
+                    resolveType(w.bound(), module, ctx), BoundKind.EXTENDS, syms.boundClass);
+            case SUPER -> new WildcardType(
+                    resolveType(w.bound(), module, ctx), BoundKind.SUPER, syms.boundClass);
+        };
+    }
+
+    private Type lookupTypeVar(String name, ResolutionContext ctx) {
+        for (Type t : ctx.methodTypeParams()) {
+            if (t instanceof TypeVar tv && tv.tsym.name.contentEquals(name)) {
+                return t;
+            }
+        }
+        for (Type t : ctx.classTypeParams()) {
+            if (t instanceof TypeVar tv && tv.tsym.name.contentEquals(name)) {
+                return t;
+            }
+        }
+        return syms.objectType;
+    }
+
+    private Type primitive(Primitive p) {
+        return switch (p) {
+            case VOID -> syms.voidType;
+            case BOOLEAN -> syms.booleanType;
+            case BYTE -> syms.byteType;
+            case CHAR -> syms.charType;
+            case SHORT -> syms.shortType;
+            case INT -> syms.intType;
+            case LONG -> syms.longType;
+            case FLOAT -> syms.floatType;
+            case DOUBLE -> syms.doubleType;
+        };
     }
 
     /**
@@ -514,7 +656,7 @@ public final class IndexClassReader extends ClassReader {
     private void applyTypeParamBounds(List<Type> formals,
                                       java.util.List<TypeParamRef> refs,
                                       ModuleSymbol module,
-                                      TypeRefResolver.ResolutionContext ctx) {
+                                      ResolutionContext ctx) {
         if (formals.isEmpty() || refs.isEmpty()) return;
         int idx = 0;
         for (Type formal : formals) {
@@ -525,8 +667,8 @@ public final class IndexClassReader extends ClassReader {
 
             ListBuffer<Type> resolved = new ListBuffer<>();
             boolean allInterfaces = !ref.bounds().isEmpty();
-            for (TypeRef b : ref.bounds()) {
-                Type bound = resolver.resolve(b, module, ctx);
+            for (ch.castleridge.javals.indexing.model.Type b : ref.bounds()) {
+                Type bound = resolveType(b, module, ctx);
                 if (bound == null || bound.isErroneous()) {
                     allInterfaces = false;
                     continue;

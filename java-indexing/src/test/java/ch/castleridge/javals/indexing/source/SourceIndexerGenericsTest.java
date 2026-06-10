@@ -8,6 +8,7 @@ import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
+import ch.castleridge.javals.indexing.model.Type;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -29,17 +30,17 @@ class SourceIndexerGenericsTest {
                 "p/I");
 
         MethodEntry expecting = method(entry, "expecting");
-        assertInstanceOf(TypeRef.Parameterized.class, expecting.returnType());
-        TypeRef.Parameterized returnType = (TypeRef.Parameterized) expecting.returnType();
-        assertInstanceOf(TypeRef.TypeVariable.class, returnType.typeArgs().get(0));
+        assertInstanceOf(Type.Parameterized.class, expecting.returnType());
+        Type.Parameterized returnType = (Type.Parameterized) expecting.returnType();
+        assertInstanceOf(Type.TypeVariable.class, returnType.typeArgs().get(0));
 
         assertEquals(1, expecting.paramTypes().size());
-        TypeRef.Parameterized param = assertInstanceOf(TypeRef.Parameterized.class, expecting.paramTypes().get(0));
+        Type.Parameterized param = assertInstanceOf(Type.Parameterized.class, expecting.paramTypes().get(0));
         assertEquals(1, param.typeArgs().size());
-        TypeRef.Wildcard wildcard = assertInstanceOf(TypeRef.Wildcard.class, param.typeArgs().get(0));
-        assertEquals(TypeRef.Wildcard.BoundKind.SUPER, wildcard.kind());
-        assertInstanceOf(TypeRef.TypeVariable.class, wildcard.bound());
-        assertEquals("T", ((TypeRef.TypeVariable) wildcard.bound()).name());
+        Type.Wildcard wildcard = assertInstanceOf(Type.Wildcard.class, param.typeArgs().get(0));
+        assertEquals(Type.Wildcard.BoundKind.SUPER, wildcard.kind());
+        assertInstanceOf(Type.TypeVariable.class, wildcard.bound());
+        assertEquals("T", ((Type.TypeVariable) wildcard.bound()).name());
     }
 
     @Test
@@ -86,9 +87,9 @@ class SourceIndexerGenericsTest {
                 "ch/castleridge/javals/test/Future");
 
         MethodEntry expecting = method(entry, "expecting");
-        TypeRef.Parameterized param = assertInstanceOf(TypeRef.Parameterized.class, expecting.paramTypes().get(0));
-        TypeRef.Wildcard wildcard = assertInstanceOf(TypeRef.Wildcard.class, param.typeArgs().get(0));
-        assertEquals(TypeRef.Wildcard.BoundKind.SUPER, wildcard.kind());
+        Type.Parameterized param = assertInstanceOf(Type.Parameterized.class, expecting.paramTypes().get(0));
+        Type.Wildcard wildcard = assertInstanceOf(Type.Wildcard.class, param.typeArgs().get(0));
+        assertEquals(Type.Wildcard.BoundKind.SUPER, wildcard.kind());
     }
 
     private static TypeEntry indexSingle(String source, String jvmName) {

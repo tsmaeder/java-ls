@@ -41,6 +41,7 @@ import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
+import ch.castleridge.javals.indexing.model.Type;
 import ch.castleridge.javals.indexing.model.TypeRef;
 import ch.castleridge.javals.indexing.scan.JrtInput;
 import ch.castleridge.javals.indexing.scan.Scanner;
@@ -80,7 +81,7 @@ class IndexCompileTest {
                         "com/example/Hello",
                         0x0009 /* ACC_PUBLIC | ACC_STATIC */,
                         "greet",
-                        TypeRef.Primitive.VOID,
+                        Type.Primitive.VOID,
                         List.of(),
                         List.of(),
                         List.of())),
@@ -152,7 +153,7 @@ class IndexCompileTest {
                         "com/example/Holder",
                         0x0019 /* ACC_PUBLIC | ACC_STATIC | ACC_FINAL */,
                         "COUNT",
-                        TypeRef.Primitive.INT,
+                        Type.Primitive.INT,
                         List.of())),
                 List.of(),
                 List.of(),
@@ -1410,7 +1411,7 @@ class IndexCompileTest {
             MethodEntry hello = withTypeUse.methods().stream()
                     .filter(m -> m.name().equals("hello"))
                     .findFirst().orElseThrow();
-            assertTrue(hello.returnType() instanceof TypeRef.Annotated,
+            assertTrue(hello.returnType() instanceof Type.Annotated,
                     () -> "Return type should be Annotated, was: " + hello.returnType());
 
             ClasspathOrder cp = classPathOf(List.of(typeUseUri, jrtUri));
@@ -1855,7 +1856,7 @@ class IndexCompileTest {
                         jvmName,
                         0x0009,
                         methodName,
-                        TypeRef.Primitive.VOID,
+                        Type.Primitive.VOID,
                         List.of(),
                         List.of(),
                         List.of())),

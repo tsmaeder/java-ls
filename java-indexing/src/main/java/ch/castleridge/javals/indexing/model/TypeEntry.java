@@ -1,5 +1,6 @@
 package ch.castleridge.javals.indexing.model;
 
+import ch.castleridge.javals.indexing.model.TypeRef;
 import java.util.List;
 
 /**
@@ -10,9 +11,9 @@ import java.util.List;
  * through {@link #innerTypeJvmNames()} on the enclosing entry.
  *
  * <p>The supertype and implemented interfaces are captured as
- * {@link TypeRef}s so that source-derived entries can defer name
+ * {@link Type}s so that source-derived entries can defer name
  * resolution until the class reader consults the full index. For
- * bytecode-derived entries every {@link TypeRef} is already
+ * bytecode-derived entries every class-type leaf is already
  * {@link TypeRef.Resolved}.
  *
  * <p>{@link #typeParams()} captures the formal type parameters declared

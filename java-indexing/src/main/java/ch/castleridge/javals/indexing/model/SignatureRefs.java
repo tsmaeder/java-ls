@@ -11,7 +11,7 @@ import org.objectweb.asm.signature.SignatureVisitor;
 import ch.castleridge.javals.indexing.intern.Interner;
 
 /**
- * Parses JVM {@code Signature} attribute strings into {@link TypeRef} trees.
+ * Parses JVM {@code Signature} attribute strings into {@link Type} trees.
  */
 public final class SignatureRefs {
 
@@ -21,9 +21,9 @@ public final class SignatureRefs {
 
     public record MethodRefs(
             List<TypeParamRef> typeParams,
-            List<TypeRef> paramTypes,
-            TypeRef returnType,
-            List<TypeRef> throwsTypes) {
+            List<Type> paramTypes,
+            Type returnType,
+            List<Type> throwsTypes) {
         public MethodRefs {
             typeParams = typeParams == null ? List.of() : List.copyOf(typeParams);
             paramTypes = paramTypes == null ? List.of() : List.copyOf(paramTypes);
@@ -31,7 +31,7 @@ public final class SignatureRefs {
         }
     }
 
-    public record ClassRefs(TypeRef superClass, List<TypeRef> interfaces) {
+    public record ClassRefs(Type superClass, List<Type> interfaces) {
         public ClassRefs {
             interfaces = interfaces == null ? List.of() : List.copyOf(interfaces);
         }
@@ -40,7 +40,7 @@ public final class SignatureRefs {
     /**
      * Pull formal type parameter names <em>and bounds</em> from a
      * signature prefix. Each declared bound is captured as a
-     * {@link TypeRef}; if a parameter has no declared bound the result is
+     * {@link Type}; if a parameter has no declared bound the result is
      * the canonical {@code [java/lang/Object]} list (see
      * {@link TypeParamRef}).
      */
@@ -53,7 +53,7 @@ public final class SignatureRefs {
         return collector.result();
     }
 
-    public static TypeRef parseType(String signature) {
+    public static Type parseType(String signature) {
         if (signature == null || signature.isEmpty()) return null;
         TypeCollector collector = new TypeCollector();
         new SignatureReader(signature).acceptType(collector.visitor());
@@ -79,52 +79,52 @@ public final class SignatureRefs {
         return collector.result();
     }
 
-    private static TypeRef primitiveFromDescriptor(char descriptor) {
+    private static Type primitiveFromDescriptor(char descriptor) {
         return switch (descriptor) {
-            case 'V' -> TypeRef.Primitive.VOID;
-            case 'Z' -> TypeRef.Primitive.BOOLEAN;
-            case 'B' -> TypeRef.Primitive.BYTE;
-            case 'C' -> TypeRef.Primitive.CHAR;
-            case 'S' -> TypeRef.Primitive.SHORT;
-            case 'I' -> TypeRef.Primitive.INT;
-            case 'J' -> TypeRef.Primitive.LONG;
-            case 'F' -> TypeRef.Primitive.FLOAT;
-            case 'D' -> TypeRef.Primitive.DOUBLE;
+            case 'V' -> Type.Primitive.VOID;
+            case 'Z' -> Type.Primitive.BOOLEAN;
+            case 'B' -> Type.Primitive.BYTE;
+            case 'C' -> Type.Primitive.CHAR;
+            case 'S' -> Type.Primitive.SHORT;
+            case 'I' -> Type.Primitive.INT;
+            case 'J' -> Type.Primitive.LONG;
+            case 'F' -> Type.Primitive.FLOAT;
+            case 'D' -> Type.Primitive.DOUBLE;
             default -> TypeRef.resolved("java/lang/Object");
         };
     }
 
-    private static TypeRef toWildcardArg(char wildcard, TypeRef bound) {
+    private static Type toWildcardArg(char wildcard, Type bound) {
         return switch (wildcard) {
             case SignatureVisitor.EXTENDS -> bound == null
-                    ? TypeRef.Wildcard.unbounded()
-                    : TypeRef.Wildcard.extendsBound(bound);
-            case SignatureVisitor.SUPER -> TypeRef.Wildcard.superBound(bound);
+                    ? Type.Wildcard.unbounded()
+                    : Type.Wildcard.extendsBound(bound);
+            case SignatureVisitor.SUPER -> Type.Wildcard.superBound(bound);
             case SignatureVisitor.INSTANCEOF -> bound == null
-                    ? TypeRef.Wildcard.unbounded()
+                    ? Type.Wildcard.unbounded()
                     : bound;
             default -> bound == null
-                    ? TypeRef.Wildcard.unbounded()
+                    ? Type.Wildcard.unbounded()
                     : bound;
         };
     }
 
     private static final class TypeCollector {
-        private TypeRef result;
+        private Type result;
 
         SignatureVisitor visitor() {
             return new ClassTypeFrame(ref -> result = ref);
         }
 
-        TypeRef result() {
+        Type result() {
             return result;
         }
     }
 
     private static final class MethodCollector {
-        private final List<TypeRef> paramTypes = new ArrayList<>();
-        private final List<TypeRef> throwsTypes = new ArrayList<>();
-        private TypeRef returnType;
+        private final List<Type> paramTypes = new ArrayList<>();
+        private final List<Type> throwsTypes = new ArrayList<>();
+        private Type returnType;
         private final FormalTypeParameterCollector typeParamCollector = new FormalTypeParameterCollector();
 
         SignatureVisitor visitor() {
@@ -181,7 +181,7 @@ public final class SignatureRefs {
     private static final class FormalTypeParameterCollector extends SignatureVisitor {
         private final List<TypeParamRef> collected = new ArrayList<>();
         private String currentName;
-        private List<TypeRef> currentBounds;
+        private List<Type> currentBounds;
 
         FormalTypeParameterCollector() {
             super(ASM_API);
@@ -249,8 +249,8 @@ public final class SignatureRefs {
     }
 
     private static final class ClassCollector {
-        private TypeRef superClass;
-        private final List<TypeRef> interfaces = new ArrayList<>();
+        private Type superClass;
+        private final List<Type> interfaces = new ArrayList<>();
 
         SignatureVisitor visitor() {
             return new SignatureVisitor(ASM_API) {
@@ -275,10 +275,10 @@ public final class SignatureRefs {
      * Collects a class, array, primitive, or type-variable signature subtree.
      */
     private abstract static class TypeFrame extends SignatureVisitor {
-        protected final Consumer<TypeRef> sink;
+        protected final Consumer<Type> sink;
         protected boolean array;
 
-        TypeFrame(Consumer<TypeRef> sink) {
+        TypeFrame(Consumer<Type> sink) {
             super(ASM_API);
             this.sink = sink;
         }
@@ -290,7 +290,7 @@ public final class SignatureRefs {
 
         @Override
         public void visitTypeVariable(String name) {
-            emit(TypeRef.typeVariable(name));
+            emit(Type.typeVariable(name));
         }
 
         @Override
@@ -299,9 +299,9 @@ public final class SignatureRefs {
             return this;
         }
 
-        protected void emit(TypeRef type) {
+        protected void emit(Type type) {
             if (array) {
-                type = new TypeRef.Array(type);
+                type = new Type.Array(type);
                 array = false;
             }
             sink.accept(type);
@@ -313,10 +313,10 @@ public final class SignatureRefs {
      */
     private static final class ClassTypeFrame extends TypeFrame {
         private String className;
-        private final List<TypeRef> typeArgs = new ArrayList<>();
+        private final List<Type> typeArgs = new ArrayList<>();
         private ClassTypeFrame inner;
 
-        ClassTypeFrame(Consumer<TypeRef> sink) {
+        ClassTypeFrame(Consumer<Type> sink) {
             super(sink);
         }
 
@@ -338,7 +338,7 @@ public final class SignatureRefs {
 
         @Override
         public void visitTypeArgument() {
-            typeArgs.add(TypeRef.Wildcard.unbounded());
+            typeArgs.add(Type.Wildcard.unbounded());
         }
 
         @Override
@@ -348,9 +348,9 @@ public final class SignatureRefs {
                 return;
             }
             TypeRef raw = TypeRef.resolved(className);
-            TypeRef type = typeArgs.isEmpty()
+            Type type = typeArgs.isEmpty()
                     ? raw
-                    : new TypeRef.Parameterized(raw, List.copyOf(typeArgs));
+                    : new Type.Parameterized(raw, List.copyOf(typeArgs));
             emit(type);
         }
     }

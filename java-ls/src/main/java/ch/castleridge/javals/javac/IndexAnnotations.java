@@ -22,6 +22,8 @@ import com.sun.tools.javac.util.Pair;
 
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
+import ch.castleridge.javals.indexing.model.Type.Array;
+import ch.castleridge.javals.indexing.model.Type.Primitive;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
 /**
@@ -70,7 +72,8 @@ final class IndexAnnotations {
      * Convert indexed type-use annotations into javac
      * {@link Attribute.TypeCompound}s. We don't have a precise
      * {@code TypeAnnotationPosition} (the indexer encodes location
-     * structurally on the {@link TypeRef} tree via the {@code Annotated}
+     * structurally on the {@link ch.castleridge.javals.indexing.model.Type}
+     * tree via the {@code Annotated}
      * decorator, not via the JVMS path), so each compound is built with
      * {@code TypeAnnotationPosition.unknown}. Callers attach the result
      * with {@code Type.annotatedType(...)}.
@@ -183,14 +186,15 @@ final class IndexAnnotations {
     }
 
     /**
-     * Resolve a {@link TypeRef} into a javac {@link Type}. Only the
+     * Resolve an indexed {@link ch.castleridge.javals.indexing.model.Type}
+     * into a javac {@link Type}. Only the
      * resolved shapes that legitimately appear in annotation values
      * (primitive, array, fully-qualified class refs and source-indexer
      * unresolved sentinels) are supported.
      */
-    private Type resolveTypeRef(TypeRef ref, ModuleSymbol module) {
+    private Type resolveTypeRef(ch.castleridge.javals.indexing.model.Type ref, ModuleSymbol module) {
         if (ref == null) return null;
-        if (ref instanceof TypeRef.Primitive p) {
+        if (ref instanceof Primitive p) {
             return switch (p) {
                 case VOID -> syms.voidType;
                 case BOOLEAN -> syms.booleanType;
@@ -203,7 +207,7 @@ final class IndexAnnotations {
                 case DOUBLE -> syms.doubleType;
             };
         }
-        if (ref instanceof TypeRef.Array a) {
+        if (ref instanceof Array a) {
             Type elem = resolveTypeRef(a.element(), module);
             if (elem == null) return null;
             return new ArrayType(elem, syms.arrayClass);
@@ -220,7 +224,7 @@ final class IndexAnnotations {
         return null;
     }
 
-    private boolean isUnresolvedSentinel(TypeRef ref) {
+    private boolean isUnresolvedSentinel(ch.castleridge.javals.indexing.model.Type ref) {
         return ref instanceof TypeRef.Unresolved;
     }
 

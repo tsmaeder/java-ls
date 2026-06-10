@@ -6,9 +6,9 @@ import java.util.List;
 import ch.castleridge.javals.indexing.intern.Interner;
 
 /**
- * Helpers for translating JVM descriptor strings into {@link TypeRef}
+ * Helpers for translating JVM descriptor strings into {@link Type}
  * values. Classfile-sourced entries go through here exclusively; source
- * indexing builds {@link TypeRef}s directly from the AST and never touches
+ * indexing builds {@link Type}s directly from the AST and never touches
  * descriptors.
  *
  * <p>Only descriptors (as used in the classfile's {@code Code} / method /
@@ -20,14 +20,14 @@ public final class Descriptors {
 
     /**
      * Parse a single field descriptor (e.g. {@code Ljava/util/List;},
-     * {@code [I}, {@code Z}) into a {@link TypeRef}.
+     * {@code [I}, {@code Z}) into a {@link Type}.
      */
-    public static TypeRef parseField(String descriptor) {
+    public static Type parseField(String descriptor) {
         if (descriptor == null || descriptor.isEmpty()) {
             return TypeRef.resolved("java/lang/Object");
         }
         int[] pos = {0};
-        TypeRef t = parseOne(descriptor, pos);
+        Type t = parseOne(descriptor, pos);
         return t == null ? TypeRef.resolved("java/lang/Object") : t;
     }
 
@@ -37,41 +37,41 @@ public final class Descriptors {
      */
     public static MethodRefs parseMethod(String descriptor) {
         if (descriptor == null || descriptor.isEmpty() || descriptor.charAt(0) != '(') {
-            return new MethodRefs(TypeRef.Primitive.VOID, List.of());
+            return new MethodRefs(Type.Primitive.VOID, List.of());
         }
         int[] pos = {1};
-        List<TypeRef> params = new ArrayList<>();
+        List<Type> params = new ArrayList<>();
         while (pos[0] < descriptor.length() && descriptor.charAt(pos[0]) != ')') {
-            TypeRef t = parseOne(descriptor, pos);
+            Type t = parseOne(descriptor, pos);
             if (t == null) break;
             params.add(t);
         }
         if (pos[0] < descriptor.length() && descriptor.charAt(pos[0]) == ')') {
             pos[0]++;
         }
-        TypeRef ret = parseOne(descriptor, pos);
-        if (ret == null) ret = TypeRef.Primitive.VOID;
+        Type ret = parseOne(descriptor, pos);
+        if (ret == null) ret = Type.Primitive.VOID;
         return new MethodRefs(ret, List.copyOf(params));
     }
 
-    private static TypeRef parseOne(String desc, int[] pos) {
+    private static Type parseOne(String desc, int[] pos) {
         if (pos[0] >= desc.length()) return null;
         char c = desc.charAt(pos[0]);
         switch (c) {
-            case 'V': pos[0]++; return TypeRef.Primitive.VOID;
-            case 'Z': pos[0]++; return TypeRef.Primitive.BOOLEAN;
-            case 'B': pos[0]++; return TypeRef.Primitive.BYTE;
-            case 'C': pos[0]++; return TypeRef.Primitive.CHAR;
-            case 'S': pos[0]++; return TypeRef.Primitive.SHORT;
-            case 'I': pos[0]++; return TypeRef.Primitive.INT;
-            case 'J': pos[0]++; return TypeRef.Primitive.LONG;
-            case 'F': pos[0]++; return TypeRef.Primitive.FLOAT;
-            case 'D': pos[0]++; return TypeRef.Primitive.DOUBLE;
+            case 'V': pos[0]++; return Type.Primitive.VOID;
+            case 'Z': pos[0]++; return Type.Primitive.BOOLEAN;
+            case 'B': pos[0]++; return Type.Primitive.BYTE;
+            case 'C': pos[0]++; return Type.Primitive.CHAR;
+            case 'S': pos[0]++; return Type.Primitive.SHORT;
+            case 'I': pos[0]++; return Type.Primitive.INT;
+            case 'J': pos[0]++; return Type.Primitive.LONG;
+            case 'F': pos[0]++; return Type.Primitive.FLOAT;
+            case 'D': pos[0]++; return Type.Primitive.DOUBLE;
             case '[': {
                 pos[0]++;
-                TypeRef elem = parseOne(desc, pos);
+                Type elem = parseOne(desc, pos);
                 if (elem == null) return null;
-                return new TypeRef.Array(elem);
+                return new Type.Array(elem);
             }
             case 'L': {
                 int semi = desc.indexOf(';', pos[0]);
@@ -94,7 +94,7 @@ public final class Descriptors {
     }
 
     /** Return value of {@link #parseMethod(String)}. */
-    public record MethodRefs(TypeRef returnType, List<TypeRef> paramTypes) {
+    public record MethodRefs(Type returnType, List<Type> paramTypes) {
         public MethodRefs {
             paramTypes = paramTypes == null ? List.of() : List.copyOf(paramTypes);
         }

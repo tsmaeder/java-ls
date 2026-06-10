@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * A single field declaration attached to a {@link TypeEntry}.
  *
- * <p>The declared type is captured as a {@link TypeRef}; for source-derived
+ * <p>The declared type is captured as a {@link Type}; for source-derived
  * fields this may be {@link TypeRef.Unresolved}, to be resolved later by
  * the class reader using the {@link SourceResolutionHints} on the
  * enclosing type.
@@ -30,7 +30,7 @@ public record FieldEntry(
         String jvmOwnerName,
         int modifiers,
         String name,
-        TypeRef type,
+        Type type,
         Object constantValue,
         List<AnnotationRef> annotations) implements IndexEntry {
 
@@ -44,7 +44,7 @@ public record FieldEntry(
             String jvmOwnerName,
             int modifiers,
             String name,
-            TypeRef type,
+            Type type,
             List<AnnotationRef> annotations) {
         this(resourceUri, jvmOwnerName, modifiers, name, type, null, annotations);
     }

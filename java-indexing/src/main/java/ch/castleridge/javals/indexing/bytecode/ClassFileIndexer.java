@@ -34,6 +34,7 @@ import ch.castleridge.javals.indexing.model.SignatureRefs;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
+import ch.castleridge.javals.indexing.model.Type;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
 /**
@@ -43,7 +44,7 @@ import ch.castleridge.javals.indexing.model.TypeRef;
  * <p>Code, debug info and stack map frames are skipped because the index only
  * needs declaration shape and annotations.
  *
- * <p>Every {@link TypeRef} produced by this indexer is already resolved
+ * <p>Every class-type {@link TypeRef} produced by this indexer is already resolved
  * (bytecode always carries fully-qualified JVM names) so the emitted
  * {@link TypeEntry} carries no {@link ch.castleridge.javals.indexing.model.SourceResolutionHints}.
  */
@@ -104,8 +105,8 @@ public final class ClassFileIndexer {
 
         private String jvmName;
         private int access;
-        private TypeRef superRef;
-        private List<TypeRef> interfaces = List.of();
+        private Type superRef;
+        private List<Type> interfaces = List.of();
         private List<TypeParamRef> typeParams = List.of();
         private final List<FieldEntry> fields = new ArrayList<>();
         private final List<MethodEntry> methods = new ArrayList<>();
@@ -144,7 +145,7 @@ public final class ClassFileIndexer {
             if (interfaces == null || interfaces.length == 0) {
                 this.interfaces = List.of();
             } else {
-                List<TypeRef> refs = new ArrayList<>(interfaces.length);
+                List<Type> refs = new ArrayList<>(interfaces.length);
                 for (String i : interfaces) refs.add(TypeRef.resolved(i));
                 this.interfaces = List.copyOf(refs);
             }
@@ -173,13 +174,13 @@ public final class ClassFileIndexer {
         public FieldVisitor visitField(int fAccess, String name, String descriptor,
                                        String fSignature, Object value) {
             final List<AnnotationRef> fAnnotations = new ArrayList<>();
-            TypeRef parsedFieldType = fSignature != null
+            Type parsedFieldType = fSignature != null
                     ? SignatureRefs.parseType(fSignature)
                     : Descriptors.parseField(descriptor);
             if (parsedFieldType == null) {
                 parsedFieldType = Descriptors.parseField(descriptor);
             }
-            final TypeRef[] fieldTypeSlot = new TypeRef[]{parsedFieldType};
+            final Type[] fieldTypeSlot = new Type[]{parsedFieldType};
             final String fieldName = Interner.intern(name);
             // ASM hands us the ConstantValue attribute's payload directly:
             // boxed Integer / Long / Float / Double for primitives, String
@@ -205,7 +206,7 @@ public final class ClassFileIndexer {
                     // the first cut.
                     if (typePath != null) return null;
                     return CapturingAnnotationVisitor.forDeclaration(d, ann ->
-                            fieldTypeSlot[0] = TypeRef.Annotated.wrap(fieldTypeSlot[0], List.of(ann)));
+                            fieldTypeSlot[0] = Type.Annotated.wrap(fieldTypeSlot[0], List.of(ann)));
                 }
 
                 @Override
@@ -230,20 +231,20 @@ public final class ClassFileIndexer {
             SignatureRefs.MethodRefs generic = mSignature == null
                     ? null
                     : SignatureRefs.parseMethod(mSignature);
-            final TypeRef returnType = generic != null && generic.returnType() != null
+            final Type returnType = generic != null && generic.returnType() != null
                     ? generic.returnType()
                     : parts.returnType();
-            final List<TypeRef> paramTypes = generic != null && !generic.paramTypes().isEmpty()
+            final List<Type> paramTypes = generic != null && !generic.paramTypes().isEmpty()
                     ? generic.paramTypes()
                     : parts.paramTypes();
             final List<TypeParamRef> methodTypeParams = generic == null
                     ? List.of()
                     : generic.typeParams();
-            final List<TypeRef> throwsRefs;
+            final List<Type> throwsRefs;
             if (exceptions == null || exceptions.length == 0) {
                 throwsRefs = List.of();
             } else {
-                List<TypeRef> ts = new ArrayList<>(exceptions.length);
+                List<Type> ts = new ArrayList<>(exceptions.length);
                 for (String e : exceptions) ts.add(TypeRef.resolved(e));
                 throwsRefs = List.copyOf(ts);
             }
@@ -266,12 +267,12 @@ public final class ClassFileIndexer {
             final List<AnnotationRef>[] parameterAnnotations = newAnnotationLists(paramTypes.size());
             final int[] parameterCursor = new int[]{0};
             // Mutable slots so visitTypeAnnotation can wrap the relevant
-            // TypeRef in TypeRef.Annotated decorators as type-use
+            // Type in Type.Annotated decorators as type-use
             // annotations arrive. Only the top-level position
             // (typePath == null) is handled in this first cut.
-            final TypeRef[] returnTypeSlot = new TypeRef[]{returnType};
-            final TypeRef[] paramTypeSlots = paramTypes.toArray(new TypeRef[0]);
-            final TypeRef[] throwsSlots = throwsRefs.toArray(new TypeRef[0]);
+            final Type[] returnTypeSlot = new Type[]{returnType};
+            final Type[] paramTypeSlots = paramTypes.toArray(new Type[0]);
+            final Type[] throwsSlots = throwsRefs.toArray(new Type[0]);
             return new MethodVisitor(ASM_API) {
                 @Override
                 public AnnotationVisitor visitAnnotation(String d, boolean visible) {
@@ -312,18 +313,18 @@ public final class ClassFileIndexer {
                     int sort = new TypeReference(typeRef).getSort();
                     return switch (sort) {
                         case TypeReference.METHOD_RETURN -> CapturingAnnotationVisitor.forDeclaration(d, ann ->
-                                returnTypeSlot[0] = TypeRef.Annotated.wrap(returnTypeSlot[0], List.of(ann)));
+                                returnTypeSlot[0] = Type.Annotated.wrap(returnTypeSlot[0], List.of(ann)));
                         case TypeReference.METHOD_FORMAL_PARAMETER -> {
                             int idx = new TypeReference(typeRef).getFormalParameterIndex();
                             if (idx < 0 || idx >= paramTypeSlots.length) yield null;
                             yield CapturingAnnotationVisitor.forDeclaration(d, ann ->
-                                    paramTypeSlots[idx] = TypeRef.Annotated.wrap(paramTypeSlots[idx], List.of(ann)));
+                                    paramTypeSlots[idx] = Type.Annotated.wrap(paramTypeSlots[idx], List.of(ann)));
                         }
                         case TypeReference.THROWS -> {
                             int idx = new TypeReference(typeRef).getExceptionIndex();
                             if (idx < 0 || idx >= throwsSlots.length) yield null;
                             yield CapturingAnnotationVisitor.forDeclaration(d, ann ->
-                                    throwsSlots[idx] = TypeRef.Annotated.wrap(throwsSlots[idx], List.of(ann)));
+                                    throwsSlots[idx] = Type.Annotated.wrap(throwsSlots[idx], List.of(ann)));
                         }
                         default -> null;
                     };
@@ -482,14 +483,14 @@ public final class ClassFileIndexer {
         @Override
         public RecordComponentVisitor visitRecordComponent(String name, String descriptor,
                                                            String signature) {
-            TypeRef componentType = signature != null
+            Type componentType = signature != null
                     ? SignatureRefs.parseType(signature)
                     : Descriptors.parseField(descriptor);
             if (componentType == null) {
                 componentType = Descriptors.parseField(descriptor);
             }
             final String componentName = Interner.intern(name);
-            final TypeRef finalComponentType = componentType;
+            final Type finalComponentType = componentType;
             final List<AnnotationRef> componentAnnotations = new ArrayList<>();
             return new RecordComponentVisitor(ASM_API) {
                 @Override
@@ -606,7 +607,7 @@ public final class ClassFileIndexer {
 
         @Override
         public void visitEnum(String name, String enumDescriptor, String value) {
-            TypeRef enumType = Descriptors.parseField(enumDescriptor);
+            Type enumType = Descriptors.parseField(enumDescriptor);
             store(name, new AnnotationValue.EnumConst(enumType, Interner.intern(value)));
         }
 
@@ -652,7 +653,7 @@ public final class ClassFileIndexer {
         }
 
         private static String jvmNameFor(String descriptor) {
-            TypeRef ref = Descriptors.parseField(descriptor);
+            Type ref = Descriptors.parseField(descriptor);
             if (ref instanceof TypeRef.Resolved r) return r.jvmBinaryName();
             return Interner.intern(descriptor);
         }
@@ -697,24 +698,24 @@ public final class ClassFileIndexer {
             return new AnnotationValue.Unsupported("unexpected literal: " + value.getClass().getName());
         }
 
-        private static TypeRef asmTypeToRef(org.objectweb.asm.Type asmType) {
+        private static Type asmTypeToRef(org.objectweb.asm.Type asmType) {
             int sort = asmType.getSort();
             switch (sort) {
-                case org.objectweb.asm.Type.VOID: return TypeRef.Primitive.VOID;
-                case org.objectweb.asm.Type.BOOLEAN: return TypeRef.Primitive.BOOLEAN;
-                case org.objectweb.asm.Type.BYTE: return TypeRef.Primitive.BYTE;
-                case org.objectweb.asm.Type.CHAR: return TypeRef.Primitive.CHAR;
-                case org.objectweb.asm.Type.SHORT: return TypeRef.Primitive.SHORT;
-                case org.objectweb.asm.Type.INT: return TypeRef.Primitive.INT;
-                case org.objectweb.asm.Type.LONG: return TypeRef.Primitive.LONG;
-                case org.objectweb.asm.Type.FLOAT: return TypeRef.Primitive.FLOAT;
-                case org.objectweb.asm.Type.DOUBLE: return TypeRef.Primitive.DOUBLE;
+                case org.objectweb.asm.Type.VOID: return Type.Primitive.VOID;
+                case org.objectweb.asm.Type.BOOLEAN: return Type.Primitive.BOOLEAN;
+                case org.objectweb.asm.Type.BYTE: return Type.Primitive.BYTE;
+                case org.objectweb.asm.Type.CHAR: return Type.Primitive.CHAR;
+                case org.objectweb.asm.Type.SHORT: return Type.Primitive.SHORT;
+                case org.objectweb.asm.Type.INT: return Type.Primitive.INT;
+                case org.objectweb.asm.Type.LONG: return Type.Primitive.LONG;
+                case org.objectweb.asm.Type.FLOAT: return Type.Primitive.FLOAT;
+                case org.objectweb.asm.Type.DOUBLE: return Type.Primitive.DOUBLE;
                 case org.objectweb.asm.Type.ARRAY: {
-                    TypeRef elem = asmTypeToRef(asmType.getElementType());
+                    Type elem = asmTypeToRef(asmType.getElementType());
                     int dims = asmType.getDimensions();
-                    TypeRef out = elem;
+                    Type out = elem;
                     for (int i = 0; i < dims; i++) {
-                        out = new TypeRef.Array(out);
+                        out = new Type.Array(out);
                     }
                     return out;
                 }

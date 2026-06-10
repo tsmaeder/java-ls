@@ -16,7 +16,7 @@ import java.util.List;
 public record ParameterEntry(
         String name,
         int modifiers,
-        TypeRef type,
+        Type type,
         List<AnnotationRef> annotations) {
 
     public ParameterEntry {
@@ -27,7 +27,7 @@ public record ParameterEntry(
     }
 
     /** Convenience for the common name-only / no-annotations case. */
-    public static ParameterEntry of(TypeRef type) {
+    public static ParameterEntry of(Type type) {
         return new ParameterEntry(null, 0, type, List.of());
     }
 }

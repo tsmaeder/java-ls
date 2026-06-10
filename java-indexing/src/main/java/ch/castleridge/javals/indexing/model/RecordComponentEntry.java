@@ -22,7 +22,7 @@ import java.util.List;
  */
 public record RecordComponentEntry(
         String name,
-        TypeRef type,
+        Type type,
         List<AnnotationRef> annotations) {
 
     public RecordComponentEntry {

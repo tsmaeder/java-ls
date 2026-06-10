@@ -6,7 +6,7 @@ import java.util.List;
 /**
  * A single method (or constructor) declaration attached to a
  * {@link TypeEntry}. Return type, parameter types and thrown types are
- * {@link TypeRef}s; for source-derived methods they may include
+ * {@link Type}s; for source-derived methods they may include
  * {@link TypeRef.Unresolved} leaves that the class reader resolves later
  * using the enclosing type's {@link SourceResolutionHints}.
  *
@@ -29,9 +29,9 @@ public record MethodEntry(
         String jvmOwnerName,
         int modifiers,
         String name,
-        TypeRef returnType,
+        Type returnType,
         List<ParameterEntry> parameters,
-        List<TypeRef> throwsTypes,
+        List<Type> throwsTypes,
         List<TypeParamRef> typeParams,
         boolean varargs,
         boolean hasBody,
@@ -57,12 +57,12 @@ public record MethodEntry(
 
     /**
      * Derived projection: the parameter types in declaration order, for
-     * callers that only need {@link TypeRef}s and don't care about names,
+     * callers that only need {@link Type}s and don't care about names,
      * modifiers or per-parameter annotations.
      */
-    public List<TypeRef> paramTypes() {
+    public List<Type> paramTypes() {
         if (parameters.isEmpty()) return List.of();
-        List<TypeRef> out = new ArrayList<>(parameters.size());
+        List<Type> out = new ArrayList<>(parameters.size());
         for (ParameterEntry p : parameters) out.add(p.type());
         return List.copyOf(out);
     }
@@ -73,9 +73,9 @@ public record MethodEntry(
             String jvmOwnerName,
             int modifiers,
             String name,
-            TypeRef returnType,
-            List<TypeRef> paramTypes,
-            List<TypeRef> throwsTypes,
+            Type returnType,
+            List<Type> paramTypes,
+            List<Type> throwsTypes,
             List<AnnotationRef> annotations) {
         this(resourceUri, jvmOwnerName, modifiers, name, returnType,
                 paramTypesOf(paramTypes), throwsTypes, List.of(), false, true, null, annotations);
@@ -87,9 +87,9 @@ public record MethodEntry(
             String jvmOwnerName,
             int modifiers,
             String name,
-            TypeRef returnType,
-            List<TypeRef> paramTypes,
-            List<TypeRef> throwsTypes,
+            Type returnType,
+            List<Type> paramTypes,
+            List<Type> throwsTypes,
             List<TypeParamRef> typeParams,
             List<AnnotationRef> annotations) {
         this(resourceUri, jvmOwnerName, modifiers, name, returnType,
@@ -99,7 +99,7 @@ public record MethodEntry(
     /**
      * Factory for callers that only know about parameter types (no
      * names, modifiers or per-parameter annotations). Each
-     * {@link TypeRef} is wrapped in an empty {@link ParameterEntry}.
+     * {@link Type} is wrapped in an empty {@link ParameterEntry}.
      * Used by tests and any consumer that doesn't have a richer source
      * of parameter data; richer producers (the bytecode and source
      * indexers) build proper {@link ParameterEntry}s and call the
@@ -110,9 +110,9 @@ public record MethodEntry(
             String jvmOwnerName,
             int modifiers,
             String name,
-            TypeRef returnType,
-            List<TypeRef> paramTypes,
-            List<TypeRef> throwsTypes,
+            Type returnType,
+            List<Type> paramTypes,
+            List<Type> throwsTypes,
             List<TypeParamRef> typeParams,
             boolean varargs,
             boolean hasBody,
@@ -123,10 +123,10 @@ public record MethodEntry(
                 annotationDefault, annotations);
     }
 
-    private static List<ParameterEntry> paramTypesOf(List<TypeRef> types) {
+    private static List<ParameterEntry> paramTypesOf(List<Type> types) {
         if (types == null || types.isEmpty()) return List.of();
         List<ParameterEntry> out = new ArrayList<>(types.size());
-        for (TypeRef t : types) {
+        for (Type t : types) {
             out.add(new ParameterEntry(null, 0, t, List.of()));
         }
         return List.copyOf(out);

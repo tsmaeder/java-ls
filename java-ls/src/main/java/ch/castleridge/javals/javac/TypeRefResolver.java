@@ -1,118 +1,54 @@
 package ch.castleridge.javals.javac;
 
-import com.sun.tools.javac.code.BoundKind;
-import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import com.sun.tools.javac.code.Symbol.ModuleSymbol;
 import com.sun.tools.javac.code.Symtab;
 import com.sun.tools.javac.code.Type;
-import com.sun.tools.javac.code.Type.ArrayType;
-import com.sun.tools.javac.code.Type.ClassType;
-import com.sun.tools.javac.code.Type.MethodType;
-import com.sun.tools.javac.code.Type.TypeVar;
-import com.sun.tools.javac.code.Type.WildcardType;
-import com.sun.tools.javac.util.List;
-import com.sun.tools.javac.util.ListBuffer;
 import com.sun.tools.javac.util.Names;
 
-import com.sun.tools.javac.code.Attribute;
-
 import ch.castleridge.javals.indexing.index.Index;
-import ch.castleridge.javals.indexing.model.FieldEntry;
-import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.SourceResolutionHints;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
 /**
- * Resolves {@link TypeRef} instances - produced by the source and bytecode
- * indexers - into javac {@link Type} instances.
+ * Resolves a {@link TypeRef} - the only indexed type shape that carries a
+ * class name needing classpath/compilation-unit resolution - into a javac
+ * {@link Type}.
+ *
+ * <p>Structural type shapes (primitives, arrays, wildcards, parameterized
+ * types, type variables and type-use annotations) are resolved by
+ * {@link IndexClassReader}, which composes this resolver for the
+ * class-reference leaves it encounters.
  */
 final class TypeRefResolver {
-
-    record ResolutionContext(
-            TypeEntry enclosing,
-            List<Type> classTypeParams,
-            List<Type> methodTypeParams) {
-
-        static ResolutionContext of(TypeEntry enclosing, List<Type> classTypeParams) {
-            return new ResolutionContext(enclosing, classTypeParams, List.nil());
-        }
-
-        static ResolutionContext of(
-                TypeEntry enclosing,
-                List<Type> classTypeParams,
-                List<Type> methodTypeParams) {
-            return new ResolutionContext(enclosing, classTypeParams, methodTypeParams);
-        }
-    }
 
     private final Symtab syms;
     private final Names names;
     private final Index index;
     private final ClasspathOrder classpath;
-    private final IndexAnnotations annotations;
 
-    TypeRefResolver(Symtab syms, Names names, Index index, ClasspathOrder classpath,
-                    IndexAnnotations annotations) {
+    TypeRefResolver(Symtab syms, Names names, Index index, ClasspathOrder classpath) {
         this.syms = syms;
         this.names = names;
         this.index = index;
         this.classpath = classpath;
-        this.annotations = annotations;
     }
 
+    /**
+     * Resolve a class-type reference. {@link TypeRef.Resolved} carries a
+     * fully-qualified JVM binary name; {@link TypeRef.Unresolved} carries
+     * only a simple name that is resolved against {@code enclosing}'s
+     * {@link SourceResolutionHints}.
+     */
     Type resolve(TypeRef ref, ModuleSymbol module, TypeEntry enclosing) {
-        return resolve(ref, module, ResolutionContext.of(enclosing, List.nil()));
-    }
-
-    Type resolve(TypeRef ref, ModuleSymbol module, ResolutionContext ctx) {
-        if (ref == null) return syms.errType;
-        if (ref instanceof TypeRef.Annotated annotated) {
-            Type inner = resolve(annotated.inner(), module, ctx);
-            if (annotations == null) return inner;
-            List<Attribute.TypeCompound> compounds =
-                    annotations.toTypeCompounds(annotated.annotations(), module);
-            if (compounds.isEmpty()) return inner;
-            return inner.annotatedType(compounds);
-        }
-        if (ref instanceof TypeRef.Primitive p) return primitive(p);
-        if (ref instanceof TypeRef.Array a) {
-            return new ArrayType(resolve(a.element(), module, ctx), syms.arrayClass);
-        }
-        if (ref instanceof TypeRef.TypeVariable tv) {
-            return lookupTypeVar(tv.name(), ctx);
-        }
-        if (ref instanceof TypeRef.Wildcard w) {
-            return resolveWildcard(w, module, ctx);
-        }
-        if (ref instanceof TypeRef.Parameterized p) {
-            return resolveParameterized(p, module, ctx);
-        }
         if (ref instanceof TypeRef.Resolved r) {
             return classType(module, r.jvmBinaryName());
         }
         if (ref instanceof TypeRef.Unresolved u) {
-            return classType(module, resolveSimple(u.simpleName(), ctx.enclosing()));
+            return classType(module, resolveSimple(u.simpleName(), enclosing));
         }
         return syms.errType;
-    }
-
-    MethodType resolveMethod(MethodEntry m, ModuleSymbol module, ResolutionContext ctx) {
-        ListBuffer<Type> params = new ListBuffer<>();
-        for (TypeRef pr : m.paramTypes()) {
-            params.add(resolve(pr, module, ctx));
-        }
-        ListBuffer<Type> thrown = new ListBuffer<>();
-        for (TypeRef tr : m.throwsTypes()) {
-            thrown.add(resolve(tr, module, ctx));
-        }
-        Type ret = resolve(m.returnType(), module, ctx);
-        return new MethodType(params.toList(), ret, thrown.toList(), syms.methodClass);
-    }
-
-    Type resolveField(FieldEntry f, ModuleSymbol module, ResolutionContext ctx) {
-        return resolve(f.type(), module, ctx);
     }
 
     Type classType(ModuleSymbol module, String jvmBinaryName) {
@@ -120,65 +56,6 @@ final class TypeRefResolver {
         String dotted = jvmBinaryName.replace('/', '.');
         ClassSymbol sym = syms.enterClass(module, names.fromString(dotted));
         return sym.type;
-    }
-
-    private Type resolveParameterized(TypeRef.Parameterized p, ModuleSymbol module, ResolutionContext ctx) {
-        Type raw = resolve(p.raw(), module, ctx);
-        ListBuffer<Type> args = new ListBuffer<>();
-        for (TypeRef arg : p.typeArgs()) {
-            args.add(resolve(arg, module, ctx));
-        }
-        if (raw instanceof ClassType ct) {
-            // Static nested types must not carry the raw outer type: propagating it
-            // causes Attr to reject uses like Map.Entry<K,V> with "improperly formed
-            // type, type arguments given on a raw type". Top-level types already have
-            // outer_field == Type.noType, so this is only a correction for static
-            // members whose outer_field was initialised to the raw owner by
-            // Symtab.defineClass.
-            Type outer = (ct.tsym.flags_field & Flags.STATIC) != 0
-                    ? Type.noType
-                    : ct.getEnclosingType();
-            return new ClassType(outer, args.toList(), ct.tsym);
-        }
-        return raw;
-    }
-
-    private Type resolveWildcard(TypeRef.Wildcard w, ModuleSymbol module, ResolutionContext ctx) {
-        return switch (w.kind()) {
-            case UNBOUNDED -> new WildcardType(syms.objectType, BoundKind.UNBOUND, syms.boundClass);
-            case EXTENDS -> new WildcardType(
-                    resolve(w.bound(), module, ctx), BoundKind.EXTENDS, syms.boundClass);
-            case SUPER -> new WildcardType(
-                    resolve(w.bound(), module, ctx), BoundKind.SUPER, syms.boundClass);
-        };
-    }
-
-    private Type lookupTypeVar(String name, ResolutionContext ctx) {
-        for (Type t : ctx.methodTypeParams()) {
-            if (t instanceof TypeVar tv && tv.tsym.name.contentEquals(name)) {
-                return t;
-            }
-        }
-        for (Type t : ctx.classTypeParams()) {
-            if (t instanceof TypeVar tv && tv.tsym.name.contentEquals(name)) {
-                return t;
-            }
-        }
-        return syms.objectType;
-    }
-
-    private Type primitive(TypeRef.Primitive p) {
-        return switch (p) {
-            case VOID -> syms.voidType;
-            case BOOLEAN -> syms.booleanType;
-            case BYTE -> syms.byteType;
-            case CHAR -> syms.charType;
-            case SHORT -> syms.shortType;
-            case INT -> syms.intType;
-            case LONG -> syms.longType;
-            case FLOAT -> syms.floatType;
-            case DOUBLE -> syms.doubleType;
-        };
     }
 
     private String resolveSimple(String simple, TypeEntry enclosing) {
