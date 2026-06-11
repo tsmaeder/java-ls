@@ -1,10 +1,6 @@
 package ch.castleridge.javals.javac;
 
-import static com.sun.tools.javac.code.Flags.ACC_MODULE;
-import static com.sun.tools.javac.code.Flags.ACC_SUPER;
 import static com.sun.tools.javac.code.Flags.MODULE;
-import static com.sun.tools.javac.code.Flags.STATIC;
-
 import com.sun.tools.javac.code.Attribute;
 import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.code.Kinds;
@@ -27,22 +23,15 @@ import com.sun.tools.javac.code.Type.MethodType;
 import com.sun.tools.javac.code.Type.TypeVar;
 import com.sun.tools.javac.code.Type.WildcardType;
 import com.sun.tools.javac.code.Types;
-import com.sun.tools.javac.comp.Annotate.AnnotationTypeMetadata;
 import com.sun.tools.javac.jvm.ClassReader;
 import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.List;
 import com.sun.tools.javac.util.ListBuffer;
 import com.sun.tools.javac.util.Names;
 import com.sun.tools.javac.util.Name;
-import com.sun.tools.javac.code.Flags;
-
 import ch.castleridge.javals.indexing.index.Index;
-import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
-import ch.castleridge.javals.indexing.model.ParameterEntry;
-import ch.castleridge.javals.indexing.model.RecordComponentEntry;
-import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeRef;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
@@ -55,18 +44,6 @@ import ch.castleridge.javals.indexing.model.Type.Wildcard;
 
 
 public final class IndexClassReader2 extends ClassReader {
-
-    /**
-     * Fallback default value for annotation elements whose default is
-     * recorded as {@link ch.castleridge.javals.indexing.model.AnnotationValue.Unsupported}
-     * (or otherwise non-convertible). {@code Check.validateAnnotation}
-     * only consults presence/absence here, so {@link Attribute.Error}
-     * is a sound placeholder.
-     */
-    private static final Attribute ANNOTATION_DEFAULT_SENTINEL = new Attribute.Error(Type.noType);
-
-    private final Index index;
-    private final ClasspathOrder classpath;
     private final Symtab syms;
     private final Names names;
     private final Types types;
@@ -75,8 +52,6 @@ public final class IndexClassReader2 extends ClassReader {
 
     private IndexClassReader2(Context context, Index index, ClasspathOrder classpath) {
         super(context);
-        this.index = index;
-        this.classpath = classpath;
         this.syms = Symtab.instance(context);
         this.names = Names.instance(context);
         this.types = Types.instance(context);

@@ -104,9 +104,10 @@ public final class Index {
     public List<TypeEntry> listPackage(String packageJvm, boolean recurse) {
         if (recurse) {
             List<TypeEntry> entries = new ArrayList<>();
+            String prefix = packageJvm+'/';
             for (Map.Entry<String, Object> entry : byPackage.entrySet()) {
                 String packageName = entry.getKey();
-                if (packageName.startsWith(packageJvm)) {
+                if (packageName.startsWith(prefix)) {
                     addBucketTo(entry.getValue(), entries);
                 }
             }
