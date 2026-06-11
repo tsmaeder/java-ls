@@ -8,6 +8,7 @@ import java.util.List;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -38,6 +39,29 @@ class LspDiagnosticsHarnessTest {
             List<Diagnostic> diagnostics = harness.openAndAwaitDiagnostics(sourceFile, TIMEOUT);
             assertFalse(hasError(diagnostics), () -> "unexpected errors: " + diagnostics);
         }
+    }
+
+    @Test
+    @EnabledIf("vertxWorkspacePresent")
+    void vertxJsonObjectBase64EncoderImportHasNoErrors() throws Exception {
+        Path workspace = Path.of("../test-projects/vert.x").toAbsolutePath().normalize();
+        Path jsonObject = workspace.resolve("vertx-core/src/main/java/io/vertx/core/json/JsonObject.java");
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(Duration.ofSeconds(600));
+            List<Diagnostic> diagnostics = harness.openAndAwaitDiagnostics(jsonObject, Duration.ofSeconds(120));
+            List<Diagnostic> encoderErrors = diagnostics.stream()
+                    .filter(d -> d.getSeverity() == DiagnosticSeverity.Error)
+                    .filter(d -> d.getMessage() != null && d.getMessage().contains("Encoder"))
+                    .toList();
+            assertTrue(encoderErrors.isEmpty(), () -> "unexpected Encoder errors: " + encoderErrors);
+        }
+    }
+
+    static boolean vertxWorkspacePresent() {
+        Path workspace = Path.of("../test-projects/vert.x").toAbsolutePath().normalize();
+        Path jsonObject = workspace.resolve("vertx-core/src/main/java/io/vertx/core/json/JsonObject.java");
+        return Files.isDirectory(workspace) && Files.isRegularFile(jsonObject);
     }
 
     @Test

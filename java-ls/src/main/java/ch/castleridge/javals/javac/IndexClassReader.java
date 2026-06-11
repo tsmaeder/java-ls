@@ -47,6 +47,8 @@ public final class IndexClassReader extends ClassReader {
     private final Symtab syms;
     private final Names names;
     private final Types types;
+    private final Index index;
+    private final ClasspathOrder classpath;
     private final TypeRefResolver resolver;
     private final IndexAnnotations annotations;
 
@@ -55,6 +57,8 @@ public final class IndexClassReader extends ClassReader {
         this.syms = Symtab.instance(context);
         this.names = Names.instance(context);
         this.types = Types.instance(context);
+        this.index = index;
+        this.classpath = classpath;
         this.resolver = new TypeRefResolver(syms, names, index, classpath);
         this.annotations = new IndexAnnotations(syms, names, types, resolver);
     }
@@ -148,12 +152,41 @@ public final class IndexClassReader extends ClassReader {
         for (MethodEntry method : entry.methods()) {
             enterMember(c, readMethod(method, entry));
         }
+        readInnerClassesFromIndex(c, entry);
         if (c.isRecord()) {
             for (RecordComponent rc: c.getRecordComponents()) {
                 rc.accessor = lookupMethod(c, rc.name, List.nil());
             }
         }
         typevars = typevars.leave();
+    }
+
+    /**
+     * Mirror javac's {@code readInnerClasses}: register each indexed nested
+     * type as a member of {@code c} so qualified names ({@code Map.Entry})
+     * and single-type imports of nested types ({@code Base64.Encoder})
+     * resolve against the outer symbol's scope.
+     */
+    private void readInnerClassesFromIndex(ClassSymbol c, TypeEntry entry) {
+        for (String innerJvm : entry.innerTypeJvmNames()) {
+            int dollar = innerJvm.lastIndexOf('$');
+            if (dollar < 0 || dollar == innerJvm.length() - 1) continue;
+            Name innerName = names.fromString(innerJvm.substring(dollar + 1));
+            ClassSymbol member = enterClass(innerName, c);
+            TypeEntry innerEntry = classpath.pick(index.getAll(innerJvm), TypeEntry::sourceUri);
+            long innerFlags = innerEntry != null
+                    ? IndexAccessFlags.classFlags(innerEntry)
+                    : member.flags_field;
+            if ((innerFlags & Flags.STATIC) == 0) {
+                ClassType memberType = (ClassType) member.type;
+                memberType.setEnclosingType(c.type);
+                if (member.erasure_field != null) {
+                    ((ClassType) member.erasure_field).setEnclosingType(types.erasure(c.type));
+                }
+            }
+            member.flags_field = innerFlags;
+            enterMember(c, member);
+        }
     }
 
         private MethodSymbol lookupMethod(ClassSymbol c, Name name, List<Type> argtypes) {

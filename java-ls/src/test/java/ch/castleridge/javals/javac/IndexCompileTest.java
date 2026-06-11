@@ -784,6 +784,54 @@ class IndexCompileTest {
     }
 
     @Test
+    void base64EncoderSingleTypeImportCompilesCleanlyWithJrtIndex() throws Exception {
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        ClasspathOrder cp = classPathOf(List.of(jrtUri));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("test:///Base64EncoderUse.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        import java.util.Base64.Encoder;
+
+                        class Base64EncoderUse {
+                            static Encoder identity(Encoder e) {
+                                return e;
+                            }
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) {
+                errors.add(d);
+            }
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "import java.util.Base64.Encoder should compile cleanly with indexed JRT classes; got: " + errors);
+    }
+
+    @Test
     void annotationsOnIndexedJdkTypesAreRecognised() throws Exception {
         // Regression: when java.lang.SuppressWarnings was loaded via the
         // index reader its ClassSymbol kept the default notAnAnnotationType()
