@@ -428,7 +428,7 @@ class IndexCompileTest {
 
         JavacTool tool = JavacTool.create();
         Context context = new Context();
-        IndexClassReader2.preRegister(context, index, cp);
+        IndexClassReader.preRegister(context, index, cp);
         StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
         IndexFileManager fm = new IndexFileManager(std, index, cp);
 
@@ -1465,7 +1465,7 @@ class IndexCompileTest {
         ClasspathOrder cp = classPathOf(List.of(cpUri, jrtUri));
         JavacTool tool = JavacTool.create();
         Context context = new Context();
-        IndexClassReader2.preRegister(context, index, cp);
+        IndexClassReader.preRegister(context, index, cp);
         StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
         IndexFileManager fm = new IndexFileManager(std, index, cp);
 
@@ -1536,7 +1536,7 @@ class IndexCompileTest {
         ClasspathOrder cp = classPathOf(List.of(cpUri, jrtUri));
         JavacTool tool = JavacTool.create();
         Context context = new Context();
-        IndexClassReader2.preRegister(context, index, cp);
+        IndexClassReader.preRegister(context, index, cp);
         StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
         IndexFileManager fm = new IndexFileManager(std, index, cp);
 

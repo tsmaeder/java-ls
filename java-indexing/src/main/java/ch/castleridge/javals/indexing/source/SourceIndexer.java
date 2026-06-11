@@ -104,7 +104,8 @@ public final class SourceIndexer {
         List<String> onDemandImports = new ArrayList<>();
         for (ImportTree imp : cu.getImports()) {
             if (imp.isStatic()) continue;
-            String qn = imp.getQualifiedIdentifier().toString();
+            Tree qualId = imp.getQualifiedIdentifier();
+            String qn = qualId.toString();
             if (qn.endsWith(".*")) {
                 String pkg = qn.substring(0, qn.length() - 2).replace('.', '/');
                 onDemandImports.add(pkg);
@@ -112,7 +113,10 @@ public final class SourceIndexer {
             }
             int dot = qn.lastIndexOf('.');
             String simple = dot < 0 ? qn : qn.substring(dot + 1);
-            singleTypeImports.put(simple, qn.replace('.', '/'));
+            String jvmName = qualId instanceof MemberSelectTree ms
+                    ? memberSelectJvmName(ms)
+                    : qn.replace('.', '/');
+            singleTypeImports.put(simple, jvmName);
         }
 
         Set<String> siblings = new LinkedHashSet<>();

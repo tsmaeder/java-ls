@@ -54,7 +54,7 @@ public final class WorkspaceCompiler {
     public static Result compile(URI uri, CharSequence text, Index index, ClasspathOrder classpath) {
         JavacTool tool = JavacTool.create();
         Context ctx = new Context();
-        IndexClassReader2.preRegister(ctx, index, classpath);
+        IndexClassReader.preRegister(ctx, index, classpath);
 
         DiagnosticCollector<JavaFileObject> collector = new DiagnosticCollector<>();
 
