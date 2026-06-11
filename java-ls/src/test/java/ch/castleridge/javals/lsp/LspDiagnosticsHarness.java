@@ -1,8 +1,8 @@
 package ch.castleridge.javals.lsp;
 
 import java.io.IOException;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,16 +50,16 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
     private final CapturingClient capturingClient;
     private final Future<?> clientListening;
     private final Thread serverThread;
-    private final PipedOutputStream clientToServer;
-    private final PipedOutputStream serverToClient;
+    private final OutputStream clientToServer;
+    private final OutputStream serverToClient;
     private boolean closed;
 
     private LspDiagnosticsHarness(LanguageServer server,
                                   CapturingClient capturingClient,
                                   Future<?> clientListening,
                                   Thread serverThread,
-                                  PipedOutputStream clientToServer,
-                                  PipedOutputStream serverToClient) {
+                                  OutputStream clientToServer,
+                                  OutputStream serverToClient) {
         this.server = server;
         this.capturingClient = capturingClient;
         this.clientListening = clientListening;
@@ -75,11 +75,20 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
     public static LspDiagnosticsHarness start(Path workspaceRoot, Duration initTimeout) throws Exception {
         Path absolute = workspaceRoot.toAbsolutePath().normalize();
 
-        PipedInputStream serverIn = new PipedInputStream();
-        PipedOutputStream clientToServer = new PipedOutputStream(serverIn);
-
-        PipedInputStream clientFromServer = new PipedInputStream();
-        PipedOutputStream serverToClient = new PipedOutputStream(clientFromServer);
+        // NOTE: we deliberately avoid java.io.Piped{Input,Output}Stream here.
+        // PipedInputStream ties pipe liveness to the *thread that last wrote*
+        // to it and throws "Pipe broken" once that thread dies. lsp4j writes
+        // requests from a pooled thread that is reclaimed after the JDK's
+        // ~60s keepalive, so any workspace that takes longer than that to
+        // index would kill the connection before the "index ready" log
+        // notification could arrive. A thread-agnostic loopback pipe keeps
+        // the connection alive for the whole index.
+        LoopbackPipe toServer = new LoopbackPipe();
+        LoopbackPipe fromServer = new LoopbackPipe();
+        InputStream serverIn = toServer.input();
+        OutputStream clientToServer = toServer.output();
+        InputStream clientFromServer = fromServer.input();
+        OutputStream serverToClient = fromServer.output();
 
         CapturingClient capturingClient = new CapturingClient();
 
@@ -256,6 +265,107 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
         @Override
         public CompletableFuture<MessageActionItem> showMessageRequest(ShowMessageRequestParams requestParams) {
             return CompletableFuture.completedFuture(null);
+        }
+    }
+
+    /**
+     * A thread-agnostic, growable byte pipe connecting one writer to one
+     * reader. Unlike {@link java.io.PipedInputStream}/{@link
+     * java.io.PipedOutputStream} it has no notion of a "write side thread"
+     * and therefore never throws {@code "Pipe broken"} when a pooled writer
+     * thread is reclaimed mid-session. Writes never block (the buffer grows);
+     * reads block until data is available or the stream is closed.
+     */
+    static final class LoopbackPipe {
+
+        private final Object lock = new Object();
+        private byte[] buf = new byte[1 << 16];
+        private int head;
+        private int count;
+        private boolean closed;
+
+        InputStream input() {
+            return new InputStream() {
+                @Override
+                public int read() throws IOException {
+                    byte[] one = new byte[1];
+                    int n = read(one, 0, 1);
+                    return n == -1 ? -1 : (one[0] & 0xFF);
+                }
+
+                @Override
+                public int read(byte[] b, int off, int len) throws IOException {
+                    if (len == 0) return 0;
+                    synchronized (lock) {
+                        while (count == 0 && !closed) {
+                            try {
+                                lock.wait();
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                throw new IOException("interrupted while reading", e);
+                            }
+                        }
+                        if (count == 0 && closed) return -1;
+                        int n = Math.min(len, count);
+                        for (int i = 0; i < n; i++) {
+                            b[off + i] = buf[(head + i) % buf.length];
+                        }
+                        head = (head + n) % buf.length;
+                        count -= n;
+                        return n;
+                    }
+                }
+
+                @Override
+                public void close() {
+                    closePipe();
+                }
+            };
+        }
+
+        OutputStream output() {
+            return new OutputStream() {
+                @Override
+                public void write(int b) {
+                    write(new byte[] {(byte) b}, 0, 1);
+                }
+
+                @Override
+                public void write(byte[] b, int off, int len) {
+                    synchronized (lock) {
+                        ensureCapacity(count + len);
+                        for (int i = 0; i < len; i++) {
+                            buf[(head + count + i) % buf.length] = b[off + i];
+                        }
+                        count += len;
+                        lock.notifyAll();
+                    }
+                }
+
+                @Override
+                public void close() {
+                    closePipe();
+                }
+            };
+        }
+
+        private void closePipe() {
+            synchronized (lock) {
+                closed = true;
+                lock.notifyAll();
+            }
+        }
+
+        private void ensureCapacity(int needed) {
+            if (needed <= buf.length) return;
+            int newCap = buf.length;
+            while (newCap < needed) newCap <<= 1;
+            byte[] grown = new byte[newCap];
+            for (int i = 0; i < count; i++) {
+                grown[i] = buf[(head + i) % buf.length];
+            }
+            buf = grown;
+            head = 0;
         }
     }
 }

@@ -61,35 +61,30 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
                                          Set<Kind> kinds,
                                          boolean recurse) throws IOException {
 
-        // Synthetic per-module location: the only file we expose is
-        // module-info.class (at the unnamed package root). Everything
-        // else returns empty - the actual member types live on the
-        // regular CLASS_PATH/MODULE_PATH and are looked up through the
-        // existing path below.
+        // Synthetic per-module location: module-info at the root, plus
+        // indexed types for packages owned by the module. Types may live
+        // on CLASS_PATH (e.g. workspace sources) while the module
+        // descriptor is advertised on MODULE_PATH; javac binds those
+        // packages to the named module and will not populate them from
+        // the unnamed-module CLASS_PATH copy (split-package skip).
         if (location instanceof IndexedModuleLocation iml) {
             if (!kinds.contains(Kind.CLASS)) return List.of();
-            if (packageName != null && !packageName.isEmpty()) return List.of();
-            IndexModuleFileObject mf = moduleFile(iml.moduleName());
-            return mf == null ? List.of() : List.of(mf);
+            if (packageName == null || packageName.isEmpty()) {
+                IndexModuleFileObject mf = moduleFile(iml.moduleName());
+                return mf == null ? List.of() : List.of(mf);
+            }
+            ModuleEntry module = moduleEntry(iml.moduleName());
+            if (module == null) return List.of();
+            String pkgJvm = packageName.replace('.', '/');
+            if (!moduleOwnsPackage(module, pkgJvm)) return List.of();
+            return listIndexedTypes(pkgJvm, recurse);
         }
 
         if (!kinds.contains(Kind.CLASS)) {
             return super.list(location, packageName, kinds, recurse);
         }
 
-        String pkgJvm = packageName.replace('.', '/');
-
-        Map<String, TypeEntry> winners = new HashMap<>();
-        Iterable<TypeEntry> candidates = index.listPackage(pkgJvm, recurse);
-        for (TypeEntry e : candidates) {
-            if (!classpath.contains(e.sourceUri())) continue;
-            String jvm = e.jvmOwnerName();
-            TypeEntry existing = winners.get(jvm);
-            if (existing == null || classpath.pick(List.of(e, existing), TypeEntry::sourceUri) == e) {
-                winners.put(jvm, e);
-            }
-        }
-        return winners.values().stream().map(IndexClassFileObject::new).collect(Collectors.toList());
+        return listIndexedTypes(packageName.replace('.', '/'), recurse);
     }
 
     @Override
@@ -106,23 +101,13 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
 
     @Override
     public JavaFileObject getJavaFileForInput(Location location, String className, Kind kind) throws IOException {
-        // A synthetic per-module location: the only file javac asks for
-        // is "module-info" (CLASS), which we materialise on demand.
-        if (location instanceof IndexedModuleLocation iml && kind == Kind.CLASS
-                && "module-info".equals(className)) {
-            IndexModuleFileObject mf = moduleFile(iml.moduleName());
-            if (mf != null) return mf;
+        if (location instanceof IndexedModuleLocation iml && kind == Kind.CLASS) {
+            if ("module-info".equals(className)) {
+                IndexModuleFileObject mf = moduleFile(iml.moduleName());
+                if (mf != null) return mf;
+            } 
         }
-        if (kind == Kind.CLASS) {
-            String jvm = className.replace('.', '/');
-            List<TypeEntry> all = index.getAll(jvm);
-            if (!all.isEmpty()) {
-                TypeEntry winner = classpath.pick(all, TypeEntry::sourceUri);
-                if (winner != null) {
-                    return new IndexClassFileObject(winner);
-                }
-            }
-        }
+        
         return super.getJavaFileForInput(location, className, kind);
     }
 
@@ -176,6 +161,35 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
     /** Convenience: cast and extract the backing entry, or null. */
     public static TypeEntry asEntry(JavaFileObject file) {
         return file instanceof IndexClassFileObject icfo ? icfo.entry() : null;
+    }
+
+    private List<JavaFileObject> listIndexedTypes(String pkgJvm, boolean recurse) {
+        Map<String, TypeEntry> winners = new HashMap<>();
+        for (TypeEntry e : index.listPackage(pkgJvm, recurse)) {
+            if (!classpath.contains(e.sourceUri())) continue;
+            String jvm = e.jvmOwnerName();
+            TypeEntry existing = winners.get(jvm);
+            if (existing == null || classpath.pick(List.of(e, existing), TypeEntry::sourceUri) == e) {
+                winners.put(jvm, e);
+            }
+        }
+        return winners.values().stream().map(IndexClassFileObject::new).collect(Collectors.toList());
+    }
+
+    private ModuleEntry moduleEntry(String moduleName) {
+        IndexModuleFileObject mf = moduleFile(moduleName);
+        return mf == null ? null : mf.entry();
+    }
+
+    private static boolean moduleOwnsPackage(ModuleEntry module, String packageJvm) {
+        if (module.packages().contains(packageJvm)) return true;
+        for (ModuleEntry.Exports e : module.exports()) {
+            if (e.packageJvm().equals(packageJvm)) return true;
+        }
+        for (ModuleEntry.Opens o : module.opens()) {
+            if (o.packageJvm().equals(packageJvm)) return true;
+        }
+        return false;
     }
 
     /**

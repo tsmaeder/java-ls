@@ -1410,6 +1410,152 @@ class IndexCompileTest {
     }
 
     @Test
+    void classpathSourceInModuleAdvertisedPackageCompilesCleanly() throws Exception {
+        // Regression for vert.x-style setups: a named module on MODULE_PATH
+        // claims a package (via ModulePackages/exports) while the types in
+        // that package are indexed from workspace sources on CLASS_PATH.
+        // Without serving those types from the module location, javac's
+        // split-package logic leaves the package empty and imports fail.
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String cpUri = "index:///cp/vertx-like/";
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        index.addModule(new ModuleEntry(
+                "index:///io.example/module-info.class",
+                cpUri,
+                "io.example",
+                null,
+                0,
+                List.of(new ModuleEntry.Requires("java.base", 0, null)),
+                List.of(new ModuleEntry.Exports("io/example/buffer", List.of(), 0)),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of("io/example/buffer"),
+                null));
+
+        SourceIndexer.index(
+                URI.create("mem:///Buffer.java"),
+                URI.create(cpUri),
+                """
+                        package io.example.buffer;
+                        public class Buffer {}
+                        """,
+                index);
+
+        JavaFileObject consumer = new SimpleJavaFileObject(
+                URI.create("mem:///JsonObject.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        package io.example.json;
+                        import io.example.buffer.Buffer;
+                        public class JsonObject {
+                            Buffer b;
+                        }
+                        """;
+            }
+        };
+
+        ClasspathOrder cp = classPathOf(List.of(cpUri, jrtUri));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader2.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(consumer), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "import of classpath source from module-advertised package should compile; got: " + errors);
+    }
+
+    @Test
+    void classAnnotatedWithMissingAnnotationTypeStillResolves() throws Exception {
+        // Regression for vert.x-style setups: a workspace type (Buffer) is
+        // annotated with an annotation (@GenIgnore) whose declaring artifact
+        // is absent from the index (e.g. an unbuilt annotation-processor
+        // dependency). Completing Buffer must not be aborted by the missing
+        // annotation type's CompletionFailure, otherwise the type looks like
+        // it does not exist and every importer reports "cannot find symbol".
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String cpUri = "index:///cp/anno-missing/";
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        // Buffer carries class- and method-level annotations from a package
+        // (io.example.codegen) that is never indexed nor on the classpath.
+        SourceIndexer.index(
+                URI.create("mem:///Buffer.java"),
+                URI.create(cpUri),
+                """
+                        package io.example.buffer;
+                        import io.example.codegen.DataObject;
+                        import io.example.codegen.GenIgnore;
+                        @DataObject
+                        public interface Buffer {
+                            @GenIgnore
+                            Buffer copy();
+                            int length();
+                        }
+                        """,
+                index);
+
+        JavaFileObject consumer = new SimpleJavaFileObject(
+                URI.create("mem:///JsonObject.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        package io.example.json;
+                        import io.example.buffer.Buffer;
+                        public class JsonObject {
+                            Buffer make(Buffer b) {
+                                return b.copy();
+                            }
+                        }
+                        """;
+            }
+        };
+
+        ClasspathOrder cp = classPathOf(List.of(cpUri, jrtUri));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader2.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(consumer), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> bufferErrors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() != Diagnostic.Kind.ERROR) continue;
+            String msg = d.getMessage(Locale.ENGLISH);
+            if (msg != null && msg.contains("Buffer")) bufferErrors.add(d);
+        }
+        assertTrue(bufferErrors.isEmpty(),
+                () -> "Buffer should resolve despite missing annotation type; got: " + bufferErrors);
+    }
+
+    @Test
     void indexedUserModuleIsVisibleToModularCompilation() throws Exception {
         // Build a real module-info.class on disk so we can have a real
         // classpath URI; the indexer turns it into a ModuleEntry.

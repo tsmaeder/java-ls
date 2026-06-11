@@ -15,7 +15,8 @@ import org.eclipse.lsp4j.Range;
  */
 public final class LspDiagnosticsHarnessMain {
 
-    private static final Duration TIMEOUT = Duration.ofSeconds(120);
+    private static final Duration TIMEOUT = Duration.ofSeconds(600);
+    private static final Duration DIAGNOSTICS_TIMEOUT = Duration.ofSeconds(120);
 
     private LspDiagnosticsHarnessMain() {}
 
@@ -29,14 +30,36 @@ public final class LspDiagnosticsHarnessMain {
         boolean hasErrors = false;
 
         try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspaceRoot)) {
-            harness.awaitIndexReady(TIMEOUT);
+            try {
+                harness.awaitIndexReady(TIMEOUT);
+            } catch (Exception e) {
+                System.err.println("awaitIndexReady failed: " + e);
+                System.err.println("--- server log messages ---");
+                harness.logMessages().forEach(m -> System.err.println("  " + m));
+                throw e;
+            }
+            System.err.println("--- index ready; server log messages ---");
+            harness.logMessages().forEach(m -> System.err.println("  " + m));
 
+            int logsAlreadyPrinted = harness.logMessages().size();
             for (int i = 1; i < args.length; i++) {
                 Path file = Path.of(args[i]).toAbsolutePath().normalize();
-                List<Diagnostic> diagnostics = harness.openAndAwaitDiagnostics(file, TIMEOUT);
-                printDiagnostics(file, diagnostics);
-                if (diagnostics.stream().anyMatch(d -> d.getSeverity() == DiagnosticSeverity.Error)) {
+                try {
+                    List<Diagnostic> diagnostics = harness.openAndAwaitDiagnostics(file, DIAGNOSTICS_TIMEOUT);
+                    printDiagnostics(file, diagnostics);
+                    if (diagnostics.stream().anyMatch(d -> d.getSeverity() == DiagnosticSeverity.Error)) {
+                        hasErrors = true;
+                    }
+                } catch (Exception e) {
+                    System.err.println(file + ": no diagnostics received (" + e + ")");
                     hasErrors = true;
+                } finally {
+                    List<String> logs = harness.logMessages();
+                    System.err.println("--- server log messages (compile phase) ---");
+                    for (int j = logsAlreadyPrinted; j < logs.size(); j++) {
+                        System.err.println("  " + logs.get(j));
+                    }
+                    logsAlreadyPrinted = logs.size();
                 }
             }
         }

@@ -107,6 +107,21 @@ final class IndexAnnotations {
      */
     Attribute.Compound toCompound(AnnotationRef ref, ModuleSymbol module, TypeEntry enclosing) {
         if (ref == null) return null;
+        // Guard the whole conversion against CompletionFailure: a missing
+        // annotation type (e.g. an unbuilt annotation-processor dependency)
+        // must not abort the enclosing class read. javac itself keeps the
+        // annotated declaration usable, so without this a single missing
+        // annotation type would make the annotated type look absent
+        // ("cannot find symbol").
+        try {
+            return toCompoundUnguarded(ref, module, enclosing);
+        } catch (CompletionFailure ignored) {
+            return null;
+        }
+    }
+
+    private Attribute.Compound toCompoundUnguarded(AnnotationRef ref, ModuleSymbol module, TypeEntry enclosing) {
+        if (ref == null) return null;
         Type annType = resolver.resolve(ref.annotationType(), module, enclosing);
         if (annType == null || annType.isErroneous()
                 || !(annType.tsym instanceof ClassSymbol annSym)) {
