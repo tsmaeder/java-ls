@@ -50,11 +50,18 @@ class LspDiagnosticsHarnessTest {
         try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
             harness.awaitIndexReady(Duration.ofSeconds(600));
             List<Diagnostic> diagnostics = harness.openAndAwaitDiagnostics(jsonObject, Duration.ofSeconds(120));
-            List<Diagnostic> encoderErrors = diagnostics.stream()
+            List<Diagnostic> errors = diagnostics.stream()
                     .filter(d -> d.getSeverity() == DiagnosticSeverity.Error)
+                    .toList();
+            List<Diagnostic> encoderErrors = errors.stream()
                     .filter(d -> d.getMessage() != null && d.getMessage().contains("Encoder"))
                     .toList();
+            List<Diagnostic> linkedHashMapErrors = errors.stream()
+                    .filter(d -> d.getMessage() != null && d.getMessage().contains("LinkedHashMap"))
+                    .toList();
             assertTrue(encoderErrors.isEmpty(), () -> "unexpected Encoder errors: " + encoderErrors);
+            assertTrue(linkedHashMapErrors.isEmpty(),
+                    () -> "unexpected LinkedHashMap errors: " + linkedHashMapErrors);
         }
     }
 

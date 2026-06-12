@@ -127,21 +127,12 @@ public final class IndexClassReader extends ClassReader {
         }
 
         if (ct.supertype_field == null) {
-            if (entry.superRef() instanceof TypeRef r) {
-                Type superType = resolver.resolve(r, currentModule, entry);
-                ct.supertype_field = superType;  
-            } else {
-                ct.supertype_field = syms.errType;
-            }
+           var superRef = entry.superRef();
+            ct.supertype_field = superRef == null ? Type.noType: resolveType(superRef, currentModule, entry);
         }
         List<Type> is = List.nil();
         for (ch.castleridge.javals.indexing.model.Type interfaceRef : entry.interfaceRefs()) {
-            if (interfaceRef instanceof TypeRef r) {
-                Type interfaceType = resolver.resolve(r, currentModule, entry);
-                is = is.prepend(interfaceType);
-            } else {
-                is = is.prepend(syms.errType);
-            }
+            is = is.prepend(resolveType(interfaceRef, currentModule, entry));
         }
         if (ct.interfaces_field == null)
             ct.interfaces_field = is.reverse();

@@ -2220,6 +2220,54 @@ class IndexCompileTest {
                 "hidden() symbol must not be public");
     }
 
+    @Test
+    void starImportedLinkedHashMapDiamondInfersFromIndexedClasspath() throws Exception {
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        ClasspathOrder cp = classPathOf(List.of(jrtUri));
+
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("mem:///JsonObject.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        package io.vertx.core.json;
+                        import java.util.*;
+                        public class JsonObject {
+                            private Map<String, Object> map;
+                            public JsonObject() {
+                                map = new LinkedHashMap<>();
+                            }
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "star-imported LinkedHashMap diamond should compile from index; got: " + errors);
+    }
+
     private static TypeEntry typeWithMethod(String srcUri, String jvmName, String methodName) {
         return new TypeEntry(
                 "index:///" + jvmName + "@" + srcUri,
