@@ -23,6 +23,7 @@ import com.sun.tools.javac.code.Type.MethodType;
 import com.sun.tools.javac.code.Type.TypeVar;
 import com.sun.tools.javac.code.Type.WildcardType;
 import com.sun.tools.javac.code.Types;
+import com.sun.tools.javac.comp.Annotate.AnnotationTypeMetadata;
 import com.sun.tools.javac.jvm.ClassReader;
 import com.sun.tools.javac.util.Context;
 import com.sun.tools.javac.util.List;
@@ -30,6 +31,7 @@ import com.sun.tools.javac.util.ListBuffer;
 import com.sun.tools.javac.util.Names;
 import com.sun.tools.javac.util.Name;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeRef;
@@ -149,7 +151,42 @@ public final class IndexClassReader extends ClassReader {
                 rc.accessor = lookupMethod(c, rc.name, List.nil());
             }
         }
+        installAnnotationTypeMetadata(c, entry, currentModule);
         typevars = typevars.leave();
+    }
+
+    /**
+     * Mirror the tail of {@code ClassReader.readClassFile}: indexed
+     * annotation types must expose real {@link AnnotationTypeMetadata}
+     * so {@code Check.validateAnnotation} can enumerate declared
+     * elements. Without this, symbols keep
+     * {@link AnnotationTypeMetadata#notAnAnnotationType()} and every
+     * use site reports duplicate/missing annotation members (e.g.
+     * {@code @SuppressWarnings("unchecked")}).
+     */
+    private void installAnnotationTypeMetadata(ClassSymbol c, TypeEntry entry, ModuleSymbol module) {
+        if ((c.flags_field & Flags.ANNOTATION) != 0) {
+            Attribute.Compound target = classAnnotationCompound(entry, "java/lang/Target", module);
+            Attribute.Compound repeatable = classAnnotationCompound(entry, "java/lang/Repeatable", module);
+            c.setAnnotationTypeMetadata(new AnnotationTypeMetadata(c, sym -> {
+                if (target != null) sym.getAnnotationTypeMetadata().setTarget(target);
+                if (repeatable != null) sym.getAnnotationTypeMetadata().setRepeatable(repeatable);
+            }));
+        } else {
+            c.setAnnotationTypeMetadata(AnnotationTypeMetadata.notAnAnnotationType());
+        }
+    }
+
+    private Attribute.Compound classAnnotationCompound(TypeEntry entry,
+                                                       String jvmBinaryName,
+                                                       ModuleSymbol module) {
+        for (AnnotationRef ref : entry.annotations()) {
+            if (ref.annotationType() instanceof TypeRef.Resolved r
+                    && jvmBinaryName.equals(r.jvmBinaryName())) {
+                return annotations.toCompound(ref, module, entry);
+            }
+        }
+        return null;
     }
 
     /**

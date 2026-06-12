@@ -62,6 +62,13 @@ class LspDiagnosticsHarnessTest {
             assertTrue(encoderErrors.isEmpty(), () -> "unexpected Encoder errors: " + encoderErrors);
             assertTrue(linkedHashMapErrors.isEmpty(),
                     () -> "unexpected LinkedHashMap errors: " + linkedHashMapErrors);
+            List<Diagnostic> suppressWarningsErrors = errors.stream()
+                    .filter(d -> d.getMessage() != null
+                            && d.getMessage().contains("duplicate element")
+                            && d.getMessage().contains("SuppressWarnings"))
+                    .toList();
+            assertTrue(suppressWarningsErrors.isEmpty(),
+                    () -> "unexpected @SuppressWarnings errors: " + suppressWarningsErrors);
         }
     }
 
