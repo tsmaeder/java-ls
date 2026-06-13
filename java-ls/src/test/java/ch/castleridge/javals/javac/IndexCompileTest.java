@@ -832,6 +832,176 @@ class IndexCompileTest {
     }
 
     @Test
+    void base64EncoderEncodeToStringCompilesCleanlyWithJrtIndex() throws Exception {
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        ClasspathOrder cp = classPathOf(List.of(jrtUri));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("test:///Base64EncodeUse.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        import java.util.Base64;
+
+                        class Base64EncodeUse {
+                            static String encode(byte[] bytes) {
+                                return Base64.getEncoder().encodeToString(bytes);
+                            }
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) {
+                errors.add(d);
+            }
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "Base64.Encoder.encodeToString should compile cleanly with indexed JRT classes; got: " + errors);
+    }
+
+    @Test
+    void base64EncoderFieldAccessWithoutLoadingOuterClassCompilesCleanly() throws Exception {
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        ClasspathOrder cp = classPathOf(List.of(jrtUri));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("test:///Base64FieldUse.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        import java.util.Base64.Encoder;
+
+                        class Base64FieldUse {
+                            static final Encoder ENCODER = null;
+
+                            static String encode(byte[] bytes) {
+                                return ENCODER.encodeToString(bytes);
+                            }
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) {
+                errors.add(d);
+            }
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "Encoder field access without loading Base64 outer should compile; got: " + errors);
+    }
+
+    @Test
+    void indexFileManagerResolvesNestedJdkClassByBinaryName() throws Exception {
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+
+        Index index = new Index();
+        new Scanner().scanAll(List.of(jrt), index);
+
+        ClasspathOrder cp = classPathOf(List.of(jrtUri));
+        JavacTool tool = JavacTool.create();
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject encoder = fm.getJavaFileForInput(
+                StandardLocation.PLATFORM_CLASS_PATH, "java.util.Base64$Encoder", JavaFileObject.Kind.CLASS);
+        assertNotNull(encoder, "indexed Base64$Encoder should be returned from getJavaFileForInput");
+        assertInstanceOf(IndexClassFileObject.class, encoder);
+        assertEquals("java.util.Base64$Encoder", ((IndexClassFileObject) encoder).binaryName());
+    }
+
+    @Test
+    void base64EncoderFieldAccessWithSourceDirOnClasspathBeforeJrtCompilesCleanly() throws Exception {
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String sourceUri = Path.of("target/encoder-cp-test-src").toAbsolutePath().toUri().toString();
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        ClasspathOrder cp = classPathOf(List.of(sourceUri, jrtUri));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("test:///Base64FieldUse.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        import java.util.Base64.Encoder;
+
+                        class Base64FieldUse {
+                            static final Encoder ENCODER = null;
+
+                            static String encode(byte[] bytes) {
+                                return ENCODER.encodeToString(bytes);
+                            }
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) {
+                errors.add(d);
+            }
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "Encoder field access with source dir before jrt on classpath should compile; got: " + errors);
+    }
+
+    @Test
     void annotationsOnIndexedJdkTypesAreRecognised() throws Exception {
         // Regression: when java.lang.SuppressWarnings was loaded via the
         // index reader its ClassSymbol kept the default notAnAnnotationType()

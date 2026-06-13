@@ -142,6 +142,18 @@ class JrtScanTest {
     }
 
     @Test
+    void base64EncoderIsIndexedAsSeparateNestedClass() {
+        Index index = new Index();
+        Scanner scanner = new Scanner();
+        scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
+
+        TypeEntry encoder = index.get("java/util/Base64$Encoder");
+        assertNotNull(encoder, "java.util.Base64.Encoder should be indexed as its own entry");
+        assertTrue(encoder.methods().stream().anyMatch(m -> m.name().equals("encodeToString")),
+                "Base64.Encoder should carry encodeToString(byte[])");
+    }
+
+    @Test
     void listPackageReturnsPackageMembers() {
         Index index = new Index();
         Scanner scanner = new Scanner();

@@ -35,27 +35,40 @@ final class TypeRefResolver {
         this.classpath = classpath;
     }
 
+    ClassSymbol resolveTypeRef(TypeRef tr, ModuleSymbol module, TypeEntry entry) {
+        ClassSymbol symbol = resolve(tr, module, entry);
+        if (symbol != null) {
+            if (symbol.classfile == null) {
+                TypeEntry refEntry =  classpath.pick(index.getAll(symbol.className()), TypeEntry::sourceUri);
+                if (refEntry != null) {
+                    symbol.classfile = new IndexClassFileObject(refEntry);
+                }
+            }
+            return symbol;
+        }
+        return null;
+    }
+
     /**
      * Resolve a class-type reference. {@link TypeRef.Resolved} carries a
      * fully-qualified JVM binary name; {@link TypeRef.Unresolved} carries
      * only a simple name that is resolved against {@code enclosing}'s
      * {@link SourceResolutionHints}.
      */
-    Type resolve(TypeRef ref, ModuleSymbol module, TypeEntry enclosing) {
+    private ClassSymbol resolve(TypeRef ref, ModuleSymbol module, TypeEntry enclosing) {
         if (ref instanceof TypeRef.Resolved r) {
-            return classType(module, r.jvmBinaryName());
+            return classSymbol(module, r.jvmBinaryName());
         }
         if (ref instanceof TypeRef.Unresolved u) {
-            return classType(module, resolveSimple(u.simpleName(), enclosing));
+            return classSymbol(module, resolveSimple(u.simpleName(), enclosing));
         }
-        return syms.errType;
+        return null;
     }
 
-    Type classType(ModuleSymbol module, String jvmBinaryName) {
-        if (jvmBinaryName == null || jvmBinaryName.isEmpty()) return syms.errType;
+    ClassSymbol classSymbol(ModuleSymbol module, String jvmBinaryName) {
+        if (jvmBinaryName == null || jvmBinaryName.isEmpty()) return null;
         String dotted = jvmBinaryName.replace('/', '.');
-        ClassSymbol sym = syms.enterClass(module, names.fromString(dotted));
-        return sym.type;
+        return syms.enterClass(module, names.fromString(dotted));
     }
 
     private String resolveSimple(String simple, TypeEntry enclosing) {

@@ -101,13 +101,28 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
 
     @Override
     public JavaFileObject getJavaFileForInput(Location location, String className, Kind kind) throws IOException {
-        if (location instanceof IndexedModuleLocation iml && kind == Kind.CLASS) {
-            if ("module-info".equals(className)) {
-                IndexModuleFileObject mf = moduleFile(iml.moduleName());
-                if (mf != null) return mf;
-            } 
+        if (kind == Kind.CLASS && className != null) {
+            if (location instanceof IndexedModuleLocation iml) {
+                if ("module-info".equals(className)) {
+                    IndexModuleFileObject mf = moduleFile(iml.moduleName());
+                    if (mf != null) return mf;
+                }
+                ModuleEntry module = moduleEntry(iml.moduleName());
+                if (module != null) {
+                    String jvm = className.replace('.', '/');
+                    int slash = jvm.lastIndexOf('/');
+                    String pkgJvm = slash < 0 ? "" : jvm.substring(0, slash);
+                    if (moduleOwnsPackage(module, pkgJvm)) {
+                        IndexClassFileObject indexed = indexedClassFile(jvm);
+                        if (indexed != null) return indexed;
+                    }
+                }
+            } else {
+                IndexClassFileObject indexed = indexedClassFile(className.replace('.', '/'));
+                if (indexed != null) return indexed;
+            }
         }
-        
+
         return super.getJavaFileForInput(location, className, kind);
     }
 
@@ -162,6 +177,12 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
     public static TypeEntry asEntry(JavaFileObject file) {
         return file instanceof IndexClassFileObject icfo ? icfo.entry() : null;
     }
+
+    private IndexClassFileObject indexedClassFile(String jvmName) {
+        TypeEntry winner = classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri);
+        return winner == null ? null : new IndexClassFileObject(winner);
+    }
+
 
     private List<JavaFileObject> listIndexedTypes(String pkgJvm, boolean recurse) {
         Map<String, TypeEntry> winners = new HashMap<>();

@@ -65,6 +65,10 @@ public final class IndexClassReader extends ClassReader {
         this.annotations = new IndexAnnotations(syms, names, types, resolver);
     }
 
+    private TypeEntry pickIndexedType(String jvmName) {
+        return classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri);
+    }
+
     /**
      * Install an {@code IndexClassReader} factory under the supplied
      * context with an {@linkplain ClasspathOrder#UNRESTRICTED unrestricted}
@@ -201,7 +205,10 @@ public final class IndexClassReader extends ClassReader {
             if (dollar < 0 || dollar == innerJvm.length() - 1) continue;
             Name innerName = names.fromString(innerJvm.substring(dollar + 1));
             ClassSymbol member = enterClass(innerName, c);
-            TypeEntry innerEntry = classpath.pick(index.getAll(innerJvm), TypeEntry::sourceUri);
+            TypeEntry innerEntry = pickIndexedType(innerJvm);
+            if (innerEntry != null) {
+                member.classfile = new IndexClassFileObject(innerEntry);
+            }
             long innerFlags = innerEntry != null
                     ? IndexAccessFlags.classFlags(innerEntry)
                     : member.flags_field;
@@ -314,9 +321,12 @@ public final class IndexClassReader extends ClassReader {
             return resolveParameterized(p, module, entry);
         }
         if (ref instanceof TypeRef tr) {
-            return resolver.resolve(tr, module, entry);
+            ClassSymbol symbol = resolver.resolveTypeRef(tr, module, entry);
+            if (symbol != null) {
+                return symbol.type;
+            }
         }
-        return syms.errType;
+        return null;
     }
 
     private Type lookupTypeVar(String name) {
@@ -326,24 +336,24 @@ public final class IndexClassReader extends ClassReader {
     }
 
     private Type resolveParameterized(Parameterized p, ModuleSymbol module, TypeEntry entry) {
-        Type raw = resolver.resolve(p.raw(), module, entry);
+        ClassSymbol raw = resolver.resolveTypeRef(p.raw(), module, entry);
         ListBuffer<Type> args = new ListBuffer<>();
         for (ch.castleridge.javals.indexing.model.Type arg : p.typeArgs()) {
             args.add(resolveType(arg, module, entry));
         }
-        if (raw instanceof ClassType ct) {
+        if (raw instanceof ClassSymbol ct) {
             // Static nested types must not carry the raw outer type: propagating it
             // causes Attr to reject uses like Map.Entry<K,V> with "improperly formed
             // type, type arguments given on a raw type". Top-level types already have
             // outer_field == Type.noType, so this is only a correction for static
             // members whose outer_field was initialised to the raw owner by
             // Symtab.defineClass.
-            Type outer = (ct.tsym.flags_field & Flags.STATIC) != 0
+            Type outer = (ct.flags_field & Flags.STATIC) != 0
                     ? Type.noType
-                    : ct.getEnclosingType();
-            return new ClassType(outer, args.toList(), ct.tsym);
+                    : ct.type.getEnclosingType();
+            return new ClassType(outer, args.toList(), ct);
         }
-        return raw;
+        return raw.type;
     }
 
     private Type resolveWildcard(Wildcard w, ModuleSymbol module, TypeEntry entry) {

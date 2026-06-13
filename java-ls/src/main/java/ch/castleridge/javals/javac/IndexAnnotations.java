@@ -234,7 +234,7 @@ final class IndexAnnotations {
         if (ref == null)
             return null;
 
-        Type annType = resolver.resolve(ref.annotationType(), module, enclosing);
+        Type annType = resolver.resolveTypeRef(ref.annotationType(), module, enclosing).type;
 
         if (annType == null || annType.isErroneous() || !(annType.tsym instanceof ClassSymbol annSym)) {
             return null;

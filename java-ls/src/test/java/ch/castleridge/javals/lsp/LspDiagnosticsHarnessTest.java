@@ -44,7 +44,7 @@ class LspDiagnosticsHarnessTest {
     @Test
     @EnabledIf("vertxWorkspacePresent")
     void vertxJsonObjectBase64EncoderImportHasNoErrors() throws Exception {
-        Path workspace = Path.of("../test-projects/vert.x").toAbsolutePath().normalize();
+        Path workspace = Path.of("../../test-projects/vert.x").toAbsolutePath().normalize();
         Path jsonObject = workspace.resolve("vertx-core/src/main/java/io/vertx/core/json/JsonObject.java");
 
         try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
@@ -73,7 +73,7 @@ class LspDiagnosticsHarnessTest {
     }
 
     static boolean vertxWorkspacePresent() {
-        Path workspace = Path.of("../test-projects/vert.x").toAbsolutePath().normalize();
+        Path workspace = Path.of("../../test-projects/vert.x").toAbsolutePath().normalize();
         Path jsonObject = workspace.resolve("vertx-core/src/main/java/io/vertx/core/json/JsonObject.java");
         return Files.isDirectory(workspace) && Files.isRegularFile(jsonObject);
     }
