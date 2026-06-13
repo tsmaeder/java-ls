@@ -34,6 +34,7 @@ import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
+import ch.castleridge.javals.indexing.model.ParameterEntry;
 import ch.castleridge.javals.indexing.model.TypeRef;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
@@ -271,10 +272,37 @@ public final class IndexClassReader extends ClassReader {
                     : new ForAll(methodTypeParams, methodType);
             MethodSymbol m = new MethodSymbol(flags, name, sig, currentOwner);
             m.setDeclarationAttributes(annotations.toCompounds(method.annotations(), currentModule, entry));
+            m.params = readParameters(method, m, currentModule, entry);
             return m;
         } finally {
             typevars = typevars.leave();
         }
+    }
+
+    /**
+     * Build the {@link MethodSymbol#params} list from the indexed
+     * {@link ParameterEntry}s so that downstream consumers see real
+     * parameter names, modifiers ({@code final}) and declaration
+     * annotations instead of javac's synthesized {@code arg0}/{@code arg1}
+     * fallback. Each {@link VarSymbol} is created with the
+     * {@link Flags#PARAMETER} bit set and owned by {@code m}.
+     */
+    private List<VarSymbol> readParameters(MethodEntry method, MethodSymbol m,
+                                           ModuleSymbol module, TypeEntry entry) {
+        if (method.parameters().isEmpty()) return List.nil();
+        ListBuffer<VarSymbol> params = new ListBuffer<>();
+        int index = 0;
+        for (ParameterEntry p : method.parameters()) {
+            long flags = Integer.toUnsignedLong(p.modifiers()) | Flags.PARAMETER;
+            String pname = p.name() != null ? p.name() : "arg" + index;
+            Name name = names.fromString(pname);
+            Type type = resolveType(p.type(), module, entry);
+            VarSymbol v = new VarSymbol(flags, name, type, m);
+            v.setDeclarationAttributes(annotations.toCompounds(p.annotations(), module, entry));
+            params.add(v);
+            index++;
+        }
+        return params.toList();
     }
 
     private MethodType resolveMethodType(MethodEntry m, ModuleSymbol module, TypeEntry entry) {
