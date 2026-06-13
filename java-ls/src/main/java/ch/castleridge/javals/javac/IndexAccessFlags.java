@@ -1,9 +1,13 @@
 package ch.castleridge.javals.javac;
 
+import java.util.List;
+
 import org.objectweb.asm.Opcodes;
 
 import com.sun.tools.javac.code.Flags;
 
+import ch.castleridge.javals.indexing.model.AnnotationRef;
+import ch.castleridge.javals.indexing.model.AnnotationValue;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
@@ -85,6 +89,30 @@ final class IndexAccessFlags {
                 && method.hasBody()
                 && (flags & (Opcodes.ACC_STATIC | Opcodes.ACC_PRIVATE | Opcodes.ACC_ABSTRACT)) == 0) {
             flags |= Flags.DEFAULT;
+        }
+        return flags;
+    }
+
+    /**
+     * Mirror javac's deprecation handling: an indexed {@code @Deprecated}
+     * declaration annotation sets {@link Flags#DEPRECATED} and
+     * {@link Flags#DEPRECATED_ANNOTATION}, and {@code forRemoval = true}
+     * additionally sets {@link Flags#DEPRECATED_REMOVAL}. These drive
+     * {@code Symbol.isDeprecated()} / {@code isDeprecatedForRemoval()} and
+     * the corresponding call-site diagnostics, which a freshly synthesized
+     * symbol would otherwise miss (attaching the {@code Attribute.Compound}
+     * alone is not enough).
+     */
+    static long withDeprecation(long flags, List<AnnotationRef> annotations) {
+        if (annotations == null) return flags;
+        for (AnnotationRef ref : annotations) {
+            if (!"java/lang/Deprecated".equals(ref.jvmName())) continue;
+            flags |= Flags.DEPRECATED | Flags.DEPRECATED_ANNOTATION;
+            AnnotationValue forRemoval = ref.values().get("forRemoval");
+            if (forRemoval instanceof AnnotationValue.Primitive p
+                    && Boolean.TRUE.equals(p.boxed())) {
+                flags |= Flags.DEPRECATED_REMOVAL;
+            }
         }
         return flags;
     }

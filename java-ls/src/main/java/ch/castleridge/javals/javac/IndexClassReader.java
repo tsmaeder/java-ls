@@ -35,6 +35,7 @@ import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ParameterEntry;
+import ch.castleridge.javals.indexing.model.RecordComponentEntry;
 import ch.castleridge.javals.indexing.model.TypeRef;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
@@ -103,6 +104,22 @@ public final class IndexClassReader extends ClassReader {
     }
 
     private void readFromIndex(ClassSymbol c, TypeEntry entry) {
+        // currentOwner / currentModule are reader-wide mutable state. Resolving a
+        // member's type can complete another indexed class (a nested readFromIndex),
+        // which would otherwise clobber these fields and leave the rest of this
+        // class's members owned by the wrong symbol. Save and restore them so the
+        // completion is re-entrancy safe.
+        Symbol prevOwner = currentOwner;
+        ModuleSymbol prevModule = currentModule;
+        try {
+            readFromIndexImpl(c, entry);
+        } finally {
+            currentOwner = prevOwner;
+            currentModule = prevModule;
+        }
+    }
+
+    private void readFromIndexImpl(ClassSymbol c, TypeEntry entry) {
         currentOwner = c;
         currentModule = c.packge() == null ? syms.unnamedModule : c.packge().modle;
         if (currentModule == null) currentModule = syms.unnamedModule;
@@ -120,7 +137,8 @@ public final class IndexClassReader extends ClassReader {
         ct.typarams_field = classTypeParams;
 
         // read flags, or skip if this is an inner class
-        long flags = IndexAccessFlags.classFlags(entry);
+        long flags = IndexAccessFlags.withDeprecation(
+                IndexAccessFlags.classFlags(entry), entry.annotations());
         if ((flags & MODULE) == 0) {
             if (c.owner.kind == Kinds.Kind.PCK || c.owner.kind == Kinds.Kind.ERR) c.flags_field = flags;
         } else {
@@ -129,6 +147,7 @@ public final class IndexClassReader extends ClassReader {
 
         readClassAttrs(c, entry);
 
+        readPermittedSubclasses(c, entry);
         if (!c.getPermittedSubclasses().isEmpty()) {
             c.flags_field |= Flags.SEALED;
         }
@@ -151,6 +170,7 @@ public final class IndexClassReader extends ClassReader {
             enterMember(c, readMethod(method, entry));
         }
         readInnerClassesFromIndex(c, entry);
+        readRecordComponents(c, entry);
         if (c.isRecord()) {
             for (RecordComponent rc: c.getRecordComponents()) {
                 rc.accessor = lookupMethod(c, rc.name, List.nil());
@@ -171,8 +191,8 @@ public final class IndexClassReader extends ClassReader {
      */
     private void installAnnotationTypeMetadata(ClassSymbol c, TypeEntry entry, ModuleSymbol module) {
         if ((c.flags_field & Flags.ANNOTATION) != 0) {
-            Attribute.Compound target = classAnnotationCompound(entry, "java/lang/Target", module);
-            Attribute.Compound repeatable = classAnnotationCompound(entry, "java/lang/Repeatable", module);
+            Attribute.Compound target = classAnnotationCompound(entry, "java/lang/annotation/Target", module);
+            Attribute.Compound repeatable = classAnnotationCompound(entry, "java/lang/annotation/Repeatable", module);
             c.setAnnotationTypeMetadata(new AnnotationTypeMetadata(c, sym -> {
                 if (target != null) sym.getAnnotationTypeMetadata().setTarget(target);
                 if (repeatable != null) sym.getAnnotationTypeMetadata().setRepeatable(repeatable);
@@ -245,7 +265,8 @@ public final class IndexClassReader extends ClassReader {
     }
 
     private VarSymbol readField(FieldEntry field, TypeEntry entry) {
-        long flags = IndexAccessFlags.fieldFlags(entry, field);
+        long flags = IndexAccessFlags.withDeprecation(
+                IndexAccessFlags.fieldFlags(entry, field), field.annotations());
         Name name = names.fromString(field.name());
         Type type = resolveType(field.type(), currentModule, entry);
         VarSymbol v = new VarSymbol(flags, name, type, currentOwner);
@@ -260,11 +281,50 @@ public final class IndexClassReader extends ClassReader {
         c.setDeclarationAttributes(annotations.toCompounds(entry.annotations(), currentModule, entry));
     }
 
+    /**
+     * Resolve the indexed permitted subclasses into member symbols and
+     * record them on {@code c}, mirroring the {@code PermittedSubclasses}
+     * classfile attribute. {@link ClassSymbol#isPermittedExplicit} must be
+     * set so {@code Check} enforces the {@code permits} clause against
+     * non-listed subtypes.
+     */
+    private void readPermittedSubclasses(ClassSymbol c, TypeEntry entry) {
+        if (entry.permittedSubclasses().isEmpty()) return;
+        ListBuffer<Symbol> permitted = new ListBuffer<>();
+        for (TypeRef ref : entry.permittedSubclasses()) {
+            ClassSymbol sym = resolver.resolveTypeRef(ref, currentModule, entry);
+            if (sym != null) permitted.add(sym);
+        }
+        c.setPermittedSubclasses(permitted.toList());
+        c.isPermittedExplicit = true;
+    }
+
+    /**
+     * Materialize the {@code Record} attribute: build a
+     * {@link RecordComponent} per indexed component so consumers walking
+     * {@code ClassSymbol.getRecordComponents()} (and javac's own record
+     * checks) see them. Accessor wiring happens at the call site once the
+     * synthesized accessor methods have been entered.
+     */
+    private void readRecordComponents(ClassSymbol c, TypeEntry entry) {
+        if (entry.recordComponents().isEmpty()) return;
+        ListBuffer<RecordComponent> components = new ListBuffer<>();
+        for (RecordComponentEntry rc : entry.recordComponents()) {
+            Type type = resolveType(rc.type(), currentModule, entry);
+            RecordComponent component = new RecordComponent(names.fromString(rc.name()), type, c);
+            component.setDeclarationAttributes(
+                    annotations.toCompounds(rc.annotations(), currentModule, entry));
+            components.add(component);
+        }
+        c.setRecordComponents(components.toList());
+    }
+
     private MethodSymbol readMethod(MethodEntry method, TypeEntry entry) {
         try {
             typevars = typevars.dup();
             List<Type> methodTypeParams = enterTypeParams(method.typeParams(), currentOwner, currentModule, entry);
-            long flags = IndexAccessFlags.methodFlags(entry, method);
+            long flags = IndexAccessFlags.withDeprecation(
+                    IndexAccessFlags.methodFlags(entry, method), method.annotations());
             Name name = names.fromString(method.name());
             MethodType methodType = resolveMethodType(method, currentModule, entry);
             Type sig = methodTypeParams.isEmpty()
@@ -273,6 +333,10 @@ public final class IndexClassReader extends ClassReader {
             MethodSymbol m = new MethodSymbol(flags, name, sig, currentOwner);
             m.setDeclarationAttributes(annotations.toCompounds(method.annotations(), currentModule, entry));
             m.params = readParameters(method, m, currentModule, entry);
+            if (method.annotationDefault() != null) {
+                m.defaultValue = annotations.toAttribute(
+                        method.annotationDefault(), m.getReturnType(), currentModule, entry);
+            }
             return m;
         } finally {
             typevars = typevars.leave();
