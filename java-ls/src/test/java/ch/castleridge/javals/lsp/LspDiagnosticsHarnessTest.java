@@ -114,6 +114,43 @@ class LspDiagnosticsHarnessTest {
         }
     }
 
+    @Test
+    @EnabledIf("vertxWorkspacePresent")
+    void vertxJsonObjectIsoInstantStaticImportNavigatesToDefinition() throws Exception {
+        Path workspace = Path.of("../../test-projects/vert.x").toAbsolutePath().normalize();
+        Path jsonObject = workspace.resolve("vertx-core/src/main/java/io/vertx/core/json/JsonObject.java");
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(Duration.ofSeconds(600));
+            harness.openAndAwaitDiagnostics(jsonObject, Duration.ofSeconds(120));
+
+            List<String> lines = Files.readAllLines(jsonObject);
+            int importLine = -1;
+            for (int i = 0; i < lines.size(); i++) {
+                if (lines.get(i).contains("import static java.time.format.DateTimeFormatter.ISO_INSTANT")) {
+                    importLine = i;
+                    break;
+                }
+            }
+            assertTrue(importLine >= 0, "expected ISO_INSTANT static import in JsonObject.java");
+
+            String line = lines.get(importLine);
+            int isoInstantCol = line.indexOf("ISO_INSTANT");
+            assertTrue(isoInstantCol >= 0);
+
+            List<Location> isoInstantDefs = harness.definitionAt(
+                    jsonObject.toUri(), new Position(importLine, isoInstantCol));
+            assertFalse(isoInstantDefs.isEmpty(),
+                    "go-to-definition on ISO_INSTANT in static import should resolve");
+
+            int formatterCol = line.indexOf("DateTimeFormatter");
+            List<Location> formatterDefs = harness.definitionAt(
+                    jsonObject.toUri(), new Position(importLine, formatterCol));
+            assertFalse(formatterDefs.isEmpty(),
+                    "go-to-definition on DateTimeFormatter in static import should resolve");
+        }
+    }
+
     static boolean vertxWorkspacePresent() {
         Path workspace = Path.of("../../test-projects/vert.x").toAbsolutePath().normalize();
         Path jsonObject = workspace.resolve("vertx-core/src/main/java/io/vertx/core/json/JsonObject.java");

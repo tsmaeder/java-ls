@@ -22,6 +22,7 @@ import com.sun.source.util.Trees;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.UriCoding;
 import ch.castleridge.javals.javac.ClasspathOrder;
+import ch.castleridge.javals.javac.DefinitionElementResolver;
 import ch.castleridge.javals.javac.SourceCache;
 import ch.castleridge.javals.javac.SymbolLocator;
 import ch.castleridge.javals.javac.TreePathLocator;
@@ -238,7 +239,7 @@ public class JavaTextDocumentService implements TextDocumentService {
         TreePath path = TreePathLocator.findAt(trees, cu, offset);
         if (path == null) return List.of();
 
-        Element element = elementForPath(trees, path);
+        Element element = DefinitionElementResolver.resolve(trees, path);
         if (element == null) return List.of();
 
         return symbolLocator.locate(element, trees, cu, uri, indexService.sourceJarByBinaryJar())
@@ -255,20 +256,6 @@ public class JavaTextDocumentService implements TextDocumentService {
         }
     }
 
-    /**
-     * Resolve {@code path}'s leaf to an {@link Element}, walking up the
-     * path if the leaf itself isn't bound (e.g. punctuation tokens that
-     * sit inside a parent {@code MemberSelectTree}).
-     */
-    private static Element elementForPath(Trees trees, TreePath path) {
-        TreePath cur = path;
-        while (cur != null) {
-            Element e = trees.getElement(cur);
-            if (e != null) return e;
-            cur = cur.getParentPath();
-        }
-        return null;
-    }
 
     @Override
     public CompletableFuture<List<? extends Location>> references(ReferenceParams params) {
