@@ -62,12 +62,53 @@ final class TypeRefResolver {
      */
     private ClassSymbol resolve(TypeRef ref, ModuleSymbol module, TypeEntry enclosing) {
         if (ref instanceof TypeRef.Resolved r) {
-            return classSymbol(module, r.jvmBinaryName());
+            return classSymbol(module, qualifyResolved(r.jvmBinaryName(), enclosing));
         }
         if (ref instanceof TypeRef.Unresolved u) {
             return classSymbol(module, resolveSimple(u.simpleName(), enclosing));
         }
         return null;
+    }
+
+    /**
+     * Source indexing emits member selects rooted at a simple name (e.g.
+     * {@code Base64.Encoder} under {@code import java.util.*}) as
+     * {@code Base64$Encoder} without a package prefix. Re-qualify those
+     * using the enclosing source entry's import hints and the active index.
+     */
+    private String qualifyResolved(String jvm, TypeEntry enclosing) {
+        if (jvm.contains("/")) return jvm;
+        if (enclosing == null || !enclosing.isSourceEntry()) return jvm;
+
+        SourceResolutionHints hints = enclosing.hints();
+        int dollar = jvm.indexOf('$');
+        String outerSimple = dollar < 0 ? jvm : jvm.substring(0, dollar);
+        String nestedSuffix = dollar < 0 ? "" : jvm.substring(dollar);
+
+        String single = hints.singleTypeImports().get(outerSimple);
+        if (single != null) {
+            String candidate = single + nestedSuffix;
+            if (availableOnClasspath(candidate)) return candidate;
+        }
+
+        if (hints.siblingSimpleNames().contains(outerSimple)) {
+            String pkg = hints.sourcePackage();
+            String candidate = pkg.isEmpty() ? jvm : pkg + "/" + jvm;
+            if (availableOnClasspath(candidate)) return candidate;
+        }
+
+        for (String od : hints.onDemandImports()) {
+            String candidate = od.isEmpty() ? jvm : od + "/" + jvm;
+            if (availableOnClasspath(candidate)) return candidate;
+        }
+
+        String pkg = hints.sourcePackage();
+        if (!pkg.isEmpty()) {
+            String candidate = pkg + "/" + jvm;
+            if (availableOnClasspath(candidate)) return candidate;
+        }
+
+        return jvm;
     }
 
     ClassSymbol classSymbol(ModuleSymbol module, String jvmBinaryName) {

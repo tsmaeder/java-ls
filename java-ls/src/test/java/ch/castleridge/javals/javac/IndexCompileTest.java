@@ -44,6 +44,7 @@ import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.Type;
 import ch.castleridge.javals.indexing.model.TypeRef;
+import ch.castleridge.javals.indexing.scan.DirInput;
 import ch.castleridge.javals.indexing.scan.JrtInput;
 import ch.castleridge.javals.indexing.scan.Scanner;
 import ch.castleridge.javals.indexing.source.SourceIndexer;
@@ -2388,6 +2389,73 @@ class IndexCompileTest {
                 "hidden() symbol should be private");
         assertTrue(!hiddenMethod.getModifiers().contains(Modifier.PUBLIC),
                 "hidden() symbol must not be public");
+    }
+
+    @Test
+    void vertxJsonUtilBase64EncoderStaticImportCompilesFromSourceAndJrtIndex() throws Exception {
+        Path vertxCoreSrc = Path.of("../../test-projects/vert.x/vertx-core/src/main/java")
+                .toAbsolutePath().normalize();
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                Files.isDirectory(vertxCoreSrc),
+                "vert.x test workspace not present");
+
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String sourceUri = vertxCoreSrc.toUri().toString();
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt, new DirInput(vertxCoreSrc)), index);
+        assertTrue(failures.isEmpty(), () -> "scan failures: " + failures);
+        assertNotNull(index.get("java/util/Base64$Encoder"), "Base64$Encoder must be indexed from jrt");
+        TypeEntry jsonUtil = index.get("io/vertx/core/json/impl/JsonUtil");
+        assertNotNull(jsonUtil, "JsonUtil must be indexed from vert.x sources");
+        FieldEntry encoderField = jsonUtil.fields().stream()
+                .filter(f -> "BASE64_ENCODER".equals(f.name()))
+                .findFirst()
+                .orElseThrow();
+        // Lazy model: the source indexer stores the member-select type
+        // package-less (Base64.Encoder -> Base64$Encoder); TypeRefResolver
+        // qualifies it to java/util/Base64$Encoder at compile time using the
+        // entry's import hints + classpath.
+        assertInstanceOf(TypeRef.Resolved.class, encoderField.type());
+        assertEquals("Base64$Encoder", ((TypeRef.Resolved) encoderField.type()).jvmBinaryName());
+
+        ClasspathOrder cp = classPathOf(List.of(sourceUri, jrtUri));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("mem:///JsonObjectSnippet.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        package io.vertx.core.json;
+                        import java.util.Base64.Encoder;
+                        import static io.vertx.core.json.impl.JsonUtil.*;
+                        class JsonObjectSnippet {
+                            static String encode(Object val) {
+                                return BASE64_ENCODER.encodeToString((byte[]) val);
+                            }
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "BASE64_ENCODER.encodeToString should compile from indexed JsonUtil + jrt; got: " + errors);
     }
 
     @Test

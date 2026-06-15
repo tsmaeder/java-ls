@@ -92,6 +92,28 @@ class SourceIndexerGenericsTest {
         assertEquals(Type.Wildcard.BoundKind.SUPER, wildcard.kind());
     }
 
+    @Test
+    void starImportedMemberSelectFieldTypeIsStoredPackageLess() {
+        // Lazy model: the source indexer cannot know java.util.* binds
+        // Base64, so it records the member select as the package-less binary
+        // form Base64$Encoder. TypeRefResolver later qualifies it using the
+        // entry's import hints + classpath. See TypeRefResolver#qualifyResolved.
+        TypeEntry entry = indexSingle("""
+                package example;
+                import java.util.*;
+                class Util {
+                    static final Base64.Encoder ENCODER = null;
+                }
+                """, "example/Util");
+
+        FieldEntry encoder = entry.fields().stream()
+                .filter(f -> "ENCODER".equals(f.name()))
+                .findFirst()
+                .orElseThrow();
+        assertInstanceOf(TypeRef.Resolved.class, encoder.type());
+        assertEquals("Base64$Encoder", ((TypeRef.Resolved) encoder.type()).jvmBinaryName());
+    }
+
     private static TypeEntry indexSingle(String source, String jvmName) {
         Index index = new Index();
         SourceIndexer.index(RESOURCE_URI, SOURCE_URI, source, index);

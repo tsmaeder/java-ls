@@ -425,6 +425,23 @@ public final class SourceIndexer {
         return TypeRef.resolved("java/lang/Object");
     }
 
+    /**
+     * Build a {@link TypeRef} from a member-select type tree.
+     *
+     * <p>When the selection is rooted at a nested type of the enclosing
+     * declaration (e.g. {@code Outer.Inner} inside {@code Outer}), it is
+     * rewritten against {@code ownerJvm} so the binary {@code $} form is
+     * produced directly.
+     *
+     * <p>Otherwise the member select collapses to a package-less
+     * {@code Outer$Nested} (via the upper-case-segment heuristic in
+     * {@link #memberSelectJvmName}). We deliberately do <em>not</em>
+     * qualify the package here: a member select rooted at an imported
+     * simple name (e.g. {@code Base64.Encoder} under {@code import
+     * java.util.*}) is left unqualified and finished lazily by
+     * {@code TypeRefResolver}, which has the index and classpath needed to
+     * pick the right package. This keeps import resolution in one place.
+     */
     private static TypeRef typeRefForMemberSelect(MemberSelectTree ms, String ownerJvm) {
         String jvm = memberSelectJvmName(ms);
         if (ownerJvm != null) {
