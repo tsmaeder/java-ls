@@ -135,19 +135,32 @@ public final class SymbolLocator {
         if (!resourceUri.endsWith(".class")) return Optional.of(resourceUri);
 
         String sourceJarUri = sourceJarByBinaryJar.get(entry.sourceUri());
-        System.err.println("sourceJarUri: " + sourceJarUri);
         if (sourceJarUri == null || sourceJarUri.isBlank()) return Optional.empty();
 
         int sep = resourceUri.indexOf("!/");
         if (sep < 0 || sep + 2 >= resourceUri.length()) return Optional.empty();
         String classEntry = resourceUri.substring(sep + 2);
         if (!classEntry.endsWith(".class")) return Optional.empty();
-        String javaEntry = classEntry.substring(0, classEntry.length() - ".class".length()) + ".java";
+        String javaEntry = outerClassJavaEntry(classEntry);
         try {
             return Optional.of(jarEntryUri(sourceJarUri, javaEntry));
         } catch (IllegalArgumentException e) {
             return Optional.empty();
         }
+    }
+
+    /**
+     * Map a {@code .class} archive entry to its companion {@code .java}
+     * entry. Nested types are compiled to {@code Outer$Inner.class} but
+     * ship in {@code Outer.java}, so strip the nested suffix.
+     */
+    static String outerClassJavaEntry(String classEntryPath) {
+        String withoutExt = classEntryPath.substring(0, classEntryPath.length() - ".class".length());
+        int dollar = withoutExt.lastIndexOf('$');
+        if (dollar >= 0) {
+            withoutExt = withoutExt.substring(0, dollar);
+        }
+        return withoutExt + ".java";
     }
 
     private static String jarEntryUri(String jarFileUri, String entryName) {

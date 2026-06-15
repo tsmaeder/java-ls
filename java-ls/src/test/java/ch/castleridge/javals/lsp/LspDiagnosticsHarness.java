@@ -20,13 +20,17 @@ import java.util.concurrent.TimeoutException;
 
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DidOpenTextDocumentParams;
+import org.eclipse.lsp4j.DefinitionParams;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.InitializedParams;
+import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.MessageActionItem;
 import org.eclipse.lsp4j.MessageParams;
+import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.PublishDiagnosticsParams;
 import org.eclipse.lsp4j.ShowMessageRequestParams;
 import org.eclipse.lsp4j.TextDocumentItem;
+import org.eclipse.lsp4j.TextDocumentIdentifier;
 import org.eclipse.lsp4j.WorkspaceFolder;
 import org.eclipse.lsp4j.jsonrpc.Launcher;
 import org.eclipse.lsp4j.launch.LSPLauncher;
@@ -171,6 +175,22 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
 
     public List<String> logMessages() {
         return capturingClient.logMessages();
+    }
+
+    /**
+     * Request go-to-definition at {@code position} in an already-open
+     * document (or open it first via {@link #openAndAwaitDiagnostics}).
+     */
+    public List<Location> definitionAt(URI uri, Position position) throws Exception {
+        DefinitionParams params = new DefinitionParams();
+        params.setTextDocument(new TextDocumentIdentifier(uri.toString()));
+        params.setPosition(position);
+        var either = server.getTextDocumentService().definition(params).get(30, TimeUnit.SECONDS);
+        if (either.isLeft()) {
+            List<? extends Location> left = either.getLeft();
+            return left == null ? List.of() : List.copyOf(left);
+        }
+        return List.of();
     }
 
     @Override

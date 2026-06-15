@@ -44,4 +44,41 @@ class SymbolLocatorSourceJarTest {
         assertTrue(uri.isPresent());
         assertEquals(wantJava, uri.get());
     }
+
+    @Test
+    void sourceResourceUriMapsNestedBytecodeEntryToOuterSourcesJarJavaEntry(@TempDir Path workspace) {
+        Path binJar = workspace.resolve("lib/dep.jar");
+        Path srcJar = workspace.resolve("lib/dep-sources.jar");
+        String binJarUri = binJar.toAbsolutePath().normalize().toUri().toString();
+        String srcJarUri = srcJar.toAbsolutePath().normalize().toUri().toString();
+        String classEntry = "jar:" + binJarUri + "!/java/util/Base64$Encoder.class";
+        String wantJava = "jar:" + srcJarUri + "!/java/util/Base64.java";
+
+        TypeEntry entry = new TypeEntry(
+                classEntry,
+                binJarUri,
+                "java/util/Base64$Encoder",
+                0,
+                TypeRef.resolved("java/lang/Object"),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                null);
+
+        Optional<String> uri = SymbolLocator.sourceResourceUri(
+                entry, Map.of(binJarUri, srcJarUri));
+        assertTrue(uri.isPresent());
+        assertEquals(wantJava, uri.get());
+    }
+
+    @Test
+    void outerClassJavaEntryStripsNestedSuffix() {
+        assertEquals("java/util/Base64.java",
+                SymbolLocator.outerClassJavaEntry("java/util/Base64$Encoder.class"));
+        assertEquals("com/example/Hello.java",
+                SymbolLocator.outerClassJavaEntry("com/example/Hello.class"));
+    }
 }
