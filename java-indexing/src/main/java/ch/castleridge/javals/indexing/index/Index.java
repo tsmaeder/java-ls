@@ -4,6 +4,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
@@ -41,6 +42,21 @@ public final class Index {
     // duplicates across classpath sources are resolved by classpath
     // ordering at lookup time (mirroring the TypeEntry bucket strategy).
     private final ConcurrentMap<String, Object> byModuleName = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, IdentifierBloomFilter> bloomByResourceUri = new ConcurrentHashMap<>();
+
+    /**
+     * Register a per-source-file identifier bloom filter keyed by the
+     * file's resource URI (e.g. {@code file:///.../Foo.java}).
+     */
+    public void registerBloom(String resourceUri, IdentifierBloomFilter filter) {
+        if (resourceUri == null || filter == null) return;
+        bloomByResourceUri.put(resourceUri, filter);
+    }
+
+    /** Every registered identifier bloom filter, keyed by resource URI. */
+    public Map<String, IdentifierBloomFilter> bloomFilters() {
+        return Collections.unmodifiableMap(bloomByResourceUri);
+    }
 
     public void add(TypeEntry entry) {
         if (entry == null) return;

@@ -89,6 +89,9 @@ public final class SourceIndexer {
         try {
             for (CompilationUnitTree cu : task.parse()) {
                 indexCompilationUnit(resourceUriStr, sourceUriStr, cu, into);
+                if (resourceUriStr != null) {
+                    into.registerBloom(resourceUriStr, IdentifierCollector.collectAndBuild(cu));
+                }
             }
         } catch (IOException e) {
             // Parsing never actually does I/O beyond our in-memory source; treat
