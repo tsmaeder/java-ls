@@ -4,6 +4,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
@@ -40,6 +42,44 @@ class LspDiagnosticsHarnessTest {
             harness.awaitIndexReady(TIMEOUT);
             List<Diagnostic> diagnostics = harness.openAndAwaitDiagnostics(sourceFile, TIMEOUT);
             assertFalse(hasError(diagnostics), () -> "unexpected errors: " + diagnostics);
+        }
+    }
+
+    @Test
+    @EnabledIf("vertxWorkspacePresent")
+    void vertxJsonObjectOpenedBeforeIndexReadyRecompilesWithoutNpe() throws Exception {
+        Path workspace = Path.of("../../test-projects/vert.x").toAbsolutePath().normalize();
+        Path jsonObject = workspace.resolve("vertx-core/src/main/java/io/vertx/core/json/JsonObject.java");
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            CompletableFuture<List<Diagnostic>> diagnosticsFuture = harness.openBeforeIndexReady(jsonObject);
+
+            if (!harness.isIndexReady()) {
+                assertFalse(harness.hasDiagnosticsFor(jsonObject),
+                        "no diagnostics should publish before index is ready");
+                assertFalse(diagnosticsFuture.isDone(),
+                        "diagnostics future should not complete before index is ready");
+            }
+
+            harness.awaitIndexReady(Duration.ofSeconds(600));
+
+            List<Diagnostic> diagnostics = diagnosticsFuture.get(120, TimeUnit.SECONDS);
+            List<Diagnostic> errors = diagnostics.stream()
+                    .filter(d -> d.getSeverity() == DiagnosticSeverity.Error)
+                    .toList();
+            List<Diagnostic> encoderErrors = errors.stream()
+                    .filter(d -> d.getMessage() != null && d.getMessage().contains("Encoder"))
+                    .toList();
+            List<Diagnostic> linkedHashMapErrors = errors.stream()
+                    .filter(d -> d.getMessage() != null && d.getMessage().contains("LinkedHashMap"))
+                    .toList();
+            assertTrue(encoderErrors.isEmpty(), () -> "unexpected Encoder errors: " + encoderErrors);
+            assertTrue(linkedHashMapErrors.isEmpty(),
+                    () -> "unexpected LinkedHashMap errors: " + linkedHashMapErrors);
+
+            boolean npeInLogs = harness.logMessages().stream()
+                    .anyMatch(m -> m != null && m.contains("NullPointerException"));
+            assertFalse(npeInLogs, () -> "server logs should not contain NPE: " + harness.logMessages());
         }
     }
 

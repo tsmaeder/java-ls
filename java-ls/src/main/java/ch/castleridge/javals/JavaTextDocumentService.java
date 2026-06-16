@@ -35,13 +35,16 @@ import ch.castleridge.javals.javac.WorkspaceCompiler;
 public class JavaTextDocumentService implements TextDocumentService {
 
     private final JavaLanguageServer server;
+    private final IndexService indexService;
     private final Map<String, TextDocumentItem> documents = new ConcurrentHashMap<>();
     private final Map<String, CachedCompile> compileCache = new ConcurrentHashMap<>();
     private final SourceCache sourceCache = new SourceCache();
     private final SymbolLocator symbolLocator = new SymbolLocator(sourceCache);
 
-    public JavaTextDocumentService(JavaLanguageServer server) {
+    public JavaTextDocumentService(JavaLanguageServer server, IndexService indexService) {
         this.server = server;
+        this.indexService = indexService;
+        indexService.addIndexReadyListener(this::refreshOpenDocuments);
     }
 
     private record CachedCompile(int version, WorkspaceCompiler.Result result) {}
@@ -91,6 +94,16 @@ public class JavaTextDocumentService implements TextDocumentService {
      * compiling, drop the result on the floor - a fresher refresh is
      * already (or will be) in flight.
      */
+  /**
+     * Recompile every open document. Called when the workspace index
+     * becomes ready so files opened during indexing get diagnostics.
+     */
+    public void refreshOpenDocuments() {
+        for (String uri : documents.keySet()) {
+            refreshCompile(uri);
+        }
+    }
+
     private void refreshCompile(String uri) {
         TextDocumentItem doc = documents.get(uri);
         if (doc == null) return;
@@ -98,8 +111,11 @@ public class JavaTextDocumentService implements TextDocumentService {
         String text = doc.getText();
 
         CompletableFuture.runAsync(() -> {
-            IndexService indexService = server.getIndexService();
-            Index index = indexService.index().orElse(null);
+            Optional<Index> indexOpt = indexService.index();
+            if (indexOpt.isEmpty()) {
+                return;
+            }
+            Index index = indexOpt.get();
             ClasspathOrder classpath = indexService.classPathFor(uri);
 
             URI docUri;
@@ -218,10 +234,11 @@ public class JavaTextDocumentService implements TextDocumentService {
         TextDocumentItem doc = documents.get(uri);
         if (doc == null) return List.of();
 
-        IndexService indexService = server.getIndexService();
-
-        WorkspaceCompiler.Result compiled = compileCache.get(uri).result();
-
+        CachedCompile cached = compileCache.get(uri);
+        if (cached == null) {
+            return List.of();
+        }
+        WorkspaceCompiler.Result compiled = cached.result();
         if (compiled == null) {
             return List.of();
         }

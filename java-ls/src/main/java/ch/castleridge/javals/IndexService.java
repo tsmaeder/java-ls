@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
 import ch.castleridge.javals.indexing.mbt.*;
@@ -37,9 +38,14 @@ public final class IndexService {
 
     private final JavaLanguageServer server;
     private final AtomicReference<State> state = new AtomicReference<>(State.empty());
+    private final List<Runnable> indexReadyListeners = new CopyOnWriteArrayList<>();
 
     public IndexService(JavaLanguageServer server) {
         this.server = server;
+    }
+
+    public void addIndexReadyListener(Runnable listener) {
+        indexReadyListeners.add(listener);
     }
 
     public Optional<Index> index() {
@@ -104,6 +110,7 @@ public final class IndexService {
                     + index.entryCount() + " entries) from " + sources.size()
                     + " sources in " + elapsedMs + " ms"
                     + (failures.isEmpty() ? "" : "; " + failures.size() + " failures"));
+            notifyIndexReady();
             failures.forEach(f -> {
                 StringWriter writer = new StringWriter();
                 f.printStackTrace(new PrintWriter(writer));
@@ -254,6 +261,16 @@ public final class IndexService {
     private void log(MessageType type, String message) {
         if (server != null) {
             server.logMessage(type, message);
+        }
+    }
+
+    private void notifyIndexReady() {
+        for (Runnable listener : indexReadyListeners) {
+            try {
+                listener.run();
+            } catch (RuntimeException e) {
+                log(MessageType.Error, "Index-ready listener failed: " + e.getMessage());
+            }
         }
     }
 

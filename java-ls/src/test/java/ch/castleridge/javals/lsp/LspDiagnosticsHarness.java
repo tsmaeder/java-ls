@@ -173,6 +173,36 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
         return diagnostics == null ? List.of() : List.copyOf(diagnostics);
     }
 
+    /**
+     * Open a document without waiting for indexing to finish. Returns a
+     * future that completes on the first {@code publishDiagnostics} for
+     * the file (expected after index-ready recompile).
+     */
+    public CompletableFuture<List<Diagnostic>> openBeforeIndexReady(Path file) throws Exception {
+        Path absolute = file.toAbsolutePath().normalize();
+        String text = Files.readString(absolute);
+        String uriString = absolute.toUri().toString();
+        String decodedUri = UriCoding.decode(uriString);
+
+        CompletableFuture<PublishDiagnosticsParams> future = capturingClient.prepareDiagnosticsFuture(decodedUri);
+        TextDocumentItem item = new TextDocumentItem(uriString, "java", 1, text);
+        server.getTextDocumentService().didOpen(new DidOpenTextDocumentParams(item));
+
+        return future.thenApply(params -> {
+            List<Diagnostic> diagnostics = params.getDiagnostics();
+            return diagnostics == null ? List.of() : List.copyOf(diagnostics);
+        });
+    }
+
+    public boolean isIndexReady() {
+        return capturingClient.isIndexReady();
+    }
+
+    public boolean hasDiagnosticsFor(Path file) {
+        String decodedUri = UriCoding.decode(file.toAbsolutePath().normalize().toUri().toString());
+        return capturingClient.hasDiagnostics(decodedUri);
+    }
+
     public List<String> logMessages() {
         return capturingClient.logMessages();
     }
@@ -228,6 +258,7 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
 
         private final ConcurrentHashMap<String, CompletableFuture<PublishDiagnosticsParams>> diagnosticsByUri =
                 new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, Integer> diagnosticsCountByUri = new ConcurrentHashMap<>();
         private final CompletableFuture<Void> indexReady = new CompletableFuture<>();
         private final List<String> logMessages = new ArrayList<>();
 
@@ -241,6 +272,14 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
             indexReady.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         }
 
+        boolean isIndexReady() {
+            return indexReady.isDone();
+        }
+
+        boolean hasDiagnostics(String decodedUri) {
+            return diagnosticsCountByUri.getOrDefault(decodedUri, 0) > 0;
+        }
+
         List<String> logMessages() {
             synchronized (logMessages) {
                 return List.copyOf(logMessages);
@@ -250,8 +289,9 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
         @Override
         public void publishDiagnostics(PublishDiagnosticsParams diagnostics) {
             String decoded = UriCoding.decode(diagnostics.getUri());
+            diagnosticsCountByUri.merge(decoded, 1, Integer::sum);
             CompletableFuture<PublishDiagnosticsParams> future = diagnosticsByUri.get(decoded);
-            if (future != null) {
+            if (future != null && !future.isDone()) {
                 future.complete(diagnostics);
             }
         }

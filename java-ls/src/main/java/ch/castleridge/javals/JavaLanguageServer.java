@@ -18,9 +18,9 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     private int errorCode = 1;
 
     public JavaLanguageServer() {
-        this.textDocumentService = new JavaTextDocumentService(this);
-        this.workspaceService = new JavaWorkspaceService(this);
         this.indexService = new IndexService(this);
+        this.textDocumentService = new JavaTextDocumentService(this, indexService);
+        this.workspaceService = new JavaWorkspaceService(this);
     }
 
     public IndexService getIndexService() {
