@@ -109,6 +109,21 @@ public final class SourceCache {
         }
     }
 
+    /**
+     * Read the UTF-8 text of a source file addressed by {@code uriStr}.
+     * Returns {@code null} when the URI cannot be read.
+     */
+    public static String readText(String uriStr) {
+        if (uriStr == null || uriStr.isBlank()) return null;
+        URI uri;
+        try {
+            uri = URI.create(uriStr);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        return read(uri);
+    }
+
     private static String read(URI uri) {
         try {
             URL url = uri.toURL();

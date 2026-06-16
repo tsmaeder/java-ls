@@ -15,12 +15,141 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.io.TempDir;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LspDiagnosticsHarnessTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(120);
+
+    @Test
+    void referencesFindsCrossFileAndSameFileUsages(@TempDir Path workspace) throws Exception {
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+
+        Path greeterFile = sourceDir.resolve("Greeter.java");
+        Files.writeString(greeterFile, """
+                package com.example;
+
+                public class Greeter {
+                    private int count;
+
+                    public String greet() {
+                        count++;
+                        return "hi";
+                    }
+                }
+                """);
+
+        Path mainFile = sourceDir.resolve("Main.java");
+        Files.writeString(mainFile, """
+                package com.example;
+
+                public class Main {
+                    void run() {
+                        Greeter g = new Greeter();
+                        g.greet();
+                    }
+                }
+                """);
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(TIMEOUT);
+            harness.openAndAwaitDiagnostics(greeterFile, TIMEOUT);
+            harness.openAndAwaitDiagnostics(mainFile, TIMEOUT);
+
+            List<String> greeterLines = Files.readAllLines(greeterFile);
+            int greetDeclLine = -1;
+            for (int i = 0; i < greeterLines.size(); i++) {
+                if (greeterLines.get(i).contains("public String greet()")) {
+                    greetDeclLine = i;
+                    break;
+                }
+            }
+            assertTrue(greetDeclLine >= 0);
+            int greetDeclCol = greeterLines.get(greetDeclLine).indexOf("greet");
+            assertTrue(greetDeclCol >= 0);
+
+            List<Location> greetRefs = harness.referencesAt(
+                    greeterFile.toUri(), new Position(greetDeclLine, greetDeclCol), true);
+            assertTrue(greetRefs.size() >= 2,
+                    () -> "expected declaration + usage references, got: " + greetRefs);
+
+            boolean hasMainUsage = greetRefs.stream()
+                    .anyMatch(loc -> loc.getUri().contains("Main.java"));
+            boolean hasGreeterDecl = greetRefs.stream()
+                    .anyMatch(loc -> loc.getUri().contains("Greeter.java"));
+            assertTrue(hasMainUsage, () -> "expected usage in Main.java, got: " + greetRefs);
+            assertTrue(hasGreeterDecl, () -> "expected declaration in Greeter.java, got: " + greetRefs);
+
+            List<String> mainLines = Files.readAllLines(mainFile);
+            int greeterUseLine = -1;
+            for (int i = 0; i < mainLines.size(); i++) {
+                if (mainLines.get(i).contains("Greeter g = new Greeter()")) {
+                    greeterUseLine = i;
+                    break;
+                }
+            }
+            assertTrue(greeterUseLine >= 0);
+            int typeUseCol = mainLines.get(greeterUseLine).indexOf("Greeter");
+            assertTrue(typeUseCol >= 0);
+
+            List<Location> typeRefs = harness.referencesAt(
+                    greeterFile.toUri(), new Position(2, "public class Greeter".indexOf("Greeter")),
+                    false);
+            assertTrue(typeRefs.size() >= 2,
+                    () -> "expected type references in Main.java, got: " + typeRefs);
+            assertTrue(typeRefs.stream().anyMatch(loc -> loc.getUri().contains("Main.java")));
+
+            List<String> logs = harness.logMessages();
+            assertTrue(logs.stream().anyMatch(m -> m != null && m.contains("bloom hits")),
+                    () -> "expected bloom candidate logging, got: " + logs);
+            assertTrue(logs.stream().anyMatch(m -> m != null && m.contains("resolved") && m.contains("references")),
+                    () -> "expected timing logging, got: " + logs);
+        }
+    }
+
+    @Test
+    void referencesFindsLocalVariableInSameFile(@TempDir Path workspace) throws Exception {
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+        Path sourceFile = sourceDir.resolve("Locals.java");
+        Files.writeString(sourceFile, """
+                package com.example;
+
+                public class Locals {
+                    void run() {
+                        int value = 1;
+                        System.out.println(value);
+                        value++;
+                    }
+                }
+                """);
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(TIMEOUT);
+            harness.openAndAwaitDiagnostics(sourceFile, TIMEOUT);
+
+            List<String> lines = Files.readAllLines(sourceFile);
+            int declLine = -1;
+            for (int i = 0; i < lines.size(); i++) {
+                if (lines.get(i).contains("int value = 1")) {
+                    declLine = i;
+                    break;
+                }
+            }
+            assertTrue(declLine >= 0);
+            int declCol = lines.get(declLine).indexOf("value");
+            assertTrue(declCol >= 0);
+
+            List<Location> refs = harness.referencesAt(
+                    sourceFile.toUri(), new Position(declLine, declCol), true);
+            assertEquals(3, refs.size(), () -> "expected declaration + 2 usages, got: " + refs);
+        }
+    }
 
     @Test
     void cleanSourceProducesNoErrors(@TempDir Path workspace) throws Exception {

@@ -12,6 +12,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.lang.model.element.Element;
+import javax.lang.model.util.Elements;
+import javax.lang.model.util.Types;
 import javax.tools.JavaFileObject;
 
 import com.sun.source.tree.CompilationUnitTree;
@@ -19,11 +21,14 @@ import com.sun.source.tree.LineMap;
 import com.sun.source.util.TreePath;
 import com.sun.source.util.Trees;
 
+import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.UriCoding;
 import ch.castleridge.javals.javac.ClasspathOrder;
 import ch.castleridge.javals.javac.DefinitionElementResolver;
+import ch.castleridge.javals.javac.ReferenceFinder;
 import ch.castleridge.javals.javac.SourceCache;
+import ch.castleridge.javals.javac.SymbolKey;
 import ch.castleridge.javals.javac.SymbolLocator;
 import ch.castleridge.javals.javac.TreePathLocator;
 import ch.castleridge.javals.javac.WorkspaceCompiler;
@@ -48,6 +53,8 @@ public class JavaTextDocumentService implements TextDocumentService {
     }
 
     private record CachedCompile(int version, WorkspaceCompiler.Result result) {}
+
+    private record ResolvedElement(WorkspaceCompiler.Result compiled, Element element) {}
 
     @Override
     public void didOpen(DidOpenTextDocumentParams params) {
@@ -231,37 +238,45 @@ public class JavaTextDocumentService implements TextDocumentService {
     }
 
     private List<Location> computeDefinition(String uri, Position position) {
-        TextDocumentItem doc = documents.get(uri);
-        if (doc == null) return List.of();
+        Optional<ResolvedElement> resolved = resolveElementAt(uri, position);
+        if (resolved.isEmpty()) return List.of();
 
-        CachedCompile cached = compileCache.get(uri);
-        if (cached == null) {
-            return List.of();
-        }
-        WorkspaceCompiler.Result compiled = cached.result();
-        if (compiled == null) {
-            return List.of();
-        }
-
+        WorkspaceCompiler.Result compiled = resolved.get().compiled();
+        Element element = resolved.get().element();
         CompilationUnitTree cu = compiled.cu();
-        if (cu == null) {
-            refreshCompile(uri); // might not be ready yet
-            return List.of();
-        }
-
-        long offset = positionToOffset(cu.getLineMap(), position);
-        if (offset < 0) return List.of();
-
         Trees trees = compiled.trees();
-        TreePath path = TreePathLocator.findAt(trees, cu, offset);
-        if (path == null) return List.of();
-
-        Element element = DefinitionElementResolver.resolve(trees, path);
-        if (element == null) return List.of();
 
         return symbolLocator.locate(element, trees, cu, uri, indexService.sourceJarByBinaryJar())
                 .map(List::of)
                 .orElse(List.of());
+    }
+
+    private Optional<ResolvedElement> resolveElementAt(String uri, Position position) {
+        TextDocumentItem doc = documents.get(uri);
+        if (doc == null) return Optional.empty();
+
+        CachedCompile cached = compileCache.get(uri);
+        if (cached == null) return Optional.empty();
+        WorkspaceCompiler.Result compiled = cached.result();
+        if (compiled == null) return Optional.empty();
+
+        CompilationUnitTree cu = compiled.cu();
+        if (cu == null) {
+            refreshCompile(uri);
+            return Optional.empty();
+        }
+
+        long offset = positionToOffset(cu.getLineMap(), position);
+        if (offset < 0) return Optional.empty();
+
+        Trees trees = compiled.trees();
+        TreePath path = TreePathLocator.findAt(trees, cu, offset);
+        if (path == null) return Optional.empty();
+
+        Element element = DefinitionElementResolver.resolve(trees, path);
+        if (element == null) return Optional.empty();
+
+        return Optional.of(new ResolvedElement(compiled, element));
     }
 
     private static long positionToOffset(LineMap lineMap, Position position) {
@@ -276,7 +291,136 @@ public class JavaTextDocumentService implements TextDocumentService {
 
     @Override
     public CompletableFuture<List<? extends Location>> references(ReferenceParams params) {
-        return CompletableFuture.completedFuture(new ArrayList<>());
+        String uri = UriCoding.decode(params.getTextDocument().getUri());
+        Position position = params.getPosition();
+        boolean includeDeclaration = params.getContext() != null
+                && Boolean.TRUE.equals(params.getContext().isIncludeDeclaration());
+        return CompletableFuture.supplyAsync(() -> computeReferences(uri, position, includeDeclaration));
+    }
+
+    private List<Location> computeReferences(String uri, Position position, boolean includeDeclaration) {
+        Optional<ResolvedElement> resolved = resolveElementAt(uri, position);
+        if (resolved.isEmpty()) return List.of();
+
+        WorkspaceCompiler.Result compiled = resolved.get().compiled();
+        Element element = resolved.get().element();
+        CompilationUnitTree cu = compiled.cu();
+        Trees trees = compiled.trees();
+
+        Elements elements = compiled.task().getElements();
+        Types types = compiled.task().getTypes();
+        Optional<SymbolKey> targetKeyOpt = SymbolKey.of(element, elements, types, trees);
+        if (targetKeyOpt.isEmpty()) return List.of();
+        SymbolKey targetKey = targetKeyOpt.get();
+
+        Optional<String> originUri = SymbolKey.originResourceUri(element, trees);
+
+        if (targetKey.fileLocal()) {
+            Set<Location> locations = ReferenceFinder.findReferences(
+                    cu, trees, elements, types, uri, targetKey, element);
+            return finalizeReferences(locations, includeDeclaration, element, trees, cu, uri);
+        }
+
+        Set<String> candidates = new LinkedHashSet<>();
+        int bloomHits = 0;
+        Optional<Index> indexOpt = indexService.index();
+        if (indexOpt.isPresent()) {
+            String simpleName = targetKey.simpleName();
+            for (Map.Entry<String, IdentifierBloomFilter> entry : indexOpt.get().bloomFilters().entrySet()) {
+                if (entry.getValue().mightContain(simpleName)) {
+                    candidates.add(entry.getKey());
+                    bloomHits++;
+                }
+            }
+        }
+        int openDocs = documents.size();
+        candidates.addAll(documents.keySet());
+        originUri.filter(u -> u.endsWith(".java")).ifPresent(candidates::add);
+
+        server.logMessage(MessageType.Log,
+                "References: '" + targetKey.simpleName() + "' -> " + candidates.size()
+                        + " candidates (" + bloomHits + " bloom hits, " + openDocs + " open docs"
+                        + originUri.map(u -> ", origin " + u).orElse("") + ")");
+
+        long t0 = System.nanoTime();
+        Set<Location> locations = Collections.synchronizedSet(new LinkedHashSet<>());
+        candidates.parallelStream().forEach(candidateUri -> {
+            String text = textForUri(candidateUri);
+            if (text == null) return;
+
+            URI docUri;
+            try {
+                docUri = URI.create(candidateUri);
+            } catch (IllegalArgumentException e) {
+                return;
+            }
+
+            Optional<Index> index = indexService.index();
+            if (index.isEmpty()) return;
+            ClasspathOrder classpath = indexService.classPathFor(candidateUri);
+
+            WorkspaceCompiler.Result result;
+            try {
+                result = WorkspaceCompiler.compile(docUri, text, index.get(), classpath);
+            } catch (RuntimeException e) {
+                server.logException(e);
+                return;
+            }
+
+            CompilationUnitTree candidateCu = result.cu();
+            if (candidateCu == null) return;
+
+            Trees candidateTrees = result.trees();
+            Elements candidateElements = result.task().getElements();
+            Types candidateTypes = result.task().getTypes();
+            locations.addAll(ReferenceFinder.findReferences(
+                    candidateCu,
+                    candidateTrees,
+                    candidateElements,
+                    candidateTypes,
+                    candidateUri,
+                    targetKey,
+                    element));
+        });
+
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+        server.logMessage(MessageType.Log,
+                "References: resolved " + locations.size() + " references across "
+                        + candidates.size() + " files in " + elapsedMs + " ms");
+
+        return finalizeReferences(locations, includeDeclaration, element, trees, cu, uri);
+    }
+
+    private List<Location> finalizeReferences(Set<Location> locations,
+                                              boolean includeDeclaration,
+                                              Element element,
+                                              Trees trees,
+                                              CompilationUnitTree cu,
+                                              String uri) {
+        Optional<Location> declaration = symbolLocator.locate(
+                element, trees, cu, uri, indexService.sourceJarByBinaryJar());
+        if (includeDeclaration) {
+            declaration.ifPresent(locations::add);
+        } else {
+            declaration.ifPresent(decl -> locations.removeIf(loc -> locationsEqual(loc, decl)));
+        }
+        return new ArrayList<>(locations);
+    }
+
+    private String textForUri(String uri) {
+        TextDocumentItem doc = documents.get(uri);
+        if (doc != null) return doc.getText();
+        return SourceCache.readText(uri);
+    }
+
+    private static boolean locationsEqual(Location a, Location b) {
+        if (a == null || b == null) return false;
+        if (!Objects.equals(a.getUri(), b.getUri())) return false;
+        Range ra = a.getRange();
+        Range rb = b.getRange();
+        if (ra == null || rb == null) return ra == rb;
+        return Objects.equals(ra.getStart(), rb.getStart())
+                && Objects.equals(ra.getEnd(), rb.getEnd());
     }
 
     @Override

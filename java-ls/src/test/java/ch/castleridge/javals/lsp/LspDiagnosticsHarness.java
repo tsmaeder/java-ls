@@ -28,6 +28,8 @@ import org.eclipse.lsp4j.MessageActionItem;
 import org.eclipse.lsp4j.MessageParams;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.PublishDiagnosticsParams;
+import org.eclipse.lsp4j.ReferenceContext;
+import org.eclipse.lsp4j.ReferenceParams;
 import org.eclipse.lsp4j.ShowMessageRequestParams;
 import org.eclipse.lsp4j.TextDocumentItem;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
@@ -221,6 +223,22 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
             return left == null ? List.of() : List.copyOf(left);
         }
         return List.of();
+    }
+
+    /**
+     * Request find-references at {@code position} in an already-open
+     * document (or open it first via {@link #openAndAwaitDiagnostics}).
+     */
+    public List<Location> referencesAt(URI uri, Position position, boolean includeDeclaration) throws Exception {
+        ReferenceParams params = new ReferenceParams();
+        params.setTextDocument(new TextDocumentIdentifier(uri.toString()));
+        params.setPosition(position);
+        ReferenceContext context = new ReferenceContext();
+        context.setIncludeDeclaration(includeDeclaration);
+        params.setContext(context);
+        List<? extends Location> refs = server.getTextDocumentService().references(params)
+                .get(120, TimeUnit.SECONDS);
+        return refs == null ? List.of() : List.copyOf(refs);
     }
 
     @Override
