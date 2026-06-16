@@ -56,7 +56,8 @@ public final class SymbolKey {
     /**
      * Build a key for {@code element} in the compilation described by
      * {@code elements}, {@code types}, and {@code trees}. Returns empty
-     * when the symbol has no source view (e.g. pure bytecode dependency).
+     * when the symbol has no indexed declaration (no {@link TypeEntry}
+     * and no source path in the current compilation).
      */
     public static Optional<SymbolKey> of(Element element,
                                          Elements elements,
@@ -107,8 +108,9 @@ public final class SymbolKey {
     }
 
     /**
-     * Recover the source {@code resourceUri} of the declaration that
-     * {@code element} resolves to.
+     * Recover the indexed {@code resourceUri} of the declaration that
+     * {@code element} resolves to (workspace {@code .java}, dependency
+     * {@code .class}, or {@code jrt:} entries).
      */
     public static Optional<String> originResourceUri(Element element, Trees trees) {
         ClassSymbol enclosing = enclosingClass(element);
@@ -118,7 +120,7 @@ public final class SymbolKey {
         TypeEntry entry = IndexFileManager.asEntry(classfile);
         if (entry != null) {
             String resourceUri = entry.resourceUri();
-            if (resourceUri != null && !resourceUri.isBlank() && resourceUri.endsWith(".java")) {
+            if (resourceUri != null && !resourceUri.isBlank()) {
                 return Optional.of(resourceUri);
             }
         }

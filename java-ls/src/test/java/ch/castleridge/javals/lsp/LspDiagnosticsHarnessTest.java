@@ -4,6 +4,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -108,6 +109,127 @@ class LspDiagnosticsHarnessTest {
                     () -> "expected bloom candidate logging, got: " + logs);
             assertTrue(logs.stream().anyMatch(m -> m != null && m.contains("resolved") && m.contains("references")),
                     () -> "expected timing logging, got: " + logs);
+        }
+    }
+
+    @Test
+    void referencesFindsBinaryTypeAcrossFiles(@TempDir Path workspace) throws Exception {
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+
+        Path alphaFile = sourceDir.resolve("Alpha.java");
+        Files.writeString(alphaFile, """
+                package com.example;
+
+                public class Alpha {
+                    String name = "a";
+                }
+                """);
+
+        Path betaFile = sourceDir.resolve("Beta.java");
+        Files.writeString(betaFile, """
+                package com.example;
+
+                public class Beta {
+                    String label = "b";
+                }
+                """);
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(TIMEOUT);
+            harness.openAndAwaitDiagnostics(alphaFile, TIMEOUT);
+            harness.openAndAwaitDiagnostics(betaFile, TIMEOUT);
+
+            List<String> alphaLines = Files.readAllLines(alphaFile);
+            int stringDeclLine = -1;
+            for (int i = 0; i < alphaLines.size(); i++) {
+                if (alphaLines.get(i).contains("String name")) {
+                    stringDeclLine = i;
+                    break;
+                }
+            }
+            assertTrue(stringDeclLine >= 0);
+            int stringCol = alphaLines.get(stringDeclLine).indexOf("String");
+            assertTrue(stringCol >= 0);
+
+            List<Location> stringRefs = harness.referencesAt(
+                    alphaFile.toUri(), new Position(stringDeclLine, stringCol), false);
+            assertTrue(stringRefs.size() >= 2,
+                    () -> "expected String references in Alpha.java and Beta.java, got: " + stringRefs);
+            assertTrue(stringRefs.stream().anyMatch(loc -> loc.getUri().contains("Alpha.java")),
+                    () -> "expected usage in Alpha.java, got: " + stringRefs);
+            assertTrue(stringRefs.stream().anyMatch(loc -> loc.getUri().contains("Beta.java")),
+                    () -> "expected usage in Beta.java, got: " + stringRefs);
+        }
+    }
+
+    @Test
+    void referencesRespectsCandidateCap(@TempDir Path workspace) throws Exception {
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+
+        Path alphaFile = sourceDir.resolve("Alpha.java");
+        Files.writeString(alphaFile, """
+                package com.example;
+
+                public class Alpha {
+                    String name = "a";
+                }
+                """);
+
+        Path betaFile = sourceDir.resolve("Beta.java");
+        Files.writeString(betaFile, """
+                package com.example;
+
+                public class Beta {
+                    String label = "b";
+                }
+                """);
+
+        List<String> alphaLines = Files.readAllLines(alphaFile);
+        int stringDeclLine = -1;
+        for (int i = 0; i < alphaLines.size(); i++) {
+            if (alphaLines.get(i).contains("String name")) {
+                stringDeclLine = i;
+                break;
+            }
+        }
+        assertTrue(stringDeclLine >= 0);
+        int stringCol = alphaLines.get(stringDeclLine).indexOf("String");
+        assertTrue(stringCol >= 0);
+        Position stringPosition = new Position(stringDeclLine, stringCol);
+
+        try (LspDiagnosticsHarness cappedHarness = LspDiagnosticsHarness.start(
+                workspace, TIMEOUT, Map.of("referencesCandidateCap", 1))) {
+            cappedHarness.awaitIndexReady(TIMEOUT);
+            cappedHarness.openAndAwaitDiagnostics(alphaFile, TIMEOUT);
+            cappedHarness.openAndAwaitDiagnostics(betaFile, TIMEOUT);
+
+            cappedHarness.referencesAt(alphaFile.toUri(), stringPosition, false);
+
+            List<String> cappedLogs = cappedHarness.logMessages();
+            assertTrue(cappedLogs.stream().anyMatch(m -> m != null && m.contains("capped ")),
+                    () -> "expected capped candidate logging, got: " + cappedLogs);
+        }
+
+        try (LspDiagnosticsHarness uncappedHarness = LspDiagnosticsHarness.start(
+                workspace, TIMEOUT, Map.of("referencesCandidateCap", 0))) {
+            uncappedHarness.awaitIndexReady(TIMEOUT);
+            uncappedHarness.openAndAwaitDiagnostics(alphaFile, TIMEOUT);
+            uncappedHarness.openAndAwaitDiagnostics(betaFile, TIMEOUT);
+
+            List<Location> stringRefs = uncappedHarness.referencesAt(
+                    alphaFile.toUri(), stringPosition, false);
+            assertTrue(stringRefs.size() >= 2,
+                    () -> "expected String references with no cap, got: " + stringRefs);
+            assertTrue(stringRefs.stream().anyMatch(loc -> loc.getUri().contains("Beta.java")),
+                    () -> "expected usage in Beta.java with no cap, got: " + stringRefs);
+
+            List<String> uncappedLogs = uncappedHarness.logMessages();
+            assertFalse(uncappedLogs.stream().anyMatch(m -> m != null && m.contains("capped ")),
+                    () -> "did not expect capped logging with cap=0, got: " + uncappedLogs);
         }
     }
 

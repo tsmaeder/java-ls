@@ -79,6 +79,12 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
     }
 
     public static LspDiagnosticsHarness start(Path workspaceRoot, Duration initTimeout) throws Exception {
+        return start(workspaceRoot, initTimeout, Map.of());
+    }
+
+    public static LspDiagnosticsHarness start(Path workspaceRoot,
+                                              Duration initTimeout,
+                                              Map<String, Object> extraInitOptions) throws Exception {
         Path absolute = workspaceRoot.toAbsolutePath().normalize();
 
         // NOTE: we deliberately avoid java.io.Piped{Input,Output}Stream here.
@@ -125,6 +131,7 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
 
         Map<String, Object> initOptions = new HashMap<>();
         initOptions.put("workspacePath", absolute.toString());
+        initOptions.putAll(extraInitOptions);
         init.setInitializationOptions(initOptions);
 
         remoteServer.initialize(init).get(initTimeout.toMillis(), TimeUnit.MILLISECONDS);

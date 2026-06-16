@@ -45,11 +45,21 @@ public class JavaTextDocumentService implements TextDocumentService {
     private final Map<String, CachedCompile> compileCache = new ConcurrentHashMap<>();
     private final SourceCache sourceCache = new SourceCache();
     private final SymbolLocator symbolLocator = new SymbolLocator(sourceCache);
+    /** Max files to scan for cross-file references; {@code <= 0} means no cap. */
+    private volatile int referencesCandidateCap;
 
     public JavaTextDocumentService(JavaLanguageServer server, IndexService indexService) {
         this.server = server;
         this.indexService = indexService;
         indexService.addIndexReadyListener(this::refreshOpenDocuments);
+    }
+
+    public void setReferencesCandidateCap(int referencesCandidateCap) {
+        this.referencesCandidateCap = referencesCandidateCap;
+    }
+
+    int referencesCandidateCap() {
+        return referencesCandidateCap;
     }
 
     private record CachedCompile(int version, WorkspaceCompiler.Result result) {}
@@ -321,25 +331,42 @@ public class JavaTextDocumentService implements TextDocumentService {
             return finalizeReferences(locations, includeDeclaration, element, trees, cu, uri);
         }
 
-        Set<String> candidates = new LinkedHashSet<>();
-        int bloomHits = 0;
+        Set<String> bloomCandidates = new LinkedHashSet<>();
         Optional<Index> indexOpt = indexService.index();
         if (indexOpt.isPresent()) {
             String simpleName = targetKey.simpleName();
             for (Map.Entry<String, IdentifierBloomFilter> entry : indexOpt.get().bloomFilters().entrySet()) {
                 if (entry.getValue().mightContain(simpleName)) {
-                    candidates.add(entry.getKey());
-                    bloomHits++;
+                    bloomCandidates.add(entry.getKey());
                 }
             }
         }
+        int bloomHits = bloomCandidates.size();
         int openDocs = documents.size();
+
+        Set<String> candidates = new LinkedHashSet<>(bloomCandidates);
         candidates.addAll(documents.keySet());
         originUri.filter(u -> u.endsWith(".java")).ifPresent(candidates::add);
+
+        int totalBeforeCap = candidates.size();
+        String capNote = "";
+        if (referencesCandidateCap > 0 && candidates.size() > referencesCandidateCap) {
+            Set<String> capped = new LinkedHashSet<>(documents.keySet());
+            originUri.filter(u -> u.endsWith(".java")).ifPresent(capped::add);
+            for (String candidateUri : bloomCandidates) {
+                if (capped.size() >= referencesCandidateCap) {
+                    break;
+                }
+                capped.add(candidateUri);
+            }
+            candidates = capped;
+            capNote = ", capped " + candidates.size() + "/" + totalBeforeCap;
+        }
 
         server.logMessage(MessageType.Log,
                 "References: '" + targetKey.simpleName() + "' -> " + candidates.size()
                         + " candidates (" + bloomHits + " bloom hits, " + openDocs + " open docs"
+                        + capNote
                         + originUri.map(u -> ", origin " + u).orElse("") + ")");
 
         long t0 = System.nanoTime();
@@ -363,6 +390,7 @@ public class JavaTextDocumentService implements TextDocumentService {
             try {
                 result = WorkspaceCompiler.compile(docUri, text, index.get(), classpath);
             } catch (RuntimeException e) {
+                server.logMessage(MessageType.Error, "Error compiling candidate " + candidateUri + ": " + e.getMessage());
                 server.logException(e);
                 return;
             }

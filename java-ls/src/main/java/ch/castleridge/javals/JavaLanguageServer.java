@@ -30,6 +30,8 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     @Override
     public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
         indexService.initialize(params);
+        InitializationOptions.referencesCandidateCap(params)
+                .ifPresent(((JavaTextDocumentService) textDocumentService)::setReferencesCandidateCap);
 
         // Set up server capabilities
         ServerCapabilities capabilities = new ServerCapabilities();
