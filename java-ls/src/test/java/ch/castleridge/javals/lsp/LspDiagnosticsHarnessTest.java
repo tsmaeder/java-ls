@@ -451,7 +451,14 @@ class LspDiagnosticsHarnessTest {
 
         try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
             harness.awaitIndexReady(Duration.ofSeconds(600));
-            harness.openAndAwaitDiagnostics(testBase, Duration.ofSeconds(120));
+            List<Diagnostic> diagnostics = harness.openAndAwaitDiagnostics(testBase, Duration.ofSeconds(120));
+
+            List<Diagnostic> vertxCoreImportErrors = diagnostics.stream()
+                    .filter(d -> d.getSeverity() == DiagnosticSeverity.Error)
+                    .filter(d -> d.getMessage() != null && d.getMessage().contains("package io.vertx.core"))
+                    .toList();
+            assertTrue(vertxCoreImportErrors.isEmpty(),
+                    () -> "unexpected io.vertx.core import errors: " + vertxCoreImportErrors);
 
             boolean npeInLogs = harness.logMessages().stream()
                     .anyMatch(m -> m != null && m.contains("NullPointerException"));

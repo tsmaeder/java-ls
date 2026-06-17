@@ -146,30 +146,37 @@ public final class IndexService {
 
         for (String namespaceId : info.namespaces.keySet()) {
             MbtTargetInfo targetInfo = info.namespaces.get(namespaceId);
-           classpathOrder(namespaceId, targetInfo, workspacePath, dependencyModuleInfos, classpathsByNamespace, sources, sourceJarByBinaryJar); 
+            classpathOrder(namespaceId, targetInfo, workspacePath, dependencyModuleInfos,
+                    info.namespaces, classpathsByNamespace, sources, sourceJarByBinaryJar);
         }
     }
 
-    private static void classpathOrder(String namespaceId, MbtTargetInfo targetInfo, Path workspacePath, Map<String, MbtDependencyModuleInfo> dependencyModules, Map<String, ClasspathOrder> classpathsByNamespace, Map<String, InputSource> sources, Map<String, String> sourceJarByBinaryJar) {
+    private static void classpathOrder(String namespaceId,
+                                       MbtTargetInfo targetInfo,
+                                       Path workspacePath,
+                                       Map<String, MbtDependencyModuleInfo> dependencyModules,
+                                       Map<String, MbtTargetInfo> namespaces,
+                                       Map<String, ClasspathOrder> classpathsByNamespace,
+                                       Map<String, InputSource> sources,
+                                       Map<String, String> sourceJarByBinaryJar) {
         List<ClasspathEntry> classpathEntries = new ArrayList<>();
-        for (String source : targetInfo.sources) {
-            Path sourcePath = workspacePath.resolve(source);
-            if (Files.isDirectory(sourcePath)) {
-               String sourceUri = sourcePath.toUri().toString(); 
-                classpathEntries.add(UriClasspathEntry.of(sourceUri));
-                if (!sources.containsKey(sourceUri)) {
-                    sources.put(sourceUri, new DirInput(sourcePath));
-                }
+        addSourceRoots(targetInfo.sources, workspacePath, classpathEntries, sources);
+
+        if (targetInfo.dependsOn != null && !targetInfo.dependsOn.isEmpty()) {
+            Set<String> visited = new HashSet<>();
+            visited.add(namespaceId);
+            for (String depId : targetInfo.dependsOn) {
+                addDependsOnEntries(depId, workspacePath, dependencyModules, namespaces,
+                        classpathEntries, sources, visited);
             }
         }
-       
-       Path jdk = Path.of(System.getProperty("java.home")); 
 
+        Path jdk = Path.of(System.getProperty("java.home"));
         if (targetInfo.javaHome != null && !targetInfo.javaHome.isBlank()) {
             jdk = Path.of(targetInfo.javaHome).toAbsolutePath().normalize();
-        } 
-        JrtInput jrtInput = new JrtInput(jdk) ; 
-        
+        }
+        JrtInput jrtInput = new JrtInput(jdk);
+
         if (!sources.containsKey(jrtInput.sourceUri().toString())) {
             sources.put(jrtInput.sourceUri().toString(), jrtInput);
             Path sourcePath = jdk.resolve("lib/src.zip");
@@ -177,15 +184,65 @@ public final class IndexService {
                 sourceJarByBinaryJar.put(jrtInput.sourceUri().toString(), sourcePath.toUri().toString());
             }
         }
-        
-        for (String dependencyModuleId : targetInfo.dependencyModules) {
+
+        addDependencyJars(targetInfo.dependencyModules, dependencyModules, classpathEntries);
+        classpathEntries.add(UriClasspathEntry.of(jrtInput.sourceUri()));
+        classpathsByNamespace.put(namespaceId, new ClasspathOrder(classpathEntries, false));
+    }
+
+    private static void addDependsOnEntries(String depNamespaceId,
+                                            Path workspacePath,
+                                            Map<String, MbtDependencyModuleInfo> dependencyModules,
+                                            Map<String, MbtTargetInfo> namespaces,
+                                            List<ClasspathEntry> classpathEntries,
+                                            Map<String, InputSource> sources,
+                                            Set<String> visited) {
+        if (depNamespaceId == null || depNamespaceId.isBlank() || !visited.add(depNamespaceId)) {
+            return;
+        }
+        MbtTargetInfo dep = namespaces.get(depNamespaceId);
+        if (dep == null) {
+            return;
+        }
+        addSourceRoots(dep.sources, workspacePath, classpathEntries, sources);
+        /* if (dep.dependsOn != null) {
+            for (String transitive : dep.dependsOn) {
+                addDependsOnEntries(transitive, workspacePath, dependencyModules, namespaces,
+                        classpathEntries, sources, visited);
+            }
+        }
+        addDependencyJars(dep.dependencyModules, dependencyModules, classpathEntries);*/
+    }
+
+    private static void addSourceRoots(List<String> roots,
+                                       Path workspacePath,
+                                       List<ClasspathEntry> classpathEntries,
+                                       Map<String, InputSource> sources) {
+        if (roots == null) {
+            return;
+        }
+        for (String source : roots) {
+            Path sourcePath = workspacePath.resolve(source);
+            if (Files.isDirectory(sourcePath)) {
+                String sourceUri = sourcePath.toUri().toString();
+                classpathEntries.add(UriClasspathEntry.of(sourceUri));
+                sources.putIfAbsent(sourceUri, new DirInput(sourcePath));
+            }
+        }
+    }
+
+    private static void addDependencyJars(List<String> dependencyModuleIds,
+                                          Map<String, MbtDependencyModuleInfo> dependencyModules,
+                                          List<ClasspathEntry> classpathEntries) {
+        if (dependencyModuleIds == null) {
+            return;
+        }
+        for (String dependencyModuleId : dependencyModuleIds) {
             MbtDependencyModuleInfo dependencyModuleInfo = dependencyModules.get(dependencyModuleId);
-            if (dependencyModuleInfo != null) {
+            if (dependencyModuleInfo != null && dependencyModuleInfo.jar != null) {
                 classpathEntries.add(UriClasspathEntry.of(dependencyModuleInfo.jar));
             }
         }
-        classpathEntries.add(UriClasspathEntry.of(jrtInput.sourceUri()));
-        classpathsByNamespace.put(namespaceId,   new ClasspathOrder(classpathEntries, false));
     }
 
     private static Path resolveWorkspacePath(InitializeParams params, List<Path> roots, Path mbt) {
