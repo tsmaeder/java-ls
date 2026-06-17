@@ -7,6 +7,7 @@ import com.sun.tools.javac.code.Kinds;
 import com.sun.tools.javac.code.Scope.WriteableScope;
 import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
+import com.sun.tools.javac.code.Symbol.CompletionFailure;
 import com.sun.tools.javac.code.Symbol.MethodSymbol;
 import com.sun.tools.javac.code.Symbol.ModuleSymbol;
 import com.sun.tools.javac.code.Symbol.TypeVariableSymbol;
@@ -97,10 +98,39 @@ public final class IndexClassReader extends ClassReader {
     @Override
     public void readClassFile(ClassSymbol c) {
         if (c.classfile instanceof IndexClassFileObject icfo) {
-            readFromIndex(c, icfo.entry());
+            try {
+                readFromIndex(c, icfo.entry());
+            } catch (CompletionFailure ex) {
+                completeAsMissing(c);
+            }
             return;
         }
-        super.readClassFile(c);
+        if (c.classfile == null) {
+            completeAsMissing(c);
+            return;
+        }
+        try {
+            super.readClassFile(c);
+        } catch (CompletionFailure ex) {
+            completeAsMissing(c);
+        }
+    }
+
+    /**
+     * Finish loading a class symbol that cannot be read from the index or
+     * classpath. A {@link CompletionFailure} during completion must not
+     * propagate into attribution: javac's {@code Attr.attribTree} catch
+     * leaves {@code JCFieldAccess.sym} unset, and JDK 25's
+     * {@code isBooleanOrNumeric} then NPEs on {@code Types.memberType}.
+     */
+    private void completeAsMissing(ClassSymbol c) {
+        if (c.members_field == null) {
+            c.members_field = WriteableScope.create(c);
+        }
+        if (c.type == null || !c.type.isErroneous()) {
+            c.type = types.createErrorType(c.name, c, c.type != null ? c.type : syms.objectType);
+        }
+        c.setAnnotationTypeMetadata(AnnotationTypeMetadata.notAnAnnotationType());
     }
 
     private void readFromIndex(ClassSymbol c, TypeEntry entry) {
@@ -113,6 +143,8 @@ public final class IndexClassReader extends ClassReader {
         ModuleSymbol prevModule = currentModule;
         try {
             readFromIndexImpl(c, entry);
+        } catch (CompletionFailure ex) {
+            completeAsMissing(c);
         } finally {
             currentOwner = prevOwner;
             currentModule = prevModule;
@@ -234,12 +266,16 @@ public final class IndexClassReader extends ClassReader {
             Name innerName = names.fromString(innerJvm.substring(dollar + 1));
             ClassSymbol member = enterClass(innerName, c);
             TypeEntry innerEntry = pickIndexedType(innerJvm);
-            if (innerEntry != null) {
-                member.classfile = new IndexClassFileObject(innerEntry);
+            if (innerEntry == null) {
+                // Listed on the outer entry but not on the active classpath:
+                // complete now so a later complete() does not throw
+                // CompletionFailure and leave method-select trees with sym == null.
+                completeAsMissing(member);
+                enterMember(c, member);
+                continue;
             }
-            long innerFlags = innerEntry != null
-                    ? IndexAccessFlags.classFlags(innerEntry)
-                    : member.flags_field;
+            member.classfile = new IndexClassFileObject(innerEntry);
+            long innerFlags = IndexAccessFlags.classFlags(innerEntry);
             if ((innerFlags & Flags.STATIC) == 0) {
                 ClassType memberType = (ClassType) member.type;
                 memberType.setEnclosingType(c.type);
@@ -451,6 +487,13 @@ public final class IndexClassReader extends ClassReader {
             Type outer = (ct.flags_field & Flags.STATIC) != 0
                     ? Type.noType
                     : ct.type.getEnclosingType();
+            if (outer == Type.noType
+                    && (ct.flags_field & Flags.STATIC) == 0
+                    && ct.owner instanceof ClassSymbol owner
+                    && owner.type != null
+                    && !owner.type.isErroneous()) {
+                outer = owner.type;
+            }
             return new ClassType(outer, args.toList(), ct);
         }
         return raw.type;

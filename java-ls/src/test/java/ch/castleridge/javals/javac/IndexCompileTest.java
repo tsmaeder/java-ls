@@ -49,6 +49,7 @@ import ch.castleridge.javals.indexing.scan.JrtInput;
 import ch.castleridge.javals.indexing.scan.Scanner;
 import ch.castleridge.javals.indexing.source.SourceIndexer;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -2504,6 +2505,96 @@ class IndexCompileTest {
         }
         assertTrue(errors.isEmpty(),
                 () -> "star-imported LinkedHashMap diamond should compile from index; got: " + errors);
+    }
+
+    @Test
+    void ternaryLambdaWithMissingReturnTypeDoesNotCrash() throws Exception {
+        Index index = new Index();
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
+        index.add(new TypeEntry(
+                "index:///com/example/Foo.class",
+                SOURCE_URI,
+                "com/example/Foo",
+                0x0001,
+                new TypeRef.Resolved("java/lang/Object"),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                null));
+        index.add(new TypeEntry(
+                "index:///com/example/EventBus.class",
+                SOURCE_URI,
+                "com/example/EventBus",
+                0x0001,
+                new TypeRef.Resolved("java/lang/Object"),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(new MethodEntry(
+                        "index:///com/example/EventBus.class",
+                        "com/example/EventBus",
+                        0x0001,
+                        "codecSelector",
+                        Type.Primitive.VOID,
+                        List.of(new TypeRef.Resolved("java/util/function/Function")),
+                        List.of(),
+                        List.of())),
+                List.of(),
+                List.of(),
+                null));
+        index.add(new TypeEntry(
+                "index:///com/example/Codec.class",
+                SOURCE_URI,
+                "com/example/Codec",
+                0x0001,
+                new TypeRef.Resolved("java/lang/Object"),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(new MethodEntry(
+                        "index:///com/example/Codec.class",
+                        "com/example/Codec",
+                        0x0001,
+                        "name",
+                        new TypeRef.Resolved("com/missing/MissingType"),
+                        List.of(),
+                        List.of(),
+                        List.of())),
+                List.of(),
+                List.of(),
+                null));
+
+        ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
+
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("test:///Caller.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        package com.example;
+
+                        public class Caller {
+                            public void test(EventBus bus, Codec codec) {
+                                bus.codecSelector(obj -> obj instanceof Foo ? codec.name() : null);
+                            }
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        assertDoesNotThrow(task::analyze);
     }
 
     private static TypeEntry typeWithMethod(String srcUri, String jvmName, String methodName) {

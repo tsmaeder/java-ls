@@ -38,20 +38,14 @@ final class TypeRefResolver {
     ClassSymbol resolveTypeRef(TypeRef tr, ModuleSymbol module, TypeEntry entry) {
         ClassSymbol symbol = resolve(tr, module, entry);
         if (symbol != null) {
-            if (symbol.classfile == null) {
-                // Index buckets are keyed by JVM binary name (package separated by
-                // '/', nested types by '$'). flatName() yields "pkg.Outer$Inner";
-                // className() (the canonical "pkg.Outer.Inner") would never match a
-                // nested type, leaving it without a class file and unloadable.
-                String jvmName = symbol.flatName().toString().replace('.', '/');
-                TypeEntry refEntry =  classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri);
-                if (refEntry != null) {
-                    symbol.classfile = new IndexClassFileObject(refEntry);
-                }
-            }
+            attachClassfile(symbol);
             return symbol;
         }
         return null;
+    }
+
+    private void attachClassfile(ClassSymbol symbol) {
+        IndexClassfileAttachment.attachIfMissing(symbol, index, classpath);
     }
 
     /**

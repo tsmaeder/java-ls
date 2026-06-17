@@ -444,6 +444,24 @@ class LspDiagnosticsHarnessTest {
 
     @Test
     @EnabledIf("vertxWorkspacePresent")
+    void vertxClusteredEventBusTestBaseOpensWithoutNpe() throws Exception {
+        Path workspace = Path.of("../../test-projects/vert.x").toAbsolutePath().normalize();
+        Path testBase = workspace.resolve(
+                "vertx-core/src/test/java/io/vertx/tests/eventbus/ClusteredEventBusTestBase.java");
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(Duration.ofSeconds(600));
+            harness.openAndAwaitDiagnostics(testBase, Duration.ofSeconds(120));
+
+            boolean npeInLogs = harness.logMessages().stream()
+                    .anyMatch(m -> m != null && m.contains("NullPointerException"));
+            assertFalse(npeInLogs,
+                    () -> "opening ClusteredEventBusTestBase should not NPE: " + harness.logMessages());
+        }
+    }
+
+    @Test
+    @EnabledIf("vertxWorkspacePresent")
     void vertxStringReferencesDoNotCrash() throws Exception {
         Path workspace = Path.of("../../test-projects/vert.x").toAbsolutePath().normalize();
         Path jsonObject = workspace.resolve("vertx-core/src/main/java/io/vertx/core/json/JsonObject.java");
