@@ -442,6 +442,45 @@ class LspDiagnosticsHarnessTest {
         }
     }
 
+    @Test
+    @EnabledIf("vertxWorkspacePresent")
+    void vertxStringReferencesDoNotCrash() throws Exception {
+        Path workspace = Path.of("../../test-projects/vert.x").toAbsolutePath().normalize();
+        Path jsonObject = workspace.resolve("vertx-core/src/main/java/io/vertx/core/json/JsonObject.java");
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(Duration.ofSeconds(600));
+            harness.openAndAwaitDiagnostics(jsonObject, Duration.ofSeconds(120));
+
+            List<String> lines = Files.readAllLines(jsonObject);
+            int stringLine = -1;
+            int stringCol = -1;
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                String trimmed = line.trim();
+                if (!trimmed.startsWith("*") && !trimmed.startsWith("//") && !trimmed.startsWith("import")) {
+                    int col = line.indexOf("String");
+                    if (col >= 0) {
+                        stringLine = i;
+                        stringCol = col;
+                        break;
+                    }
+                }
+            }
+            assertTrue(stringLine >= 0, "expected a 'String' usage in " + jsonObject);
+
+            // find-references on String triggers compilation of ALL candidate files
+            // in the workspace, including complex vert.x impl files that reference
+            // missing transitive Netty dependencies.
+            harness.referencesAt(jsonObject.toUri(), new Position(stringLine, stringCol), false);
+
+            boolean npeInLogs = harness.logMessages().stream()
+                    .anyMatch(m -> m != null && m.contains("NullPointerException"));
+            assertFalse(npeInLogs,
+                    () -> "find-references on String triggered NPE: " + harness.logMessages());
+        }
+    }
+
     static boolean vertxWorkspacePresent() {
         Path workspace = Path.of("../../test-projects/vert.x").toAbsolutePath().normalize();
         Path jsonObject = workspace.resolve("vertx-core/src/main/java/io/vertx/core/json/JsonObject.java");

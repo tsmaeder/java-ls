@@ -76,7 +76,7 @@ public final class WorkspaceCompiler {
         try {
             Iterable<? extends CompilationUnitTree> parsed = task.parse();
             CompilationUnitTree cu = firstOrNull(parsed);
-                task.analyze();
+            task.analyze();
             return new Result(task, cu, Trees.instance(task), input, List.copyOf(collector.getDiagnostics()));
         } catch (IOException e) {
             return new Result(task, null, Trees.instance(task), input, List.copyOf(collector.getDiagnostics()));

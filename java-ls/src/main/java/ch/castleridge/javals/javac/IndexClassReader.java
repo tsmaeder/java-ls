@@ -163,13 +163,20 @@ public final class IndexClassReader extends ClassReader {
         if (ct.interfaces_field == null)
             ct.interfaces_field = is.reverse();
 
+        // Inner classes must be registered before fields and methods so that
+        // resolveParameterized can read each inner ClassSymbol's enclosing type
+        // (set here) rather than falling back to Type.noType.  If the enclosing
+        // type were noType, javac's isSubtype visitor would eventually call
+        // asSuper(t, Type.noType.tsym) with a null sym, causing an NPE in
+        // Types.asSuper during override checking (e.g. WindowsFileSystem).
+        readInnerClassesFromIndex(c, entry);
+
         for (FieldEntry field : entry.fields()) {
             enterMember(c, readField(field, entry));
         }
         for (MethodEntry method : entry.methods()) {
             enterMember(c, readMethod(method, entry));
         }
-        readInnerClassesFromIndex(c, entry);
         readRecordComponents(c, entry);
         if (c.isRecord()) {
             for (RecordComponent rc: c.getRecordComponents()) {
@@ -418,7 +425,7 @@ public final class IndexClassReader extends ClassReader {
                 return symbol.type;
             }
         }
-        return null;
+        return syms.errType;
     }
 
     private Type lookupTypeVar(String name) {
@@ -429,6 +436,7 @@ public final class IndexClassReader extends ClassReader {
 
     private Type resolveParameterized(Parameterized p, ModuleSymbol module, TypeEntry entry) {
         ClassSymbol raw = resolver.resolveTypeRef(p.raw(), module, entry);
+        if (raw == null) return syms.errType;
         ListBuffer<Type> args = new ListBuffer<>();
         for (ch.castleridge.javals.indexing.model.Type arg : p.typeArgs()) {
             args.add(resolveType(arg, module, entry));
