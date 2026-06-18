@@ -210,6 +210,7 @@ public final class IndexClassReader extends ClassReader {
             enterMember(c, readMethod(method, entry));
         }
         readRecordComponents(c, entry);
+        enterDefaultConstructorsIfNeeded(c, entry);
         if (c.isRecord()) {
             for (RecordComponent rc: c.getRecordComponents()) {
                 rc.accessor = lookupMethod(c, rc.name, List.nil());
@@ -217,6 +218,61 @@ public final class IndexClassReader extends ClassReader {
         }
         installAnnotationTypeMetadata(c, entry, currentModule);
         typevars = typevars.leave();
+    }
+
+    /**
+     * Source indexing records only explicit constructors; javac normally
+     * synthesizes a default constructor and record canonical constructors.
+     * Without them, {@code new Nested()} on an indexed nested type fails
+     * with "cannot find symbol: constructor".
+     */
+    private void enterDefaultConstructorsIfNeeded(ClassSymbol c, TypeEntry entry) {
+        if (c.isInterface() || c.isEnum()) return;
+        if ((c.flags_field & Flags.ANNOTATION) != 0) return;
+        if (hasConstructor(c)) return;
+
+        if (c.isRecord()) {
+            enterCanonicalRecordConstructor(c, entry);
+            return;
+        }
+
+        long access = c.flags_field & (Flags.PUBLIC | Flags.PROTECTED | Flags.PRIVATE);
+        long constrFlags = access;
+
+        ListBuffer<Type> argtypes = new ListBuffer<>();
+        if (isNonStaticNestedClass(c)) {
+            ClassSymbol encl = (ClassSymbol) c.owner;
+            if (encl.type != null && encl.type.hasTag(TypeTag.CLASS)) {
+                argtypes.add(encl.type);
+            }
+        }
+
+        MethodType mt = new MethodType(argtypes.toList(), syms.voidType, List.nil(), syms.methodClass);
+        enterMember(c, new MethodSymbol(constrFlags, names.init, mt, c));
+    }
+
+    private void enterCanonicalRecordConstructor(ClassSymbol c, TypeEntry entry) {
+        if (entry.recordComponents().isEmpty()) return;
+
+        ListBuffer<Type> argtypes = new ListBuffer<>();
+        for (RecordComponentEntry rc : entry.recordComponents()) {
+            argtypes.add(resolveType(rc.type(), currentModule, entry));
+        }
+
+        long access = c.flags_field & (Flags.PUBLIC | Flags.PROTECTED | Flags.PRIVATE);
+        MethodType mt = new MethodType(argtypes.toList(), syms.voidType, List.nil(), syms.methodClass);
+        enterMember(c, new MethodSymbol(access, names.init, mt, c));
+    }
+
+    private boolean hasConstructor(ClassSymbol c) {
+        for (Symbol sym : c.members().getSymbolsByName(names.init)) {
+            if (sym.kind == Kinds.Kind.MTH) return true;
+        }
+        return false;
+    }
+
+    private static boolean isNonStaticNestedClass(ClassSymbol c) {
+        return (c.flags_field & Flags.STATIC) == 0 && c.owner.kind == Kinds.Kind.TYP;
     }
 
     /**

@@ -2597,6 +2597,61 @@ class IndexCompileTest {
         assertDoesNotThrow(task::analyze);
     }
 
+    @Test
+    void inheritedStaticNestedClassFromIndexedParentCompilesCleanly() throws Exception {
+        Index index = new Index();
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
+        SourceIndexer.index(
+                URI.create("mem:///Base.java"),
+                URI.create(SOURCE_URI),
+                """
+                        package com.example;
+
+                        public class Base {
+                            public Base() {}
+
+                            public static class Codec {
+                            }
+                        }
+                        """,
+                index);
+        ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
+
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("mem:///Child.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        package com.example;
+
+                        public class Child extends Base {
+                            void use() {
+                                Codec c = new Codec();
+                            }
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "inherited static nested Codec should compile; got: " + errors);
+    }
+
     private static TypeEntry typeWithMethod(String srcUri, String jvmName, String methodName) {
         return new TypeEntry(
                 "index:///" + jvmName + "@" + srcUri,

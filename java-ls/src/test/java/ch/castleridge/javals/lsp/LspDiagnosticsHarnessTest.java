@@ -444,6 +444,27 @@ class LspDiagnosticsHarnessTest {
 
     @Test
     @EnabledIf("vertxWorkspacePresent")
+    void vertxClusteredEventBusTestMyReplyExceptionCodecConstructsCleanly() throws Exception {
+        Path workspace = Path.of("../../test-projects/vert.x").toAbsolutePath().normalize();
+        Path testFile = workspace.resolve(
+                "vertx-core/src/test/java/io/vertx/tests/eventbus/ClusteredEventBusTest.java");
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(Duration.ofSeconds(600));
+            List<Diagnostic> diagnostics = harness.openAndAwaitDiagnostics(testFile, Duration.ofSeconds(120));
+
+            List<Diagnostic> codecErrors = diagnostics.stream()
+                    .filter(d -> d.getSeverity() == DiagnosticSeverity.Error)
+                    .filter(d -> d.getMessage() != null
+                            && d.getMessage().contains("constructor MyReplyExceptionMessageCodec"))
+                    .toList();
+            assertTrue(codecErrors.isEmpty(),
+                    () -> "unexpected MyReplyExceptionMessageCodec errors: " + codecErrors);
+        }
+    }
+
+    @Test
+    @EnabledIf("vertxWorkspacePresent")
     void vertxClusteredEventBusTestBaseOpensWithoutNpe() throws Exception {
         Path workspace = Path.of("../../test-projects/vert.x").toAbsolutePath().normalize();
         Path testBase = workspace.resolve(
