@@ -151,6 +151,12 @@ public class JavaTextDocumentService implements TextDocumentService {
                             "Refresh compile took " + (t1 - t0) + "ms for " + uri);
                 } catch (RuntimeException e) {
                     server.logException(e);
+                    TextDocumentItem latestOnError = documents.get(uri);
+                    if (latestOnError == null || latestOnError.getVersion() != versionAtStart) {
+                        // Superseded by a newer edit (or document closed) - drop.
+                        return;
+                    }
+                    publishCompilerErrorDiagnostic(uri, e);
                     return;
                 }
 
@@ -517,6 +523,35 @@ public class JavaTextDocumentService implements TextDocumentService {
 
         PublishDiagnosticsParams params = new PublishDiagnosticsParams(uri, out);
         client.publishDiagnostics(params);
+    }
+
+    /**
+     * Publish a single error diagnostic representing a crash in the
+     * workspace compiler itself (as opposed to a javac diagnostic about the
+     * user's source). Without this, a {@link RuntimeException} during
+     * {@link WorkspaceCompiler#compile} would leave the file with no
+     * diagnostics at all, making the failure invisible to the client.
+     */
+    private void publishCompilerErrorDiagnostic(String uri, Throwable error) {
+        LanguageClient client = server.getClient();
+        if (client == null) return;
+
+        Position start = new Position(0, 0);
+        Position end = new Position(0, 1);
+        Diagnostic lsp = new Diagnostic(new Range(start, end),
+                "Internal error while compiling this file: " + describe(error));
+        lsp.setSeverity(DiagnosticSeverity.Error);
+        lsp.setSource("javals");
+        lsp.setCode("compiler-internal-error");
+
+        client.publishDiagnostics(new PublishDiagnosticsParams(uri, List.of(lsp)));
+    }
+
+    private static String describe(Throwable error) {
+        if (error == null) return "unknown error";
+        String type = error.getClass().getSimpleName();
+        String message = error.getMessage();
+        return message == null || message.isBlank() ? type : type + ": " + message;
     }
 
     private void publishEmptyDiagnostics(String uri) {

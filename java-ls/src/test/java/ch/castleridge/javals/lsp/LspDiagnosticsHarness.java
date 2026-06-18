@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.eclipse.lsp4j.Diagnostic;
+import org.eclipse.lsp4j.DidCloseTextDocumentParams;
 import org.eclipse.lsp4j.DidOpenTextDocumentParams;
 import org.eclipse.lsp4j.DefinitionParams;
 import org.eclipse.lsp4j.InitializeParams;
@@ -201,6 +202,17 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
             List<Diagnostic> diagnostics = params.getDiagnostics();
             return diagnostics == null ? List.of() : List.copyOf(diagnostics);
         });
+    }
+
+    /**
+     * Send a {@code didClose} for {@code file}, mirroring an editor closing
+     * the document. The server drops its cached compile and publishes empty
+     * diagnostics for the URI.
+     */
+    public void closeDocument(Path file) {
+        String uriString = file.toAbsolutePath().normalize().toUri().toString();
+        server.getTextDocumentService().didClose(
+                new DidCloseTextDocumentParams(new TextDocumentIdentifier(uriString)));
     }
 
     public boolean isIndexReady() {
