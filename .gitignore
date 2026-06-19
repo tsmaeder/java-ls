@@ -43,6 +43,7 @@ bin/
 /.nb-gradle/
 
 .metals/
+build/
 
 # IDE — VS Code (local overrides; commit shared launch/tasks if you want)
 .vscode/*

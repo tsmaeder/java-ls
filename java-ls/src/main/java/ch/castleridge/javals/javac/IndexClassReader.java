@@ -207,7 +207,20 @@ public final class IndexClassReader extends ClassReader {
             enterMember(c, readField(field, entry));
         }
         for (MethodEntry method : entry.methods()) {
-            enterMember(c, readMethod(method, entry));
+            MethodSymbol m = readMethod(method, entry);
+            enterMember(c, m);
+            // Mirror javac's ClassReader.readMethod, which ORs Flags.DEFAULT
+            // onto the owning interface as soon as it reads a default method.
+            // Resolve.findMethod only consults an interface for inherited
+            // default methods during its DEFAULT_OK phase when the interface
+            // symbol itself carries this flag; without it, an inherited
+            // default method invoked through a concrete subtype resolves to
+            // "cannot find symbol". IndexAccessFlags.methodFlags sets the
+            // per-method bit but can only see one method, so the owner-level
+            // propagation has to happen here at the call site.
+            if ((m.flags_field & Flags.DEFAULT) != 0) {
+                c.flags_field |= Flags.DEFAULT;
+            }
         }
         readRecordComponents(c, entry);
         enterDefaultConstructorsIfNeeded(c, entry);
@@ -514,7 +527,12 @@ public final class IndexClassReader extends ClassReader {
         if (ref instanceof TypeRef tr) {
             ClassSymbol symbol = resolver.resolveTypeRef(tr, module, entry);
             if (symbol != null) {
-                return symbol.type;
+                // Bare class references (raw types) must be erased. Returning
+                // symbol.type for a generic declaration keeps its formal type
+                // parameters (e.g. NetworkMetrics<T>), which breaks override
+                // checks against source uses of the raw form (NetworkMetrics) or
+                // raw type arguments (ConcurrentCyclicSequence<HandlerHolder>).
+                return types.erasure(symbol.type);
             }
         }
         return syms.errType;

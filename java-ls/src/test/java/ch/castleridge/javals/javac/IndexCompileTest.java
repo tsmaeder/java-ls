@@ -1419,6 +1419,138 @@ class IndexCompileTest {
                 () -> "FutureBase.expecting should override Future.expecting cleanly; got: " + errors);
     }
 
+    @Test
+    void wildcardReturnOverrideCompilesCleanly() throws Exception {
+        Path resources = testResourcesDir();
+        Index index = indexWithJrt();
+        indexSourceFile(index, resources.resolve("SimpleFuture.java"));
+        indexSourceFile(index, resources.resolve("VerticleBaseLike.java"));
+
+        ClasspathOrder cp = classPathOf(List.of(jrtUri(), SOURCE_URI));
+        String source = """
+                package ch.castleridge.javals.test;
+
+                public class VerticleSubclass extends VerticleBaseLike {
+                    @Override
+                    public SimpleFuture<?> start() throws Exception {
+                        return null;
+                    }
+
+                    @Override
+                    public SimpleFuture<?> stop() throws Exception {
+                        return null;
+                    }
+                }
+                """;
+
+        List<Diagnostic<? extends JavaFileObject>> errors =
+                compileSource(index, cp, "test:///VerticleSubclass.java", source);
+        assertTrue(errors.isEmpty(),
+                () -> "VerticleSubclass.start/stop should override VerticleBaseLike cleanly; got: " + errors);
+    }
+
+    @Test
+    void covariantWildcardReturnOverrideCompilesCleanly() throws Exception {
+        Path resources = testResourcesDir();
+        Index index = indexWithJrt();
+        indexSourceFile(index, resources.resolve("NetworkMetrics.java"));
+        indexSourceFile(index, resources.resolve("TransportMetrics.java"));
+        indexSourceFile(index, resources.resolve("ConnectionBaseLike.java"));
+
+        ClasspathOrder cp = classPathOf(List.of(jrtUri(), SOURCE_URI));
+        String source = """
+                package ch.castleridge.javals.test;
+
+                public class HttpConnectionLike extends ConnectionBaseLike {
+                    @Override
+                    public TransportMetrics<?> metrics() {
+                        return null;
+                    }
+                }
+                """;
+
+        List<Diagnostic<? extends JavaFileObject>> errors =
+                compileSource(index, cp, "test:///HttpConnectionLike.java", source);
+        assertTrue(errors.isEmpty(),
+                () -> "HttpConnectionLike.metrics should override ConnectionBaseLike.metrics cleanly; got: " + errors);
+    }
+
+    @Test
+    void vertxIndexedVerticleBaseStartOverrideCompilesCleanly() throws Exception {
+        Path vertxCoreSrc = Path.of("../../test-projects/vert.x/vertx-core/src/main/java")
+                .toAbsolutePath().normalize();
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isDirectory(vertxCoreSrc));
+
+        Index index = indexWithJrt();
+        List<Throwable> failures = new Scanner().scanAll(List.of(new DirInput(vertxCoreSrc)), index);
+        assertTrue(failures.isEmpty(), () -> "scan failures: " + failures);
+
+        ClasspathOrder cp = classPathOf(List.of(vertxCoreSrc.toUri().toString(), jrtUri()));
+        String source = """
+                package io.vertx.core;
+                class VerticleSubclass extends VerticleBase {
+                    @Override
+                    public Future<?> start() throws Exception {
+                        return null;
+                    }
+                }
+                """;
+
+        List<Diagnostic<? extends JavaFileObject>> errors =
+                compileSource(index, cp, "test:///VerticleSubclass.java", source);
+        assertTrue(errors.isEmpty(),
+                () -> "VerticleBase.start override should compile cleanly; got: " + errors);
+    }
+
+    private static String jrtUri() {
+        return new JrtInput(Path.of(System.getProperty("java.home"))).sourceUri().toString();
+    }
+
+    private static Index indexWithJrt() throws Exception {
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(
+                List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+        return index;
+    }
+
+    private static Path testResourcesDir() {
+        Path resources = Path.of("src/test/resources/ch/castleridge/javals/test");
+        if (!Files.exists(resources)) {
+            resources = Path.of("java-ls/src/test/resources/ch/castleridge/javals/test");
+        }
+        return resources;
+    }
+
+    private static List<Diagnostic<? extends JavaFileObject>> compileSource(
+            Index index, ClasspathOrder cp, String uri, String source) throws Exception {
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(URI.create(uri), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return source;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) {
+                errors.add(d);
+            }
+        }
+        return errors;
+    }
+
     private static void indexSourceFile(Index index, Path file) throws Exception {
         String source = Files.readString(file);
         String fileName = file.getFileName().toString();
@@ -2323,6 +2455,160 @@ class IndexCompileTest {
                 "Greeter.greet should be reported as a default method");
         assertTrue(greeter.getModifiers().contains(Modifier.ABSTRACT),
                 "the interface itself is still abstract");
+    }
+
+    /**
+     * Regression for the dominant vert.x diagnostic: invoking an inherited
+     * default method through a concrete-class receiver (e.g.
+     * {@code checkpoint.succeed()} where {@code Checkpoint implements
+     * Completable<Object>} and {@code succeed()} is a default on
+     * {@code Completable}). javac's {@code Resolve.findMethod} only scans an
+     * index-provided interface for default methods when the interface symbol
+     * carries {@code Flags.DEFAULT}; {@link IndexClassReader} must propagate
+     * that bit from its default methods to the owning interface.
+     */
+    @Test
+    void concreteClassResolvesInheritedDefaultMethod() throws Exception {
+        Index index = new Index();
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
+        SourceIndexer.index(
+                URI.create("mem:///Greeter.java"),
+                URI.create(SOURCE_URI),
+                """
+                        package com.example;
+
+                        public interface Greeter<T> {
+                            default String greet() { return "hi"; }
+                            default String greet(T who) { return "hi " + who; }
+                        }
+                        """,
+                index);
+        SourceIndexer.index(
+                URI.create("mem:///Politeness.java"),
+                URI.create(SOURCE_URI),
+                """
+                        package com.example;
+
+                        public final class Politeness implements Greeter<Object> {
+                            public Politeness() {}
+                        }
+                        """,
+                index);
+
+        ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("mem:///Caller.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        package com.example;
+
+                        public class Caller {
+                            void m(Politeness p) {
+                                p.greet();
+                                p.greet("world");
+                            }
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "inherited default method via concrete receiver should resolve; got: " + errors);
+    }
+
+    /**
+     * The owner-level {@code Flags.DEFAULT} propagation must hold across a
+     * chain of interfaces: a concrete class implementing an interface that
+     * <em>extends</em> another interface declaring the default method must
+     * still resolve the inherited default.
+     */
+    @Test
+    void transitiveSuperInterfaceDefaultMethodResolves() throws Exception {
+        Index index = new Index();
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
+        SourceIndexer.index(
+                URI.create("mem:///Base.java"),
+                URI.create(SOURCE_URI),
+                """
+                        package com.example;
+
+                        public interface Base {
+                            default String hello() { return "hi"; }
+                        }
+                        """,
+                index);
+        SourceIndexer.index(
+                URI.create("mem:///Polite.java"),
+                URI.create(SOURCE_URI),
+                """
+                        package com.example;
+
+                        public interface Polite extends Base {
+                        }
+                        """,
+                index);
+        SourceIndexer.index(
+                URI.create("mem:///Person.java"),
+                URI.create(SOURCE_URI),
+                """
+                        package com.example;
+
+                        public final class Person implements Polite {
+                            public Person() {}
+                        }
+                        """,
+                index);
+
+        ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject src = new SimpleJavaFileObject(
+                URI.create("mem:///Caller.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        package com.example;
+
+                        public class Caller {
+                            void m(Person p) {
+                                p.hello();
+                            }
+                        }
+                        """;
+            }
+        };
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(src), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "default method inherited via a super-interface chain should resolve; got: " + errors);
     }
 
     @Test

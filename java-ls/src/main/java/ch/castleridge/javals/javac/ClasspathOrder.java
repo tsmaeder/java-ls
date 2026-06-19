@@ -48,15 +48,24 @@ public final class ClasspathOrder {
     }
 
     /**
-        * Pick the winning {@link T} from a set of candidates. The one with the lowest index in the classpath order is returned. Returns {@code null} if no candidate is on the classpath.
+     * Pick the winning {@link T} from a set of candidates. The one with the
+     * lowest index in the classpath order is returned. When this order is
+     * {@linkplain #UNRESTRICTED unrestricted}, the first candidate is
+     * returned if no entry-specific match exists.
      */
     public <T> T pick(Collection<T> candidates, Function<T, String> uriMapper) {
+        if (candidates == null || candidates.isEmpty()) {
+            return null;
+        }
         for (ClasspathEntry e : entries) {
             for (T c : candidates) {
                 if (e.contains(uriMapper.apply(c))) {
                     return c;
                 }
             }
+        }
+        if (unrestricted) {
+            return candidates.iterator().next();
         }
         return null;
     }
