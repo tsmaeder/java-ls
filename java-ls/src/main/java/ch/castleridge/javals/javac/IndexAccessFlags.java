@@ -53,6 +53,31 @@ final class IndexAccessFlags {
         return flags & ~Opcodes.ACC_SUPER;
     }
 
+    /**
+     * Compute the access flags for a nested type as read through
+     * {@link IndexClassReader#readInnerClassesFromIndex}. A member type of
+     * an interface (or annotation type) is implicitly {@code public} and
+     * {@code static} (JLS 9.5), but {@code SourceIndexer} only records the
+     * explicit source modifiers, so a bare {@code interface Action {}}
+     * inside an interface would otherwise be synthesized package-private
+     * and non-static. javac then rejects every use as "not public … cannot
+     * be accessed from outside package", and the missing {@code static}
+     * bit also makes the reader wire a bogus enclosing instance type.
+     *
+     * <p>The promotion is restricted to source entries: bytecode-indexed
+     * inners already carry the right bits (merged from the InnerClasses
+     * attribute in {@code ClassFileIndexer.visitInnerClass}), so re-OR-ing
+     * them would be redundant. This mirrors the source-only interface-member
+     * handling already done for fields and methods.
+     */
+    static long innerClassFlags(TypeEntry outer, TypeEntry inner) {
+        long flags = classFlags(inner);
+        if (inner.isSourceEntry() && isInterfaceOwner(outer)) {
+            flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC;
+        }
+        return flags;
+    }
+
     static int fieldFlags(TypeEntry owner, FieldEntry field) {
         if (!owner.isSourceEntry()) {
             return field.modifiers();

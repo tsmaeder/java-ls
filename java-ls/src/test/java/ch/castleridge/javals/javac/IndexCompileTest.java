@@ -1835,6 +1835,96 @@ class IndexCompileTest {
     }
 
     @Test
+    void interfaceMemberTypesAreImplicitlyPublicAndStatic() throws Exception {
+        // Regression for P3: a member type of an interface is implicitly
+        // public and static (JLS 9.5), but the source indexer only records
+        // the explicit modifiers, so a bare `interface Action {}` (or nested
+        // class) inside an interface is recorded with no access bits. The
+        // synthesized inner ClassSymbol must still come out public + static,
+        // otherwise javac rejects every use - even from the SAME package -
+        // with "X is not public in Y; cannot be accessed from outside
+        // package" (and the missing static bit wires a bogus enclosing
+        // instance type).
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String cpUri = "index:///cp/iface-members/";
+
+        Index index = new Index();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        SourceIndexer.index(
+                URI.create("mem:///Executor.java"),
+                URI.create(cpUri),
+                """
+                        package io.example.pool;
+                        public interface Executor<S> {
+                            interface Action<S> {
+                                void execute(S state);
+                            }
+                            class Holder {
+                                public int value;
+                            }
+                            void submit(Action<S> action);
+                        }
+                        """,
+                index);
+
+        // Same package as the declaring interface: package-private access
+        // would still fail here if Action/Holder were not promoted to public.
+        JavaFileObject samePackage = new SimpleJavaFileObject(
+                URI.create("mem:///SamePackageUser.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        package io.example.pool;
+                        public class SamePackageUser {
+                            Executor.Action<String> action;
+                            Executor.Holder holder;
+                        }
+                        """;
+            }
+        };
+
+        // Different package: only legal if the member types are public.
+        JavaFileObject crossPackage = new SimpleJavaFileObject(
+                URI.create("mem:///CrossPackageUser.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        package io.example.other;
+                        import io.example.pool.Executor;
+                        public class CrossPackageUser {
+                            Executor.Action<String> action;
+                            Executor.Holder holder;
+                        }
+                        """;
+            }
+        };
+
+        ClasspathOrder cp = classPathOf(List.of(cpUri, jrtUri));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(),
+                List.of(samePackage, crossPackage), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
+        }
+        assertTrue(errors.isEmpty(),
+                () -> "interface member types should be implicitly public+static; got: " + errors);
+    }
+
+    @Test
     void classAnnotatedWithMissingAnnotationTypeStillResolves() throws Exception {
         // Regression for vert.x-style setups: a workspace type (Buffer) is
         // annotated with an annotation (@GenIgnore) whose declaring artifact

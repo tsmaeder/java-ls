@@ -344,7 +344,7 @@ public final class IndexClassReader extends ClassReader {
                 continue;
             }
             member.classfile = new IndexClassFileObject(innerEntry);
-            long innerFlags = IndexAccessFlags.classFlags(innerEntry);
+            long innerFlags = IndexAccessFlags.innerClassFlags(entry, innerEntry);
             if ((innerFlags & Flags.STATIC) == 0) {
                 ClassType memberType = (ClassType) member.type;
                 memberType.setEnclosingType(c.type);
