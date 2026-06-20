@@ -186,12 +186,15 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
 
     private List<JavaFileObject> listIndexedTypes(String pkgJvm, boolean recurse) {
         Map<String, TypeEntry> winners = new HashMap<>();
+        Map<String, Integer> winnerRank = new HashMap<>();
         for (TypeEntry e : index.listPackage(pkgJvm, recurse)) {
-            if (!classpath.contains(e.sourceUri())) continue;
+            int rank = classpath.rank(e.sourceUri());
+            if (rank < 0) continue;
             String jvm = e.jvmOwnerName();
-            TypeEntry existing = winners.get(jvm);
-            if (existing == null || classpath.pick(List.of(e, existing), TypeEntry::sourceUri) == e) {
+            Integer best = winnerRank.get(jvm);
+            if (best == null || rank < best) {
                 winners.put(jvm, e);
+                winnerRank.put(jvm, rank);
             }
         }
         return winners.values().stream().map(IndexClassFileObject::new).collect(Collectors.toList());

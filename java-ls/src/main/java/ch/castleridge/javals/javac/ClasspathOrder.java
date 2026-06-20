@@ -1,15 +1,12 @@
 package ch.castleridge.javals.javac;
 
-import java.net.URI;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Objects;
-import java.util.function.BiFunction;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
 
 import ch.castleridge.javals.indexing.model.TypeEntry;
-import ch.castleridge.javals.indexing.scan.InputSource;
 
 /**
  * Ordered list of {@link ClasspathEntry} expressing classpath priority
@@ -35,16 +32,37 @@ public final class ClasspathOrder {
 
     private final List<ClasspathEntry> entries;
     private final boolean unrestricted;
+    private final ConcurrentMap<String, Integer> rankCache = new ConcurrentHashMap<>();
 
     public ClasspathOrder(List<ClasspathEntry> entries, boolean unrestricted) {
         this.entries = entries;
         this.unrestricted = unrestricted;
     }
 
+    /**
+     * Classpath priority of {@code sourceUri}: index of the earliest
+     * {@link ClasspathEntry} whose prefix matches, or {@code -1} when none
+     * claim it. Under {@linkplain #UNRESTRICTED unrestricted} order every
+     * non-null URI ranks {@code 0}.
+     */
+    public int rank(String sourceUri) {
+        if (unrestricted) return sourceUri == null ? -1 : 0;
+        if (sourceUri == null) return -1;
+        return rankCache.computeIfAbsent(sourceUri, this::computeRank);
+    }
+
+    private int computeRank(String sourceUri) {
+        for (int i = 0; i < entries.size(); i++) {
+            if (entries.get(i).contains(sourceUri)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     /** True if any entry on this classpath claims {@code sourceUri}. */
     public boolean contains(String sourceUri) {
-        if (unrestricted) return true;
-       return entries.stream().anyMatch(e -> e.contains(sourceUri));
+        return unrestricted || rank(sourceUri) >= 0;
     }
 
     /**
@@ -57,16 +75,18 @@ public final class ClasspathOrder {
         if (candidates == null || candidates.isEmpty()) {
             return null;
         }
-        for (ClasspathEntry e : entries) {
-            for (T c : candidates) {
-                if (e.contains(uriMapper.apply(c))) {
-                    return c;
-                }
-            }
-        }
         if (unrestricted) {
             return candidates.iterator().next();
         }
-        return null;
+        T best = null;
+        int bestRank = Integer.MAX_VALUE;
+        for (T c : candidates) {
+            int r = rank(uriMapper.apply(c));
+            if (r >= 0 && r < bestRank) {
+                bestRank = r;
+                best = c;
+            }
+        }
+        return best;
     }
 }
