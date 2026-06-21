@@ -3028,6 +3028,300 @@ class IndexCompileTest {
                 () -> "inherited static nested Codec should compile; got: " + errors);
     }
 
+    @Test
+    void inheritedMemberTypeInIndexedSignatureResolves() throws Exception {
+        // Regression for P4: an indexed type's signature references a nested
+        // type it INHERITS from its supertype, by simple name (e.g. a subclass
+        // constructor `Sub(Mode m)` where Mode is declared in Base). The source
+        // indexer emits Unresolved("Mode"); without inherited-member resolution
+        // the class reader falls back to a phantom java.lang.Mode, so a call
+        // passing the real Base.Mode fails with "incompatible types:
+        // java.lang.Mode cannot be converted to p.Base.Mode".
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String cpUri = "index:///cp/inherited-member/";
+
+        Index index = new Index();
+        assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
+
+        SourceIndexer.index(URI.create("mem:///Base.java"), URI.create(cpUri),
+                """
+                        package p;
+                        public class Base {
+                            public static class Mode {}
+                            public Base(Mode m) {}
+                        }
+                        """,
+                index);
+        SourceIndexer.index(URI.create("mem:///Sub.java"), URI.create(cpUri),
+                """
+                        package p;
+                        public class Sub extends Base {
+                            public Sub(Mode m) { super(m); }
+                        }
+                        """,
+                index);
+
+        ClasspathOrder cp = classPathOf(List.of(cpUri, jrtUri));
+        var errors = compileSource(index, cp, "test:///User.java",
+                """
+                        package q;
+                        import p.Base;
+                        import p.Sub;
+                        public class User {
+                            Sub s = new Sub(new Base.Mode());
+                        }
+                        """);
+        assertTrue(errors.isEmpty(),
+                () -> "inherited member type in an indexed signature must resolve; got: " + errors);
+    }
+
+    @Test
+    void siblingNestedTypeInIndexedSignatureResolves() throws Exception {
+        // Regression for P4: an indexed nested type references a SIBLING nested
+        // type of its lexically-enclosing type by simple name (Other referring
+        // to Inner, both nested in Outer). Resolution must walk out to the
+        // enclosing scope, not fall back to a phantom java.lang.Inner.
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String cpUri = "index:///cp/sibling-nested/";
+
+        Index index = new Index();
+        assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
+
+        SourceIndexer.index(URI.create("mem:///Outer.java"), URI.create(cpUri),
+                """
+                        package p;
+                        public class Outer {
+                            public static class Inner {}
+                            public static class Other {
+                                public Other(Inner i) {}
+                            }
+                        }
+                        """,
+                index);
+
+        ClasspathOrder cp = classPathOf(List.of(cpUri, jrtUri));
+        var errors = compileSource(index, cp, "test:///User.java",
+                """
+                        package q;
+                        import p.Outer;
+                        public class User {
+                            Outer.Other o = new Outer.Other(new Outer.Inner());
+                        }
+                        """);
+        assertTrue(errors.isEmpty(),
+                () -> "sibling nested type in an indexed signature must resolve; got: " + errors);
+    }
+
+    @Test
+    void sourceIndexedAnnotationIsRecognizedAsAnnotationType() throws Exception {
+        // Regression for P5: a source-indexed @interface must come out as a
+        // subtype of java.lang.annotation.Annotation, otherwise every use site
+        // reports "incompatible types: Marker cannot be converted to
+        // java.lang.annotation.Annotation".
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String cpUri = "index:///cp/anno-type/";
+
+        Index index = new Index();
+        assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
+
+        SourceIndexer.index(URI.create("mem:///Marker.java"), URI.create(cpUri),
+                """
+                        package p;
+                        public @interface Marker {
+                            String value() default "";
+                        }
+                        """,
+                index);
+
+        ClasspathOrder cp = classPathOf(List.of(cpUri, jrtUri));
+        var errors = compileSource(index, cp, "test:///User.java",
+                """
+                        package q;
+                        import p.Marker;
+                        @Marker("x")
+                        public class User {}
+                        """);
+        assertTrue(errors.isEmpty(),
+                () -> "source-indexed annotation must be usable as an annotation; got: " + errors);
+    }
+
+    @Test
+    void sourceIndexedEnumConstantUsableAsAnnotationValue() throws Exception {
+        // Regression for P5/P9: an annotation element of a source-indexed enum
+        // type, given a source-indexed enum constant
+        // (`@WithProxy(kind = ProxyKind.HTTP)`), must type-check. javac's
+        // Annotate requires the referenced constant's VarSymbol to be a static
+        // field carrying Flags.ENUM (Annotate.getAnnotationEnumValue); if the
+        // indexed enum constant loses ACC_ENUM/ACC_STATIC the use site reports
+        // "an enum annotation value must be an enum constant".
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String cpUri = "index:///cp/enum-anno-value/";
+
+        Index index = new Index();
+        assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
+
+        SourceIndexer.index(URI.create("mem:///ProxyKind.java"), URI.create(cpUri),
+                """
+                        package p;
+                        public enum ProxyKind { HTTP, SOCKS4, SOCKS5 }
+                        """,
+                index);
+        SourceIndexer.index(URI.create("mem:///WithProxy.java"), URI.create(cpUri),
+                """
+                        package p;
+                        public @interface WithProxy {
+                            ProxyKind kind() default ProxyKind.HTTP;
+                        }
+                        """,
+                index);
+
+        ClasspathOrder cp = classPathOf(List.of(cpUri, jrtUri));
+        var errors = compileSource(index, cp, "test:///User.java",
+                """
+                        package q;
+                        import p.WithProxy;
+                        import p.ProxyKind;
+                        public class User {
+                            @WithProxy(kind = ProxyKind.HTTP)
+                            void m() {}
+                        }
+                        """);
+        assertTrue(errors.isEmpty(),
+                () -> "source-indexed enum constant must be usable as an annotation value; got: " + errors);
+    }
+
+    @Test
+    void sourceIndexedEnumSupportsImplicitMembers() throws Exception {
+        // Regression for P6/P9: a source-indexed enum must behave like a real
+        // enum - extend java.lang.Enum<E> (so name()/ordinal() resolve and it
+        // satisfies EnumSet/EnumMap bounds), expose its constants as public
+        // static fields, and carry the synthetic values()/valueOf(String).
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String cpUri = "index:///cp/enum-members/";
+
+        Index index = new Index();
+        assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
+
+        SourceIndexer.index(URI.create("mem:///Color.java"), URI.create(cpUri),
+                """
+                        package p;
+                        public enum Color { RED, GREEN, BLUE }
+                        """,
+                index);
+
+        ClasspathOrder cp = classPathOf(List.of(cpUri, jrtUri));
+        var errors = compileSource(index, cp, "test:///User.java",
+                """
+                        package q;
+                        import p.Color;
+                        import java.util.EnumSet;
+                        public class User {
+                            Color a = Color.RED;
+                            Color b = Color.valueOf("RED");
+                            Color[] all = Color.values();
+                            String n = Color.RED.name();
+                            int o = Color.RED.ordinal();
+                            EnumSet<Color> set = EnumSet.of(Color.RED, Color.GREEN);
+                        }
+                        """);
+        assertTrue(errors.isEmpty(),
+                () -> "source-indexed enum must support implicit members; got: " + errors);
+    }
+
+    @Test
+    void memberInterfaceOfGenericClassIsImplicitlyStatic() throws Exception {
+        // Regression for the PoolWaiter<C>.Listener cascade (P8/P10): a member
+        // interface is implicitly static (JLS 9.5) even when nested in a
+        // generic CLASS. If the indexed symbol is left non-static it becomes an
+        // inner of the generic outer, so writing the (correct) static form
+        // `Holder.Listener<String>` with a raw outer is rejected with
+        // "improperly formed type, type arguments given on a raw type".
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String cpUri = "index:///cp/member-iface/";
+
+        Index index = new Index();
+        assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
+
+        SourceIndexer.index(URI.create("mem:///Holder.java"), URI.create(cpUri),
+                """
+                        package p;
+                        public class Holder<C> {
+                            public interface Listener<C> {}
+                            public Holder(Holder.Listener<C> l) {}
+                        }
+                        """,
+                index);
+
+        ClasspathOrder cp = classPathOf(List.of(cpUri, jrtUri));
+        var errors = compileSource(index, cp, "test:///User.java",
+                """
+                        package q;
+                        import p.Holder;
+                        public class User {
+                            Holder.Listener<String> l;
+                            Holder<String> h = new Holder<>(l);
+                        }
+                        """);
+        assertTrue(errors.isEmpty(),
+                () -> "member interface of a generic class must be implicitly static; got: " + errors);
+    }
+
+    @Test
+    void indexedSneakyThrowsMethodInfersRuntimeException() throws Exception {
+        // Regression for P11: a generic "sneaky throws" helper
+        // `<E extends Throwable> void throwAsUnchecked(Throwable) throws E`
+        // must keep `throws E` as an inference type variable so javac infers
+        // E=RuntimeException at an unconstrained call site. If the indexed
+        // throws clause collapses to the bound (java.lang.Throwable), callers
+        // report "unreported exception java.lang.Throwable; must be caught".
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String cpUri = "index:///cp/sneaky-throws/";
+
+        Index index = new Index();
+        assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
+
+        SourceIndexer.index(URI.create("mem:///Utils.java"), URI.create(cpUri),
+                """
+                        package p;
+                        public final class Utils {
+                            @SuppressWarnings("unchecked")
+                            public static <E extends Throwable> void throwAsUnchecked(Throwable t) throws E {
+                                throw (E) t;
+                            }
+                        }
+                        """,
+                index);
+
+        ClasspathOrder cp = classPathOf(List.of(cpUri, jrtUri));
+        var errors = compileSource(index, cp, "test:///User.java",
+                """
+                        package q;
+                        import p.Utils;
+                        public class User {
+                            int m(Throwable cause) {
+                                Utils.throwAsUnchecked(cause);
+                                return 0;
+                            }
+                        }
+                        """);
+        assertTrue(errors.isEmpty(),
+                () -> "sneaky-throws generic method should not force a checked throwable; got: " + errors);
+    }
+
     private static TypeEntry typeWithMethod(String srcUri, String jvmName, String methodName) {
         return new TypeEntry(
                 "index:///" + jvmName + "@" + srcUri,

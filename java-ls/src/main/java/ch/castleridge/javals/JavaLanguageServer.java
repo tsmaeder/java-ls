@@ -118,7 +118,7 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
         }
     }
 
-    public void logException(Exception e) {
+    public void logException(Throwable e) {
         if (client != null) {
             StringWriter stringWriter = new StringWriter();
             PrintWriter printWriter = new PrintWriter(stringWriter);

@@ -149,7 +149,15 @@ public class JavaTextDocumentService implements TextDocumentService {
                     long t1 = System.currentTimeMillis();
                     server.logMessage(MessageType.Log,
                             "Refresh compile took " + (t1 - t0) + "ms for " + uri);
-                } catch (RuntimeException e) {
+                } catch (RuntimeException | Error e) {
+                    // javac signals fatal internal failures with Error subtypes
+                    // (com.sun.tools.javac.util.Abort, AssertionError) and deep
+                    // resolution cycles surface as StackOverflowError - none of
+                    // which are RuntimeExceptions. Catching only RuntimeException
+                    // let those escape the async task, which then died silently:
+                    // no diagnostics were ever published and the failure was
+                    // invisible. Catch Throwable-but-rethrow-nothing so every
+                    // compile failure becomes a visible compiler-internal-error.
                     server.logException(e);
                     TextDocumentItem latestOnError = documents.get(uri);
                     if (latestOnError == null || latestOnError.getVersion() != versionAtStart) {

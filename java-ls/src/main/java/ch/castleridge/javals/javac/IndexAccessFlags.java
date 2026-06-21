@@ -72,10 +72,32 @@ final class IndexAccessFlags {
      */
     static long innerClassFlags(TypeEntry outer, TypeEntry inner) {
         long flags = classFlags(inner);
-        if (inner.isSourceEntry() && isInterfaceOwner(outer)) {
-            flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC;
+        if (inner.isSourceEntry()) {
+            if (isInterfaceOwner(outer)) {
+                flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC;
+            }
+            // A member interface, enum, annotation or record is implicitly
+            // static regardless of the enclosing type's kind (JLS 8.5/9.5).
+            // SourceIndexer only records explicit modifiers, so e.g. an
+            // `interface Listener<C> {}` nested in a generic `class
+            // PoolWaiter<C>` would otherwise be synthesized as a non-static
+            // inner of the generic outer. The reader then wires it as
+            // PoolWaiter<C>.Listener, which no longer matches uses written as
+            // the (correct) static form PoolWaiter.Listener<C> - surfacing as
+            // "improperly formed type, type arguments given on a raw type" and
+            // a cascade of bogus override/abstract-method errors.
+            if (isImplicitlyStaticMember(inner.declKind())) {
+                flags |= Opcodes.ACC_STATIC;
+            }
         }
         return flags;
+    }
+
+    private static boolean isImplicitlyStaticMember(TypeDeclKind kind) {
+        return kind == TypeDeclKind.INTERFACE
+                || kind == TypeDeclKind.ANNOTATION
+                || kind == TypeDeclKind.ENUM
+                || kind == TypeDeclKind.RECORD;
     }
 
     static int fieldFlags(TypeEntry owner, FieldEntry field) {

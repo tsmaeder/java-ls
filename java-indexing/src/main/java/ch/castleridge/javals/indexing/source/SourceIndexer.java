@@ -248,6 +248,14 @@ public final class SourceIndexer {
     private static FieldEntry toFieldEntry(String uri, String owner, VariableTree vt,
                                            Set<String> typeParams, String ownerJvm) {
         int flags = modifierFlags(vt.getModifiers());
+        if (isEnumConstant(vt)) {
+            // An enum constant is implicitly public, static and final and
+            // carries ACC_ENUM, but its source ModifiersTree lists none of
+            // these. Without them the synthesized field is package-private and
+            // non-static, so `MyEnum.CONSTANT` references report "cannot find
+            // symbol: variable CONSTANT".
+            flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_ENUM;
+        }
         Object constantValue = null;
         if ((flags & (Opcodes.ACC_STATIC | Opcodes.ACC_FINAL)) == (Opcodes.ACC_STATIC | Opcodes.ACC_FINAL)) {
             constantValue = literalConstantValue(vt.getInitializer());
@@ -509,6 +517,13 @@ public final class SourceIndexer {
             case RECORD -> TypeDeclKind.RECORD;
             default -> TypeDeclKind.CLASS;
         };
+    }
+
+    private static boolean isEnumConstant(VariableTree vt) {
+        // The parser sets Flags.ENUM on enum-constant declarations; this is the
+        // only reliable structural signal (the public ModifiersTree API exposes
+        // no ENUM modifier).
+        return vt instanceof JCTree.JCVariableDecl v && (v.mods.flags & Flags.ENUM) != 0;
     }
 
     private static boolean isVarArgs(MethodTree mt) {

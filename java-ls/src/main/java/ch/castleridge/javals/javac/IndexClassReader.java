@@ -185,12 +185,31 @@ public final class IndexClassReader extends ClassReader {
         }
 
         if (ct.supertype_field == null) {
-           var superRef = entry.superRef();
-            ct.supertype_field = superRef == null ? Type.noType: resolveType(superRef, currentModule, entry);
+            ct.supertype_field = resolveSupertype(c, entry);
         }
         List<Type> is = List.nil();
         for (ch.castleridge.javals.indexing.model.Type interfaceRef : entry.interfaceRefs()) {
             is = is.prepend(resolveType(interfaceRef, currentModule, entry));
+        }
+        // An annotation interface implicitly extends java.lang.annotation.Annotation
+        // (JLS 9.6). The source indexer records no explicit super-interface for a
+        // bare `@interface Foo {}`, so without this the synthesized symbol carries
+        // the ACC_ANNOTATION flag but is NOT a subtype of Annotation - and javac's
+        // annotation-use check (which verifies the annotation type is assignable to
+        // java.lang.annotation.Annotation) then reports "incompatible types: Foo
+        // cannot be converted to java.lang.annotation.Annotation" at every use site.
+        if ((flags & Flags.ANNOTATION) != 0) {
+            Type annotationType = syms.annotationType;
+            boolean present = false;
+            for (Type i : is) {
+                if (i.tsym == annotationType.tsym) {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present) {
+                is = is.prepend(annotationType);
+            }
         }
         if (ct.interfaces_field == null)
             ct.interfaces_field = is.reverse();
@@ -223,6 +242,7 @@ public final class IndexClassReader extends ClassReader {
             }
         }
         readRecordComponents(c, entry);
+        enterSyntheticEnumMembersIfNeeded(c, entry);
         enterDefaultConstructorsIfNeeded(c, entry);
         if (c.isRecord()) {
             for (RecordComponent rc: c.getRecordComponents()) {
@@ -231,6 +251,68 @@ public final class IndexClassReader extends ClassReader {
         }
         installAnnotationTypeMetadata(c, entry, currentModule);
         typevars = typevars.leave();
+    }
+
+    /**
+     * Synthesize the two implicitly-declared static members of a
+     * source-indexed enum, {@code public static E[] values()} and
+     * {@code public static E valueOf(String)}. The compiler generates these
+     * for an enum declaration, so source indexing never sees them; without
+     * them {@code MyEnum.values()} / {@code MyEnum.valueOf("X")} report
+     * "cannot find symbol". Bytecode-indexed enums already carry both methods
+     * (read straight from the classfile), so the synthesis is restricted to
+     * source entries.
+     */
+    private void enterSyntheticEnumMembersIfNeeded(ClassSymbol c, TypeEntry entry) {
+        if (!entry.isSourceEntry()
+                || entry.declKind() != ch.castleridge.javals.indexing.model.TypeDeclKind.ENUM) {
+            return;
+        }
+        Name valuesName = names.fromString("values");
+        if (!hasMethodNamed(c, valuesName)) {
+            MethodType mt = new MethodType(
+                    List.nil(), new ArrayType(c.type, syms.arrayClass), List.nil(), syms.methodClass);
+            enterMember(c, new MethodSymbol(Flags.PUBLIC | Flags.STATIC, valuesName, mt, c));
+        }
+        Name valueOfName = names.fromString("valueOf");
+        if (!hasMethodNamed(c, valueOfName)) {
+            MethodType mt = new MethodType(
+                    List.of(syms.stringType), c.type, List.nil(), syms.methodClass);
+            enterMember(c, new MethodSymbol(Flags.PUBLIC | Flags.STATIC, valueOfName, mt, c));
+        }
+    }
+
+    private boolean hasMethodNamed(ClassSymbol c, Name name) {
+        for (Symbol sym : c.members().getSymbolsByName(name)) {
+            if (sym.kind == Kinds.Kind.MTH) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Compute the supertype of an indexed type.
+     *
+     * <p>For a source-indexed {@code enum} the source indexer records the
+     * declared super as {@code java/lang/Object} (an enum header has no
+     * {@code extends} clause), but an enum's real supertype is
+     * {@code java.lang.Enum<E>}. Without it the synthesized symbol is not an
+     * {@code Enum} subtype, so generic uses bounded by {@code <E extends
+     * Enum<E>>} - {@code EnumSet.of(...)}, {@code EnumMap}, {@code
+     * EnumSet.copyOf(...)} - fail with "type argument E is not within bounds".
+     * We rebuild {@code Enum<E>} explicitly here; {@code Comparable<E>} and
+     * {@code Serializable} then come transitively from {@code Enum}.
+     */
+    private Type resolveSupertype(ClassSymbol c, TypeEntry entry) {
+        if (entry.isSourceEntry()
+                && entry.declKind() == ch.castleridge.javals.indexing.model.TypeDeclKind.ENUM) {
+            ClassSymbol enumSym = resolver.resolveTypeRef(
+                    TypeRef.resolved("java/lang/Enum"), currentModule, entry);
+            if (enumSym != null) {
+                return new ClassType(Type.noType, List.of(c.type), enumSym);
+            }
+        }
+        var superRef = entry.superRef();
+        return superRef == null ? Type.noType : resolveType(superRef, currentModule, entry);
     }
 
     /**
@@ -488,7 +570,18 @@ public final class IndexClassReader extends ClassReader {
         }
         ListBuffer<Type> thrown = new ListBuffer<>();
         for (ch.castleridge.javals.indexing.model.Type tr : m.throwsTypes()) {
-            thrown.add(resolveType(tr, module, entry));
+            Type thrownType = resolveType(tr, module, entry);
+            // Mirror javac's ClassReader: a type variable that appears in the
+            // throws clause must be flagged THROWS. This flag is the sole gate
+            // for the JLS inference rule that solves an otherwise-unconstrained
+            // throws type variable to RuntimeException. Without it the "sneaky
+            // throws" idiom `<E extends Throwable> void m() throws E` is seen by
+            // callers as `throws Throwable`, yielding spurious "unreported
+            // exception java.lang.Throwable" diagnostics.
+            if (thrownType.hasTag(TypeTag.TYPEVAR)) {
+                thrownType.tsym.flags_field |= Flags.THROWS;
+            }
+            thrown.add(thrownType);
         }
         Type ret = resolveType(m.returnType(), module, entry);
         return new MethodType(params.toList(), ret, thrown.toList(), syms.methodClass);

@@ -72,6 +72,16 @@ public final class LspWorkspaceDiagnosticsMain {
         Path fileListOut = args.length >= 3 ? Path.of(args[2]).toAbsolutePath().normalize() : null;
 
         List<Path> javaFiles = collectJavaFiles(workspaceRoot);
+        // Optional path-substring filter (system property) to restrict the run
+        // to a subset of files for fast iteration/diagnosis without changing the
+        // index. Example: -Ddiag.filter=jacksonv3
+        String filter = System.getProperty("diag.filter");
+        if (filter != null && !filter.isEmpty()) {
+            javaFiles = javaFiles.stream()
+                    .filter(p -> p.toString().replace('\\', '/').contains(filter))
+                    .toList();
+            System.err.println("Filter '" + filter + "' -> " + javaFiles.size() + " file(s)");
+        }
         System.err.println("Discovered " + javaFiles.size() + " .java files under " + workspaceRoot);
         if (fileListOut != null) {
             Files.write(fileListOut, javaFiles.stream().map(Path::toString).toList());
@@ -100,6 +110,9 @@ public final class LspWorkspaceDiagnosticsMain {
                     filesFailed++;
                     System.err.println("[" + filesProcessed + "/" + javaFiles.size()
                             + "] FAILED " + relative + " : " + e);
+                    if (Boolean.getBoolean("diag.dumpOnTimeout")) {
+                        dumpAllThreads();
+                    }
                     // Record the failure to receive diagnostics as its own problem
                     // so it is not silently lost.
                     recordProblem(problems,
@@ -161,6 +174,20 @@ public final class LspWorkspaceDiagnosticsMain {
         System.exit(0);
     }
 
+    private static void dumpAllThreads() {
+        System.err.println("==== THREAD DUMP (on timeout) ====");
+        Map<Thread, StackTraceElement[]> all = Thread.getAllStackTraces();
+        for (Map.Entry<Thread, StackTraceElement[]> e : all.entrySet()) {
+            Thread t = e.getKey();
+            System.err.println("\"" + t.getName() + "\" state=" + t.getState());
+            for (StackTraceElement f : e.getValue()) {
+                System.err.println("    at " + f);
+            }
+            System.err.println();
+        }
+        System.err.println("==== END THREAD DUMP ====");
+    }
+
     private static void safeClose(LspDiagnosticsHarness harness, Path file) {
         try {
             harness.closeDocument(file);
@@ -169,14 +196,37 @@ public final class LspWorkspaceDiagnosticsMain {
         }
     }
 
+    /**
+     * Directory names that hold build output or tooling caches rather than
+     * real workspace sources. {@code .metals/out} in particular contains
+     * JDK/library sources that metals extracted for navigation; compiling them
+     * re-declares types that the index already provides (e.g. a second
+     * {@code java.lang.Object}), which is a self-shadowing artifact unrelated
+     * to workspace diagnostics — so we never want them in the measurement.
+     */
+    private static final java.util.Set<String> EXCLUDED_DIRS =
+            java.util.Set.of(".metals", ".bloop", "target", "build", "out", "bin",
+                    "node_modules", ".git", ".gradle", ".idea");
+
     private static List<Path> collectJavaFiles(Path workspaceRoot) throws IOException {
         try (Stream<Path> stream = Files.walk(workspaceRoot)) {
             return stream
                     .filter(Files::isRegularFile)
                     .filter(p -> p.getFileName().toString().endsWith(".java"))
+                    .filter(p -> !isUnderExcludedDir(workspaceRoot, p))
                     .sorted()
                     .toList();
         }
+    }
+
+    private static boolean isUnderExcludedDir(Path workspaceRoot, Path file) {
+        Path relative = workspaceRoot.relativize(file);
+        for (Path segment : relative) {
+            if (EXCLUDED_DIRS.contains(segment.toString())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void recordProblemFull(Map<String, Problem> problems, String code, String message,
