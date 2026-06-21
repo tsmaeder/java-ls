@@ -3322,6 +3322,38 @@ class IndexCompileTest {
                 () -> "sneaky-throws generic method should not force a checked throwable; got: " + errors);
     }
 
+    @Test
+    void bytecodeIndexedOptionalLongOrElseThrowInfersRuntimeException() throws Exception {
+        // Regression for bytecode sneaky-throws: JDK OptionalLong.orElseThrow is
+        // `<X extends Throwable> long orElseThrow(Supplier<? extends X>) throws X`.
+        // If the indexed throws clause is the erased Throwable, callers report
+        // "unreported exception java.lang.Throwable; must be caught".
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+
+        Index index = new Index();
+        assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
+
+        ClasspathOrder cp = classPathOf(List.of(jrtUri));
+        var errors = compileSource(index, cp, "test:///User.java",
+                """
+                        package q;
+                        import java.util.OptionalLong;
+                        public class User {
+                            long m(java.util.List<Long> values) {
+                                return values.stream().mapToLong(v -> v).max()
+                                        .orElseThrow(IllegalStateException::new);
+                            }
+                            long n() {
+                                return OptionalLong.empty().orElseThrow(IllegalStateException::new);
+                            }
+                        }
+                        """);
+        assertTrue(errors.isEmpty(),
+                () -> "bytecode-indexed OptionalLong.orElseThrow should infer RuntimeException; got: " + errors);
+    }
+
     private static TypeEntry typeWithMethod(String srcUri, String jvmName, String methodName) {
         return new TypeEntry(
                 "index:///" + jvmName + "@" + srcUri,

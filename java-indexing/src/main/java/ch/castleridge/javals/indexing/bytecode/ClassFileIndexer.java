@@ -241,7 +241,9 @@ public final class ClassFileIndexer {
                     ? List.of()
                     : generic.typeParams();
             final List<Type> throwsRefs;
-            if (exceptions == null || exceptions.length == 0) {
+            if (generic != null && !generic.throwsTypes().isEmpty()) {
+                throwsRefs = generic.throwsTypes();
+            } else if (exceptions == null || exceptions.length == 0) {
                 throwsRefs = List.of();
             } else {
                 List<Type> ts = new ArrayList<>(exceptions.length);
