@@ -292,27 +292,54 @@ public final class IndexClassReader extends ClassReader {
     /**
      * Compute the supertype of an indexed type.
      *
-     * <p>For a source-indexed {@code enum} the source indexer records the
-     * declared super as {@code java/lang/Object} (an enum header has no
-     * {@code extends} clause), but an enum's real supertype is
-     * {@code java.lang.Enum<E>}. Without it the synthesized symbol is not an
-     * {@code Enum} subtype, so generic uses bounded by {@code <E extends
-     * Enum<E>>} - {@code EnumSet.of(...)}, {@code EnumMap}, {@code
-     * EnumSet.copyOf(...)} - fail with "type argument E is not within bounds".
-     * We rebuild {@code Enum<E>} explicitly here; {@code Comparable<E>} and
-     * {@code Serializable} then come transitively from {@code Enum}.
+     * <p>When an explicit supertype was recorded we simply resolve it. The
+     * source indexer records only an explicit {@code extends} clause, so a
+     * source entry with no recorded super means the supertype is implicit and
+     * depends on the declaration kind:
+     *
+     * <ul>
+     *   <li>{@code enum} -> {@code java.lang.Enum<E>}. Without it the
+     *   synthesized symbol is not an {@code Enum} subtype, so generic uses
+     *   bounded by {@code <E extends Enum<E>>} - {@code EnumSet.of(...)},
+     *   {@code EnumMap}, {@code EnumSet.copyOf(...)} - fail with "type
+     *   argument E is not within bounds". We rebuild {@code Enum<E>}
+     *   explicitly; {@code Comparable<E>} and {@code Serializable} then come
+     *   transitively from {@code Enum}.</li>
+     *   <li>{@code record} -> {@code java.lang.Record}.</li>
+     *   <li>{@code interface}/{@code @interface} -> {@code java.lang.Object}.
+     *   An interface has no superclass in the JLS sense, but javac stores
+     *   {@code Object} in {@code supertype_field} so that {@code
+     *   Types.supertype} and inherited {@code Object} members resolve.</li>
+     *   <li>everything else (a plain class) -> {@code java.lang.Object}.</li>
+     * </ul>
+     *
+     * <p>A bytecode entry only reaches the no-recorded-super case for
+     * {@code java.lang.Object} itself, which correctly has no supertype.
      */
     private Type resolveSupertype(ClassSymbol c, TypeEntry entry) {
-        if (entry.isSourceEntry()
-                && entry.declKind() == ch.castleridge.javals.indexing.model.TypeDeclKind.ENUM) {
-            ClassSymbol enumSym = resolver.resolveTypeRef(
-                    TypeRef.resolved("java/lang/Enum"), currentModule, entry);
-            if (enumSym != null) {
-                return new ClassType(Type.noType, List.of(c.type), enumSym);
-            }
-        }
         var superRef = entry.superRef();
-        return superRef == null ? Type.noType : resolveType(superRef, currentModule, entry);
+        if (superRef != null) {
+            return resolveType(superRef, currentModule, entry);
+        }
+        if (!entry.isSourceEntry()) {
+            return Type.noType;
+        }
+        return switch (entry.declKind()) {
+            case ENUM -> {
+                ClassSymbol enumSym = resolver.resolveTypeRef(
+                        TypeRef.resolved("java/lang/Enum"), currentModule, entry);
+                yield enumSym != null
+                        ? new ClassType(Type.noType, List.of(c.type), enumSym)
+                        : syms.objectType;
+            }
+            case RECORD -> {
+                ClassSymbol recordSym = resolver.resolveTypeRef(
+                        TypeRef.resolved("java/lang/Record"), currentModule, entry);
+                yield recordSym != null ? recordSym.type : syms.objectType;
+            }
+            case INTERFACE, ANNOTATION -> syms.objectType;
+            default -> syms.objectType;
+        };
     }
 
     /**

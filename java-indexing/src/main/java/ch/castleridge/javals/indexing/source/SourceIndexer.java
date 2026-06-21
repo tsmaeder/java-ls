@@ -179,14 +179,16 @@ public final class SourceIndexer {
 
         TypeDeclKind declKind = declKind(ct);
         int modifiers = modifierFlags(ct.getModifiers());
-        Type superRef;
-        if (ct.getExtendsClause() != null) {
-            superRef = toTypeRef(ct.getExtendsClause(), classTypeParams, localName);
-        } else if (declKind != TypeDeclKind.INTERFACE && declKind != TypeDeclKind.ANNOTATION) {
-            superRef = TypeRef.resolved("java/lang/Object");
-        } else {
-            superRef = null;
-        }
+        // Only an explicit `extends` clause is recorded here. When the header
+        // carries none, the implicit supertype depends on the declaration
+        // kind (java/lang/Object for a class, java/lang/Enum for an enum,
+        // java/lang/Record for a record, none for an interface/annotation).
+        // We deliberately leave it null and let the index class reader supply
+        // the right default, where the declKind is known and the supertype can
+        // be resolved against the full index.
+        Type superRef = ct.getExtendsClause() != null
+                ? toTypeRef(ct.getExtendsClause(), classTypeParams, localName)
+                : null;
         List<Type> interfaceRefs = new ArrayList<>();
         for (Tree intf : ct.getImplementsClause()) {
             interfaceRefs.add(toTypeRef(intf, classTypeParams, localName));
