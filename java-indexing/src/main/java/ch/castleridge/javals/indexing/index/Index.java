@@ -1,9 +1,6 @@
 package ch.castleridge.javals.indexing.index;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
@@ -32,26 +29,47 @@ import ch.castleridge.javals.indexing.model.TypeEntry;
  * case: the map value is {@code Object}, carrying either a bare
  * {@link TypeEntry} (1 entry) or a {@code TypeEntry[]} (2+). This avoids
  * ~430k {@link java.util.concurrent.CopyOnWriteArrayList} shells for the
- * trino workload and is updated atomically via
- * {@link ConcurrentMap#compute}.
+ * trino workload.
+ *
+ * <p>Thread-safety is provided by a single monitor ({@code synchronized}
+ * on {@link #lock}) guarding plain {@link HashMap}s rather than
+ * {@code ConcurrentHashMap}. Indexing happens in batches: a scanner builds
+ * a per-source temporary index and merges it wholesale via
+ * {@link #addAll(Index)}, so each merge takes the monitor exactly once and
+ * applies the whole batch under it, avoiding the per-key CAS/bin-lock
+ * overhead of {@code ConcurrentHashMap}. Critical sections are short (map
+ * puts/gets only; the expensive parsing happens before entries reach the
+ * index), so a single mutex is cheaper than a read/write lock's bookkeeping.
  */
 public final class Index {
 
-    private final ConcurrentMap<String, Object> byJvmName = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, Object> byPackage = new ConcurrentHashMap<>();
+    private final Object lock = new Object();
+
+    private final Map<String, Object> byJvmName = new HashMap<>();
+    private final Map<String, Object> byPackage = new HashMap<>();
     // Modules are addressed by module name, not by JVM binary name, and
     // duplicates across classpath sources are resolved by classpath
     // ordering at lookup time (mirroring the TypeEntry bucket strategy).
-    private final ConcurrentMap<String, Object> byModuleName = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, IdentifierBloomFilter> bloomByResourceUri = new ConcurrentHashMap<>();
-    private final List<Runnable> changedListeners = new CopyOnWriteArrayList<>();
+    private final Map<String, Object> byModuleName = new HashMap<>();
+    private final Map<String, IdentifierBloomFilter> bloomByResourceUri = new HashMap<>();
+    // Observer list is touched once per merge and rarely mutated; guard it
+    // with the same monitor and iterate a snapshot taken outside it.
+    private final List<Runnable> changedListeners = new ArrayList<>();
 
     public void addChangedListener(Runnable listener) {
-        if (listener != null) changedListeners.add(listener);
+        if (listener == null) return;
+        synchronized (lock) {
+            changedListeners.add(listener);
+        }
     }
 
     private void notifyChanged() {
-        for (Runnable listener : changedListeners) {
+        Runnable[] snapshot;
+        synchronized (lock) {
+            if (changedListeners.isEmpty()) return;
+            snapshot = changedListeners.toArray(new Runnable[0]);
+        }
+        for (Runnable listener : snapshot) {
             try {
                 listener.run();
             } catch (RuntimeException ignored) {
@@ -66,48 +84,75 @@ public final class Index {
      * Does not fire change listeners — bloom filters are consulted on demand.
      */
     public void registerBloom(String resourceUri, IdentifierBloomFilter filter) {
-        registerBloomInternal(resourceUri, filter);
+        if (resourceUri == null || filter == null) return;
+        synchronized (lock) {
+            registerBloomLocked(resourceUri, filter);
+        }
     }
 
-    private void registerBloomInternal(String resourceUri, IdentifierBloomFilter filter) {
+    /** Caller must hold the monitor. */
+    private void registerBloomLocked(String resourceUri, IdentifierBloomFilter filter) {
         if (resourceUri == null || filter == null) return;
         bloomByResourceUri.put(resourceUri, filter);
     }
 
-    /** Every registered identifier bloom filter, keyed by resource URI. */
+    /**
+     * Snapshot of every registered identifier bloom filter, keyed by
+     * resource URI. Returns an immutable copy so callers can iterate it
+     * without holding the index lock.
+     */
     public Map<String, IdentifierBloomFilter> bloomFilters() {
-        return Collections.unmodifiableMap(bloomByResourceUri);
+        synchronized (lock) {
+            return Map.copyOf(bloomByResourceUri);
+        }
     }
 
     public void add(TypeEntry entry) {
-        if (addInternal(entry)) notifyChanged();
+        if (entry == null) return;
+        boolean changed;
+        synchronized (lock) {
+            changed = addLocked(entry);
+        }
+        if (changed) notifyChanged();
     }
 
-    private boolean addInternal(TypeEntry entry) {
+    /** Caller must hold the monitor. */
+    private boolean addLocked(TypeEntry entry) {
         if (entry == null) return false;
         String jvm = entry.jvmOwnerName();
         if (isSkippedJvmName(jvm)) return false;
 
-        byJvmName.compute(jvm, (k, prior) -> appendBucket(prior, entry));
+        byJvmName.put(jvm, appendBucket(byJvmName.get(jvm), entry));
         String pkg = entry.packageJvm();
-        byPackage.compute(pkg, (k, prior) -> appendBucket(prior, entry));
+        byPackage.put(pkg, appendBucket(byPackage.get(pkg), entry));
         return true;
     }
 
     /**
      * Merge every entry from {@code other} into this index and fire a
-     * single change notification. Bloom filters are merged silently.
+     * single change notification. The entire batch is applied under one
+     * monitor acquisition. Bloom filters are merged silently.
      */
     public void addAll(Index other) {
         if (other == null || other.isEmpty()) return;
-        for (TypeEntry e : other.all()) addInternal(e);
-        for (ModuleEntry m : other.allModules()) addModuleInternal(m);
-        other.bloomFilters().forEach(this::registerBloomInternal);
+        // Snapshot the source outside our lock (each call takes the
+        // source's own monitor); then apply the whole batch at once.
+        Collection<TypeEntry> types = other.all();
+        Collection<ModuleEntry> modules = other.allModules();
+        Map<String, IdentifierBloomFilter> blooms = other.bloomFilters();
+
+        synchronized (lock) {
+            for (TypeEntry e : types) addLocked(e);
+            for (ModuleEntry m : modules) addModuleLocked(m);
+            blooms.forEach(this::registerBloomLocked);
+        }
         notifyChanged();
     }
 
     public boolean isEmpty() {
-        return entryCount() == 0 && moduleCount() == 0 && bloomByResourceUri.isEmpty();
+        synchronized (lock) {
+            return byJvmName.isEmpty() && byModuleName.isEmpty() && bloomByResourceUri.isEmpty();
+        }
     }
 
     private static Object appendBucket(Object prior, TypeEntry entry) {
@@ -129,7 +174,9 @@ public final class Index {
      * ordering via {@link TypeEntry#sourceUri()}.
      */
     public List<TypeEntry> getAll(String jvmName) {
-        return toList(byJvmName.get(jvmName));
+        synchronized (lock) {
+            return toList(byJvmName.get(jvmName));
+        }
     }
 
     /**
@@ -139,19 +186,23 @@ public final class Index {
      * explicit classpath ordering for deterministic behaviour.
      */
     public TypeEntry get(String jvmName) {
-        Object bucket = byJvmName.get(jvmName);
-        if (bucket == null) return null;
-        if (bucket instanceof TypeEntry only) return only;
-        TypeEntry[] arr = (TypeEntry[]) bucket;
-        return arr.length == 0 ? null : arr[0];
+        synchronized (lock) {
+            Object bucket = byJvmName.get(jvmName);
+            if (bucket == null) return null;
+            if (bucket instanceof TypeEntry only) return only;
+            TypeEntry[] arr = (TypeEntry[]) bucket;
+            return arr.length == 0 ? null : arr[0];
+        }
     }
 
     public boolean contains(String jvmName) {
-        Object bucket = byJvmName.get(jvmName);
-        if (bucket == null) return false;
-        if (bucket instanceof TypeEntry) return true;
-        TypeEntry[] arr = (TypeEntry[]) bucket;
-        return arr.length > 0;
+        synchronized (lock) {
+            Object bucket = byJvmName.get(jvmName);
+            if (bucket == null) return false;
+            if (bucket instanceof TypeEntry) return true;
+            TypeEntry[] arr = (TypeEntry[]) bucket;
+            return arr.length > 0;
+        }
     }
 
     /**
@@ -160,43 +211,51 @@ public final class Index {
      * multiple sources) - consumers apply their own deduplication.
      */
     public List<TypeEntry> listPackage(String packageJvm, boolean recurse) {
-        if (recurse) {
-            List<TypeEntry> entries = new ArrayList<>();
-            String prefix = packageJvm+'/';
-            for (Map.Entry<String, Object> entry : byPackage.entrySet()) {
-                String packageName = entry.getKey();
-                if (packageName.startsWith(prefix)) {
-                    addBucketTo(entry.getValue(), entries);
+        synchronized (lock) {
+            if (recurse) {
+                List<TypeEntry> entries = new ArrayList<>();
+                String prefix = packageJvm+'/';
+                for (Map.Entry<String, Object> entry : byPackage.entrySet()) {
+                    String packageName = entry.getKey();
+                    if (packageName.startsWith(prefix)) {
+                        addBucketTo(entry.getValue(), entries);
+                    }
                 }
+                return entries;
+            } else {
+                return toList(byPackage.get(packageJvm == null ? "" : packageJvm));
             }
-            return entries;
-        } else {
-            return toList(byPackage.get(packageJvm == null ? "" : packageJvm));
         }
     }
 
     /** Every {@link TypeEntry} currently stored, including duplicates. */
     public Collection<TypeEntry> all() {
-        List<TypeEntry> out = new ArrayList<>();
-        for (Object bucket : byJvmName.values()) {
-            addBucketTo(bucket, out);
+        synchronized (lock) {
+            List<TypeEntry> out = new ArrayList<>();
+            for (Object bucket : byJvmName.values()) {
+                addBucketTo(bucket, out);
+            }
+            return Collections.unmodifiableCollection(out);
         }
-        return Collections.unmodifiableCollection(out);
     }
 
     /** Number of distinct JVM binary names indexed (ignoring duplicates). */
     public int size() {
-        return byJvmName.size();
+        synchronized (lock) {
+            return byJvmName.size();
+        }
     }
 
     /** Number of indexed entries in total, counting duplicates. */
     public int entryCount() {
-        int n = 0;
-        for (Object bucket : byJvmName.values()) {
-            if (bucket instanceof TypeEntry) n += 1;
-            else if (bucket != null) n += ((TypeEntry[]) bucket).length;
+        synchronized (lock) {
+            int n = 0;
+            for (Object bucket : byJvmName.values()) {
+                if (bucket instanceof TypeEntry) n += 1;
+                else if (bucket != null) n += ((TypeEntry[]) bucket).length;
+            }
+            return n;
         }
-        return n;
     }
 
     private static List<TypeEntry> toList(Object bucket) {
@@ -224,12 +283,18 @@ public final class Index {
      * strategy.
      */
     public void addModule(ModuleEntry module) {
-        if (addModuleInternal(module)) notifyChanged();
+        if (module == null) return;
+        synchronized (lock) {
+            addModuleLocked(module);
+        }
+        notifyChanged();
     }
 
-    private boolean addModuleInternal(ModuleEntry module) {
+    /** Caller must hold the monitor. */
+    private boolean addModuleLocked(ModuleEntry module) {
         if (module == null) return false;
-        byModuleName.compute(module.name(), (k, prior) -> appendModuleBucket(prior, module));
+        String name = module.name();
+        byModuleName.put(name, appendModuleBucket(byModuleName.get(name), module));
         return true;
     }
 
@@ -251,33 +316,41 @@ public final class Index {
      * picking via {@link ModuleEntry#sourceUri()}.
      */
     public List<ModuleEntry> getAllModules(String moduleName) {
-        return toModuleList(byModuleName.get(moduleName));
+        synchronized (lock) {
+            return toModuleList(byModuleName.get(moduleName));
+        }
     }
 
     /** Convenience: pick an arbitrary {@link ModuleEntry} for the name, or null. */
     public ModuleEntry getModule(String moduleName) {
-        Object bucket = byModuleName.get(moduleName);
-        if (bucket == null) return null;
-        if (bucket instanceof ModuleEntry only) return only;
-        ModuleEntry[] arr = (ModuleEntry[]) bucket;
-        return arr.length == 0 ? null : arr[0];
+        synchronized (lock) {
+            Object bucket = byModuleName.get(moduleName);
+            if (bucket == null) return null;
+            if (bucket instanceof ModuleEntry only) return only;
+            ModuleEntry[] arr = (ModuleEntry[]) bucket;
+            return arr.length == 0 ? null : arr[0];
+        }
     }
 
     /** Every {@link ModuleEntry} currently stored, including duplicates. */
     public Collection<ModuleEntry> allModules() {
-        List<ModuleEntry> out = new ArrayList<>();
-        for (Object bucket : byModuleName.values()) {
-            if (bucket instanceof ModuleEntry only) out.add(only);
-            else if (bucket != null) {
-                for (ModuleEntry m : (ModuleEntry[]) bucket) out.add(m);
+        synchronized (lock) {
+            List<ModuleEntry> out = new ArrayList<>();
+            for (Object bucket : byModuleName.values()) {
+                if (bucket instanceof ModuleEntry only) out.add(only);
+                else if (bucket != null) {
+                    for (ModuleEntry m : (ModuleEntry[]) bucket) out.add(m);
+                }
             }
+            return Collections.unmodifiableCollection(out);
         }
-        return Collections.unmodifiableCollection(out);
     }
 
     /** Distinct number of module names indexed (ignoring duplicates). */
     public int moduleCount() {
-        return byModuleName.size();
+        synchronized (lock) {
+            return byModuleName.size();
+        }
     }
 
     private static List<ModuleEntry> toModuleList(Object bucket) {
