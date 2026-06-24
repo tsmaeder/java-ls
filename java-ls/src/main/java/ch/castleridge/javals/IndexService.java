@@ -29,23 +29,23 @@ import ch.castleridge.javals.indexing.index.Index;
  * in one of the workspace folders and asynchronously running the
  * {@link Scanner} over the {@link InputSource}s it describes.
  *
- * <p>While the scan is running both {@link #index()}  returns {@link Optional#empty()}; callers that need
- * the index should treat that as "not yet ready" and skip cross-file
- * resolution. Once the future completes the references are published
- * atomically.
+ * <p>While the scan is running {@link #index()} returns the live index,
+ * which grows incrementally as each {@link InputSource} is merged. Callers
+ * that need the index can use it immediately; change listeners are
+ * notified as entries arrive.
  */
 public final class IndexService {
 
     private final JavaLanguageServer server;
     private final AtomicReference<State> state = new AtomicReference<>(State.empty());
-    private final List<Runnable> indexReadyListeners = new CopyOnWriteArrayList<>();
+    private final List<Runnable> indexChangedListeners = new CopyOnWriteArrayList<>();
 
     public IndexService(JavaLanguageServer server) {
         this.server = server;
     }
 
-    public void addIndexReadyListener(Runnable listener) {
-        indexReadyListeners.add(listener);
+    public void addIndexChangedListener(Runnable listener) {
+        indexChangedListeners.add(listener);
     }
 
     public Optional<Index> index() {
@@ -100,17 +100,18 @@ public final class IndexService {
                 return;
             }
             Index index = new Index();
+            index.addChangedListener(this::notifyIndexChanged);
+            state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar));
+            notifyIndexChanged();
             Scanner scanner = new Scanner();
             long t0 = System.nanoTime();
             List<Throwable> failures = scanner.scanAll(sources.values(), index);
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
 
-            state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar));
             log(MessageType.Info, "Indexed " + index.size() + " types ("
                     + index.entryCount() + " entries) from " + sources.size()
                     + " sources in " + elapsedMs + " ms"
                     + (failures.isEmpty() ? "" : "; " + failures.size() + " failures"));
-            notifyIndexReady();
             failures.forEach(f -> {
                 StringWriter writer = new StringWriter();
                 f.printStackTrace(new PrintWriter(writer));
@@ -321,12 +322,12 @@ public final class IndexService {
         }
     }
 
-    private void notifyIndexReady() {
-        for (Runnable listener : indexReadyListeners) {
+    private void notifyIndexChanged() {
+        for (Runnable listener : indexChangedListeners) {
             try {
                 listener.run();
             } catch (RuntimeException e) {
-                log(MessageType.Error, "Index-ready listener failed: " + e.getMessage());
+                log(MessageType.Error, "Index-changed listener failed: " + e.getMessage());
             }
         }
     }

@@ -20,12 +20,16 @@ import ch.castleridge.javals.indexing.source.SourceIndexer;
 /**
  * Drives one or more {@link InputSource}s into a single {@link Index}.
  *
- * <p>Input sources (typically one per jar / source directory / jrt module)
- * are walked concurrently across a small driver pool so that sequential
- * {@link java.util.jar.JarFile} iteration does not serialise the wall clock
- * across hundreds of jars. File-level indexing work - ASM parsing, javac
- * tree analysis - is then dispatched from the walker onto a separate
- * {@link ForkJoinPool} which can saturate every CPU.
+ * <p>Each input source is indexed as a unit: files are parsed in parallel
+ * into a temporary {@link Index}, then merged into the target index via
+ * {@link Index#addAll(Index)} so consumers see one change notification per
+ * source.
+ *
+ * <p>Input sources are walked concurrently across a small driver pool so
+ * that sequential {@link java.util.jar.JarFile} iteration does not
+ * serialise the wall clock across hundreds of jars. File-level indexing
+ * work - ASM parsing, javac tree analysis - is dispatched from the walker
+ * onto a separate {@link ForkJoinPool} which can saturate every CPU.
  *
  * <p>Individual file failures are swallowed and collected so a single bad
  * class file cannot stop the scan.
@@ -65,49 +69,13 @@ public final class Scanner {
             return t;
         });
         try {
-            List<Future<?>> walkFutures = new ArrayList<>(sources.size());
-            List<ForkJoinTask<?>> indexTasks = Collections.synchronizedList(new ArrayList<>());
+            List<Future<?>> sourceFutures = new ArrayList<>(sources.size());
             for (InputSource src : sources) {
-                String srcUri = src.sourceUri();
-                walkFutures.add(driverPool.submit(() -> {
-                    try {
-                        src.walk((uri, fileName, bytes) -> {
-                            ForkJoinTask<?> task = pool.submit(() -> {
-                                try {
-                                    indexOne(uri, srcUri, fileName, bytes.get(), into);
-                                } catch (Throwable t) {
-                                    failures.add(t);
-                                }
-                            });
-                            indexTasks.add(task);
-                        });
-                    } catch (Throwable t) {
-                        System.err.println("Skipping unreadable source " + srcUri + ": "
-                                + t.getClass().getSimpleName() + ": " + t.getMessage());
-                        failures.add(t);
-                    }
-                }));
+                sourceFutures.add(driverPool.submit(() -> scanOneSource(src, into, failures)));
             }
-            // Let the walkers finish enqueueing before we join the index
-            // tasks, otherwise new tasks may still be added while we iterate.
-            for (Future<?> f : walkFutures) {
+            for (Future<?> f : sourceFutures) {
                 try {
                     f.get();
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    failures.add(ie);
-                } catch (ExecutionException ee) {
-                    failures.add(ee.getCause() == null ? ee : ee.getCause());
-                }
-            }
-            // Snapshot before draining to decouple from any late walker.
-            ForkJoinTask<?>[] snapshot;
-            synchronized (indexTasks) {
-                snapshot = indexTasks.toArray(new ForkJoinTask<?>[0]);
-            }
-            for (ForkJoinTask<?> t : snapshot) {
-                try {
-                    t.get();
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     failures.add(ie);
@@ -122,6 +90,40 @@ public final class Scanner {
             }
         }
         return failures;
+    }
+
+    private void scanOneSource(InputSource src, Index into, List<Throwable> failures) {
+        String srcUri = src.sourceUri();
+        Index temp = new Index();
+        List<ForkJoinTask<?>> indexTasks = new ArrayList<>();
+        try {
+            src.walk((uri, fileName, bytes) -> {
+                ForkJoinTask<?> task = pool.submit(() -> {
+                    try {
+                        indexOne(uri, srcUri, fileName, bytes.get(), temp);
+                    } catch (Throwable t) {
+                        failures.add(t);
+                    }
+                });
+                indexTasks.add(task);
+            });
+        } catch (Throwable t) {
+            System.err.println("Skipping unreadable source " + srcUri + ": "
+                    + t.getClass().getSimpleName() + ": " + t.getMessage());
+            failures.add(t);
+            return;
+        }
+        for (ForkJoinTask<?> task : indexTasks) {
+            try {
+                task.get();
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                failures.add(ie);
+            } catch (ExecutionException ee) {
+                failures.add(ee.getCause() == null ? ee : ee.getCause());
+            }
+        }
+        into.addAll(temp);
     }
 
     private static void indexOne(String uri, String sourceUri, String fileName, byte[] content, Index into) {

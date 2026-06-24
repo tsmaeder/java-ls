@@ -10,6 +10,11 @@ import java.net.URI;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.lang.model.element.Element;
 import javax.lang.model.util.Elements;
@@ -47,11 +52,18 @@ public class JavaTextDocumentService implements TextDocumentService {
     private final SymbolLocator symbolLocator = new SymbolLocator(sourceCache);
     /** Max files to scan for cross-file references; {@code <= 0} means no cap. */
     private volatile int referencesCandidateCap;
+    private final ScheduledExecutorService refreshScheduler =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "index-refresh-debounce");
+                t.setDaemon(true);
+                return t;
+            });
+    private final AtomicReference<ScheduledFuture<?>> pendingRefresh = new AtomicReference<>();
 
     public JavaTextDocumentService(JavaLanguageServer server, IndexService indexService) {
         this.server = server;
         this.indexService = indexService;
-        indexService.addIndexReadyListener(this::refreshOpenDocuments);
+        indexService.addIndexChangedListener(this::scheduleRefreshOpenDocuments);
     }
 
     public void setReferencesCandidateCap(int referencesCandidateCap) {
@@ -113,11 +125,22 @@ public class JavaTextDocumentService implements TextDocumentService {
      */
   /**
      * Recompile every open document. Called when the workspace index
-     * becomes ready so files opened during indexing get diagnostics.
+     * changes so diagnostics reflect the latest classpath.
      */
     public void refreshOpenDocuments() {
         for (String uri : documents.keySet()) {
             refreshCompile(uri);
+        }
+    }
+
+    private void scheduleRefreshOpenDocuments() {
+        if (pendingRefresh.get() != null) return;
+        ScheduledFuture<?> f = refreshScheduler.schedule(() -> {
+            pendingRefresh.set(null);
+            refreshOpenDocuments();
+        }, 1, TimeUnit.SECONDS);
+        if (!pendingRefresh.compareAndSet(null, f)) {
+            f.cancel(false);
         }
     }
 

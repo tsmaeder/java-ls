@@ -3,6 +3,7 @@ package ch.castleridge.javals.indexing.index;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
@@ -43,12 +44,32 @@ public final class Index {
     // ordering at lookup time (mirroring the TypeEntry bucket strategy).
     private final ConcurrentMap<String, Object> byModuleName = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, IdentifierBloomFilter> bloomByResourceUri = new ConcurrentHashMap<>();
+    private final List<Runnable> changedListeners = new CopyOnWriteArrayList<>();
+
+    public void addChangedListener(Runnable listener) {
+        if (listener != null) changedListeners.add(listener);
+    }
+
+    private void notifyChanged() {
+        for (Runnable listener : changedListeners) {
+            try {
+                listener.run();
+            } catch (RuntimeException ignored) {
+                // listener failures must not break indexing
+            }
+        }
+    }
 
     /**
      * Register a per-source-file identifier bloom filter keyed by the
      * file's resource URI (e.g. {@code file:///.../Foo.java}).
+     * Does not fire change listeners — bloom filters are consulted on demand.
      */
     public void registerBloom(String resourceUri, IdentifierBloomFilter filter) {
+        registerBloomInternal(resourceUri, filter);
+    }
+
+    private void registerBloomInternal(String resourceUri, IdentifierBloomFilter filter) {
         if (resourceUri == null || filter == null) return;
         bloomByResourceUri.put(resourceUri, filter);
     }
@@ -59,13 +80,34 @@ public final class Index {
     }
 
     public void add(TypeEntry entry) {
-        if (entry == null) return;
+        if (addInternal(entry)) notifyChanged();
+    }
+
+    private boolean addInternal(TypeEntry entry) {
+        if (entry == null) return false;
         String jvm = entry.jvmOwnerName();
-        if (isSkippedJvmName(jvm)) return;
+        if (isSkippedJvmName(jvm)) return false;
 
         byJvmName.compute(jvm, (k, prior) -> appendBucket(prior, entry));
         String pkg = entry.packageJvm();
         byPackage.compute(pkg, (k, prior) -> appendBucket(prior, entry));
+        return true;
+    }
+
+    /**
+     * Merge every entry from {@code other} into this index and fire a
+     * single change notification. Bloom filters are merged silently.
+     */
+    public void addAll(Index other) {
+        if (other == null || other.isEmpty()) return;
+        for (TypeEntry e : other.all()) addInternal(e);
+        for (ModuleEntry m : other.allModules()) addModuleInternal(m);
+        other.bloomFilters().forEach(this::registerBloomInternal);
+        notifyChanged();
+    }
+
+    public boolean isEmpty() {
+        return entryCount() == 0 && moduleCount() == 0 && bloomByResourceUri.isEmpty();
     }
 
     private static Object appendBucket(Object prior, TypeEntry entry) {
@@ -182,8 +224,13 @@ public final class Index {
      * strategy.
      */
     public void addModule(ModuleEntry module) {
-        if (module == null) return;
+        if (addModuleInternal(module)) notifyChanged();
+    }
+
+    private boolean addModuleInternal(ModuleEntry module) {
+        if (module == null) return false;
         byModuleName.compute(module.name(), (k, prior) -> appendModuleBucket(prior, module));
+        return true;
     }
 
     private static Object appendModuleBucket(Object prior, ModuleEntry entry) {
