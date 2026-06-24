@@ -3,7 +3,9 @@ package ch.castleridge.javals.indexing.index;
 import java.util.*;
 
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
+import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
+import ch.castleridge.javals.indexing.model.ModuleFileEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**
@@ -47,6 +49,9 @@ public final class Index {
 
     private final Map<String, Object> byJvmName = new HashMap<>();
     private final Map<String, Object> byPackage = new HashMap<>();
+    private final Map<String, Object> classFileByJvmName = new HashMap<>();
+    private final Map<String, Object> classFileByPackage = new HashMap<>();
+    private final Map<String, Object> moduleFileByName = new HashMap<>();
     // Modules are addressed by module name, not by JVM binary name, and
     // duplicates across classpath sources are resolved by classpath
     // ordering at lookup time (mirroring the TypeEntry bucket strategy).
@@ -139,11 +144,15 @@ public final class Index {
         // source's own monitor); then apply the whole batch at once.
         Collection<TypeEntry> types = other.all();
         Collection<ModuleEntry> modules = other.allModules();
+        Collection<ClassFileEntry> classFiles = other.allClassFiles();
+        Collection<ModuleFileEntry> moduleFiles = other.allModuleFiles();
         Map<String, IdentifierBloomFilter> blooms = other.bloomFilters();
 
         synchronized (lock) {
             for (TypeEntry e : types) addLocked(e);
             for (ModuleEntry m : modules) addModuleLocked(m);
+            for (ClassFileEntry cf : classFiles) addClassFileLocked(cf);
+            for (ModuleFileEntry mf : moduleFiles) addModuleFileLocked(mf);
             blooms.forEach(this::registerBloomLocked);
         }
         notifyChanged();
@@ -151,7 +160,11 @@ public final class Index {
 
     public boolean isEmpty() {
         synchronized (lock) {
-            return byJvmName.isEmpty() && byModuleName.isEmpty() && bloomByResourceUri.isEmpty();
+            return byJvmName.isEmpty()
+                    && byModuleName.isEmpty()
+                    && classFileByJvmName.isEmpty()
+                    && moduleFileByName.isEmpty()
+                    && bloomByResourceUri.isEmpty();
         }
     }
 
@@ -254,8 +267,186 @@ public final class Index {
                 if (bucket instanceof TypeEntry) n += 1;
                 else if (bucket != null) n += ((TypeEntry[]) bucket).length;
             }
+            for (Object bucket : classFileByJvmName.values()) {
+                if (bucket instanceof ClassFileEntry) n += 1;
+                else if (bucket != null) n += ((ClassFileEntry[]) bucket).length;
+            }
             return n;
         }
+    }
+
+    public void addClassFile(ClassFileEntry entry) {
+        if (entry == null) return;
+        boolean changed;
+        synchronized (lock) {
+            changed = addClassFileLocked(entry);
+        }
+        if (changed) notifyChanged();
+    }
+
+    /** Caller must hold the monitor. */
+    private boolean addClassFileLocked(ClassFileEntry entry) {
+        if (entry == null) return false;
+        String jvm = entry.jvmOwnerName();
+        if (isSkippedJvmName(jvm)) return false;
+        classFileByJvmName.put(jvm, appendClassFileBucket(classFileByJvmName.get(jvm), entry));
+        String pkg = entry.packageJvm();
+        classFileByPackage.put(pkg, appendClassFileBucket(classFileByPackage.get(pkg), entry));
+        return true;
+    }
+
+    public List<ClassFileEntry> getAllClassFiles(String jvmName) {
+        synchronized (lock) {
+            return toClassFileList(classFileByJvmName.get(jvmName));
+        }
+    }
+
+    public boolean containsClassFile(String jvmName) {
+        synchronized (lock) {
+            Object bucket = classFileByJvmName.get(jvmName);
+            if (bucket == null) return false;
+            if (bucket instanceof ClassFileEntry) return true;
+            ClassFileEntry[] arr = (ClassFileEntry[]) bucket;
+            return arr.length > 0;
+        }
+    }
+
+    /**
+     * Return every {@link ClassFileEntry} whose declaring package is
+     * {@code packageJvm}. May contain duplicates from multiple sources.
+     */
+    public List<ClassFileEntry> listPackageClassFiles(String packageJvm, boolean recurse) {
+        synchronized (lock) {
+            if (recurse) {
+                List<ClassFileEntry> entries = new ArrayList<>();
+                String prefix = packageJvm + '/';
+                for (Map.Entry<String, Object> entry : classFileByPackage.entrySet()) {
+                    String packageName = entry.getKey();
+                    if (packageName.startsWith(prefix)) {
+                        addClassFileBucketTo(entry.getValue(), entries);
+                    }
+                }
+                return entries;
+            }
+            return toClassFileList(classFileByPackage.get(packageJvm == null ? "" : packageJvm));
+        }
+    }
+
+    /** Every {@link ClassFileEntry} currently stored, including duplicates. */
+    public Collection<ClassFileEntry> allClassFiles() {
+        synchronized (lock) {
+            List<ClassFileEntry> out = new ArrayList<>();
+            for (Object bucket : classFileByJvmName.values()) {
+                addClassFileBucketTo(bucket, out);
+            }
+            return Collections.unmodifiableCollection(out);
+        }
+    }
+
+    /** Number of distinct JVM binary names in the class-file registry. */
+    public int classFileSize() {
+        synchronized (lock) {
+            return classFileByJvmName.size();
+        }
+    }
+
+    public void addModuleFile(ModuleFileEntry module) {
+        if (module == null) return;
+        synchronized (lock) {
+            addModuleFileLocked(module);
+        }
+        notifyChanged();
+    }
+
+    /** Caller must hold the monitor. */
+    private boolean addModuleFileLocked(ModuleFileEntry module) {
+        if (module == null) return false;
+        String name = module.name();
+        moduleFileByName.put(name, appendModuleFileBucket(moduleFileByName.get(name), module));
+        return true;
+    }
+
+    public List<ModuleFileEntry> getAllModuleFiles(String moduleName) {
+        synchronized (lock) {
+            return toModuleFileList(moduleFileByName.get(moduleName));
+        }
+    }
+
+    public ModuleFileEntry getModuleFile(String moduleName) {
+        synchronized (lock) {
+            Object bucket = moduleFileByName.get(moduleName);
+            if (bucket == null) return null;
+            if (bucket instanceof ModuleFileEntry only) return only;
+            ModuleFileEntry[] arr = (ModuleFileEntry[]) bucket;
+            return arr.length == 0 ? null : arr[0];
+        }
+    }
+
+    /** Every {@link ModuleFileEntry} currently stored, including duplicates. */
+    public Collection<ModuleFileEntry> allModuleFiles() {
+        synchronized (lock) {
+            List<ModuleFileEntry> out = new ArrayList<>();
+            for (Object bucket : moduleFileByName.values()) {
+                if (bucket instanceof ModuleFileEntry only) out.add(only);
+                else if (bucket != null) {
+                    for (ModuleFileEntry m : (ModuleFileEntry[]) bucket) out.add(m);
+                }
+            }
+            return Collections.unmodifiableCollection(out);
+        }
+    }
+
+    public int moduleFileCount() {
+        synchronized (lock) {
+            return moduleFileByName.size();
+        }
+    }
+
+    private static Object appendClassFileBucket(Object prior, ClassFileEntry entry) {
+        if (prior == null) return entry;
+        if (prior instanceof ClassFileEntry only) {
+            return new ClassFileEntry[]{only, entry};
+        }
+        ClassFileEntry[] arr = (ClassFileEntry[]) prior;
+        ClassFileEntry[] grown = new ClassFileEntry[arr.length + 1];
+        System.arraycopy(arr, 0, grown, 0, arr.length);
+        grown[arr.length] = entry;
+        return grown;
+    }
+
+    private static Object appendModuleFileBucket(Object prior, ModuleFileEntry entry) {
+        if (prior == null) return entry;
+        if (prior instanceof ModuleFileEntry only) {
+            return new ModuleFileEntry[]{only, entry};
+        }
+        ModuleFileEntry[] arr = (ModuleFileEntry[]) prior;
+        ModuleFileEntry[] grown = new ModuleFileEntry[arr.length + 1];
+        System.arraycopy(arr, 0, grown, 0, arr.length);
+        grown[arr.length] = entry;
+        return grown;
+    }
+
+    private static List<ClassFileEntry> toClassFileList(Object bucket) {
+        if (bucket == null) return List.of();
+        if (bucket instanceof ClassFileEntry only) return List.of(only);
+        ClassFileEntry[] arr = (ClassFileEntry[]) bucket;
+        return arr.length == 0 ? List.of() : List.of(arr);
+    }
+
+    private static void addClassFileBucketTo(Object bucket, List<ClassFileEntry> out) {
+        if (bucket == null) return;
+        if (bucket instanceof ClassFileEntry only) {
+            out.add(only);
+            return;
+        }
+        for (ClassFileEntry e : (ClassFileEntry[]) bucket) out.add(e);
+    }
+
+    private static List<ModuleFileEntry> toModuleFileList(Object bucket) {
+        if (bucket == null) return List.of();
+        if (bucket instanceof ModuleFileEntry only) return List.of(only);
+        ModuleFileEntry[] arr = (ModuleFileEntry[]) bucket;
+        return arr.length == 0 ? List.of() : List.of(arr);
     }
 
     private static List<TypeEntry> toList(Object bucket) {

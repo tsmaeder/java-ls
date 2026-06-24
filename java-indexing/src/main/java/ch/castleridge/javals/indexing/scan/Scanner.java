@@ -42,18 +42,28 @@ public final class Scanner {
 
     private final ForkJoinPool pool;
     private final boolean ownsPool;
+    private final boolean minimalClassFiles;
 
     public Scanner() {
-        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true);
+        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, false);
+    }
+
+    public Scanner(boolean minimalClassFiles) {
+        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, minimalClassFiles);
     }
 
     public Scanner(ForkJoinPool pool) {
-        this(pool, false);
+        this(pool, false, false);
     }
 
-    private Scanner(ForkJoinPool pool, boolean owns) {
+    public Scanner(ForkJoinPool pool, boolean minimalClassFiles) {
+        this(pool, false, minimalClassFiles);
+    }
+
+    private Scanner(ForkJoinPool pool, boolean owns, boolean minimalClassFiles) {
         this.pool = pool;
         this.ownsPool = owns;
+        this.minimalClassFiles = minimalClassFiles;
     }
 
     public List<Throwable> scanAll(Collection<InputSource> sources, Index into) {
@@ -98,15 +108,23 @@ public final class Scanner {
         List<ForkJoinTask<?>> indexTasks = new ArrayList<>();
         try {
             src.walk((uri, fileName, bytes) -> {
+                if (bytes == null) {
+                    try {
+                        indexOne(uri, srcUri, fileName, null, temp, true);
+                    } catch (Throwable t) {
+                        failures.add(t);
+                    }
+                    return;
+                }
                 ForkJoinTask<?> task = pool.submit(() -> {
                     try {
-                        indexOne(uri, srcUri, fileName, bytes.get(), temp);
+                        indexOne(uri, srcUri, fileName, bytes.get(), temp, minimalClassFiles);
                     } catch (Throwable t) {
                         failures.add(t);
                     }
                 });
                 indexTasks.add(task);
-            });
+            }, minimalClassFiles);
         } catch (Throwable t) {
             System.err.println("Skipping unreadable source " + srcUri + ": "
                     + t.getClass().getSimpleName() + ": " + t.getMessage());
@@ -126,8 +144,18 @@ public final class Scanner {
         into.addAll(temp);
     }
 
-    private static void indexOne(String uri, String sourceUri, String fileName, byte[] content, Index into) {
+    private static void indexOne(String uri, String sourceUri, String fileName, byte[] content, Index into,
+                               boolean minimalClassFiles) {
         if (fileName.endsWith(".class")) {
+            if (minimalClassFiles) {
+                if (Index.isModuleInfoFileName(fileName)) {
+                    ClassFileIndexer.indexModuleMinimal(
+                            URI.create(uri), URI.create(sourceUri), content, into);
+                } else {
+                    ClassFileIndexer.indexClassCatalog(URI.create(uri), URI.create(sourceUri), into);
+                }
+                return;
+            }
             ClassFileIndexer.index(URI.create(uri), URI.create(sourceUri), content, into);
         } else if (fileName.endsWith(".java")) {
             SourceIndexer.index(URI.create(uri), URI.create(sourceUri), new String(content, StandardCharsets.UTF_8), into);

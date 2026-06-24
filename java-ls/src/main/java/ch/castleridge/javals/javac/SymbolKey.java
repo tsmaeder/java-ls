@@ -17,7 +17,7 @@ import javax.tools.JavaFileObject;
 import com.sun.source.util.Trees;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 
-import ch.castleridge.javals.indexing.model.TypeEntry;
+import ch.castleridge.javals.indexing.model.IndexedClassRef;
 
 /**
  * A compilation-independent identity for a symbol, used to match references
@@ -56,7 +56,7 @@ public final class SymbolKey {
     /**
      * Build a key for {@code element} in the compilation described by
      * {@code elements}, {@code types}, and {@code trees}. Returns empty
-     * when the symbol has no indexed declaration (no {@link TypeEntry}
+     * when the symbol has no indexed declaration (no {@link IndexedClassRef}
      * and no source path in the current compilation).
      */
     public static Optional<SymbolKey> of(Element element,
@@ -117,9 +117,9 @@ public final class SymbolKey {
         if (enclosing == null) return Optional.empty();
 
         JavaFileObject classfile = enclosing.classfile;
-        TypeEntry entry = IndexFileManager.asEntry(classfile);
-        if (entry != null) {
-            String resourceUri = entry.resourceUri();
+        IndexedClassRef ref = IndexFileManager.asClassRef(classfile);
+        if (ref != null) {
+            String resourceUri = ref.resourceUri();
             if (resourceUri != null && !resourceUri.isBlank()) {
                 return Optional.of(resourceUri);
             }

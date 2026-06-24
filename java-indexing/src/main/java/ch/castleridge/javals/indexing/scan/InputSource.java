@@ -16,7 +16,17 @@ import java.net.URI;
 public sealed interface InputSource permits DirInput, JarInput, JrtInput {
 
     /** Walk the source and hand each candidate resource to {@code sink}. */
-    void walk(ResourceSink sink);
+    default void walk(ResourceSink sink) {
+        walk(sink, false);
+    }
+
+    /**
+     * @param catalogClassFilesOnly when {@code true}, ordinary {@code .class}
+     *        files are catalogued from their entry path only; bytecode is not
+     *        read. {@code module-info.class} and {@code .java} files are
+     *        still read.
+     */
+    void walk(ResourceSink sink, boolean catalogClassFilesOnly);
 
     /**
      * URI identifying this source as a whole (the jar file, the directory

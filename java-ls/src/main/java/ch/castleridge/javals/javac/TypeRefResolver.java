@@ -10,6 +10,7 @@ import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.util.Names;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.SourceResolutionHints;
 import ch.castleridge.javals.indexing.model.Type.Parameterized;
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -183,7 +184,8 @@ final class TypeRefResolver {
     }
 
     private boolean availableOnClasspath(String jvmName) {
-        return classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri) != null;
+        return classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri) != null
+                || classpath.pick(index.getAllClassFiles(jvmName), ClassFileEntry::sourceUri) != null;
     }
 
     /**

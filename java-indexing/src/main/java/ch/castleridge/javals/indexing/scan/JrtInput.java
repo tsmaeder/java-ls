@@ -32,8 +32,8 @@ public final class JrtInput implements InputSource {
     }
 
     @Override
-    public void walk(ResourceSink sink) {
-        JrtWalker.walk(this, sink);
+    public void walk(ResourceSink sink, boolean catalogClassFilesOnly) {
+        JrtWalker.walk(this, sink, catalogClassFilesOnly);
     }
 
     @Override

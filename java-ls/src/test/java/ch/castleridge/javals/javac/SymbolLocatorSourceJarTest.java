@@ -8,6 +8,8 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import ch.castleridge.javals.indexing.model.ClassFileEntry;
+import ch.castleridge.javals.indexing.model.IndexedClassRef;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
@@ -40,7 +42,7 @@ class SymbolLocatorSourceJarTest {
                 null);
 
         Optional<String> uri = SymbolLocator.sourceResourceUri(
-                entry, Map.of(binJarUri, srcJarUri));
+                IndexedClassRef.from(entry), Map.of(binJarUri, srcJarUri));
         assertTrue(uri.isPresent());
         assertEquals(wantJava, uri.get());
     }
@@ -69,9 +71,37 @@ class SymbolLocatorSourceJarTest {
                 null);
 
         Optional<String> uri = SymbolLocator.sourceResourceUri(
-                entry, Map.of(binJarUri, srcJarUri));
+                IndexedClassRef.from(entry), Map.of(binJarUri, srcJarUri));
         assertTrue(uri.isPresent());
         assertEquals(wantJava, uri.get());
+    }
+
+    @Test
+    void sourceResourceUriMapsMinimalClassFileEntryToSourcesJarJavaEntry(@TempDir Path workspace) {
+        Path binJar = workspace.resolve("lib/dep.jar");
+        Path srcJar = workspace.resolve("lib/dep-sources.jar");
+        String binJarUri = binJar.toAbsolutePath().normalize().toUri().toString();
+        String srcJarUri = srcJar.toAbsolutePath().normalize().toUri().toString();
+        String classEntry = "jar:" + binJarUri + "!/com/example/Hello.class";
+        String wantJava = "jar:" + srcJarUri + "!/com/example/Hello.java";
+
+        ClassFileEntry entry = new ClassFileEntry(classEntry, binJarUri, "com/example/Hello");
+
+        Optional<String> uri = SymbolLocator.sourceResourceUri(
+                IndexedClassRef.from(entry), Map.of(binJarUri, srcJarUri));
+        assertTrue(uri.isPresent());
+        assertEquals(wantJava, uri.get());
+    }
+
+    @Test
+    void asClassRefReadsMinimalRealClassFileObject() {
+        ClassFileEntry entry = new ClassFileEntry(
+                "jar:file:///lib.jar!/com/example/Hello.class",
+                "file:///lib.jar",
+                "com/example/Hello");
+        IndexedClassRef ref = IndexFileManager.asClassRef(
+                ch.castleridge.javals.indexing.index.RealClassFileObject.from(entry));
+        assertEquals(IndexedClassRef.from(entry), ref);
     }
 
     @Test

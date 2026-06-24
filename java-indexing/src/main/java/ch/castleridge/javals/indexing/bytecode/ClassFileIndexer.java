@@ -21,13 +21,16 @@ import org.objectweb.asm.TypePath;
 import org.objectweb.asm.TypeReference;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.scan.ClassFileUris;
 import ch.castleridge.javals.indexing.intern.Interner;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
+import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.Descriptors;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
+import ch.castleridge.javals.indexing.model.ModuleFileEntry;
 import ch.castleridge.javals.indexing.model.ParameterEntry;
 import ch.castleridge.javals.indexing.model.RecordComponentEntry;
 import ch.castleridge.javals.indexing.model.SignatureRefs;
@@ -81,6 +84,47 @@ public final class ClassFileIndexer {
         index(uri, sourceUri, bytes, into);
     }
 
+    public static void index(URI uri, URI sourceUri, InputStream in, Index into, boolean minimal) throws IOException {
+        byte[] bytes = in.readAllBytes();
+        index(uri, sourceUri, bytes, into, minimal);
+    }
+
+    public static void index(URI uri, URI sourceUri, byte[] bytes, Index into, boolean minimal) {
+        if (minimal) {
+            if (Index.isModuleInfoFileName(ClassFileUris.simpleFileName(uri.toString()))) {
+                indexModuleMinimal(uri, sourceUri, bytes, into);
+            } else {
+                indexClassCatalog(uri, sourceUri, into);
+            }
+            return;
+        }
+        index(uri, sourceUri, bytes, into);
+    }
+
+    /**
+     * Record a {@link ClassFileEntry} from the resource URI alone (no bytecode read).
+     */
+    public static void indexClassCatalog(URI uri, URI sourceUri, Index into) {
+        String jvmName = ClassFileUris.jvmOwnerName(uri, sourceUri);
+        if (Index.isSkippedJvmName(jvmName)) return;
+        into.addClassFile(new ClassFileEntry(uri.toString(), sourceUri.toString(), jvmName));
+    }
+
+    /**
+     * Record a minimal {@link ModuleFileEntry} by parsing only the {@code Module}
+     * attribute from {@code module-info.class} bytes.
+     */
+    public static void indexModuleMinimal(URI uri, URI sourceUri, byte[] bytes, Index into) {
+        if (bytes == null || bytes.length == 0) return;
+        ClassReader reader = new ClassReader(bytes);
+        MinimalModuleCollector collector = new MinimalModuleCollector(uri.toString(), sourceUri.toString());
+        reader.accept(collector, ClassReader.SKIP_CODE | ClassReader.SKIP_FRAMES);
+        ModuleFileEntry module = collector.toModuleFileEntry();
+        if (module != null) {
+            into.addModuleFile(module);
+        }
+    }
+
     public static void index(URI uri, URI sourceUri, byte[] bytes, Index into) {
         ClassReader reader = new ClassReader(bytes);
         CollectingVisitor visitor = new CollectingVisitor(uri, sourceUri);
@@ -96,6 +140,35 @@ public final class ClassFileIndexer {
         TypeEntry entry = visitor.toTypeEntry();
         if (entry != null) {
             into.add(entry);
+        }
+    }
+
+    private static final class MinimalModuleCollector extends ClassVisitor {
+        private final String uri;
+        private final String sourceUri;
+        private String moduleName;
+        private final List<String> packages = new ArrayList<>();
+
+        MinimalModuleCollector(String uri, String sourceUri) {
+            super(ASM_API);
+            this.uri = uri;
+            this.sourceUri = sourceUri;
+        }
+
+        @Override
+        public ModuleVisitor visitModule(String name, int access, String version) {
+            this.moduleName = name;
+            return new ModuleVisitor(ASM_API) {
+                @Override
+                public void visitPackage(String packaze) {
+                    packages.add(packaze);
+                }
+            };
+        }
+
+        ModuleFileEntry toModuleFileEntry() {
+            if (moduleName == null) return null;
+            return new ModuleFileEntry(uri, sourceUri, moduleName, packages);
         }
     }
 

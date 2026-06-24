@@ -18,23 +18,24 @@ final class JrtWalker {
 
     private JrtWalker() {}
 
-    static void walk(JrtInput in, ResourceSink sink) {
+    static void walk(JrtInput in, ResourceSink sink, boolean catalogClassFilesOnly) {
 
         try (FileSystem fs = FileSystems.newFileSystem(
                 URI.create("jrt:/"),
                 Map.of("java.home", in.javaHome.toString()))) {
-            walkOn(fs, in, sink, in.sourceUri());
+            walkOn(fs, in, sink, in.sourceUri(), catalogClassFilesOnly);
         } catch (IOException e) {
             throw new RuntimeException("Failed opening jrt:/ for " + in.javaHome, e);
         }
     }
 
-    private static void walkOn(FileSystem fs, JrtInput in, ResourceSink sink, String javaHomeUriPath) {
+    private static void walkOn(FileSystem fs, JrtInput in, ResourceSink sink, String javaHomeUriPath,
+                               boolean catalogClassFilesOnly) {
         Path modulesRoot = fs.getPath("modules");
         try {
                 try (Stream<Path> list = Files.list(modulesRoot)) {
                     for (Path mod : (Iterable<Path>) list::iterator) {
-                        walkModule(mod, sink, javaHomeUriPath);
+                        walkModule(mod, sink, javaHomeUriPath, catalogClassFilesOnly);
                     }
                 }
         } catch (IOException e) {
@@ -42,7 +43,8 @@ final class JrtWalker {
         }
     }
 
-    private static void walkModule(Path moduleRoot, ResourceSink sink, String javaHomeUriPath) throws IOException {
+    private static void walkModule(Path moduleRoot, ResourceSink sink, String javaHomeUriPath,
+                                   boolean catalogClassFilesOnly) throws IOException {
         if (!Files.exists(moduleRoot)) return;
         Files.walkFileTree(moduleRoot, new SimpleFileVisitor<>() {
             @Override
@@ -51,6 +53,10 @@ final class JrtWalker {
                 if (!isIndexable(name)) return FileVisitResult.CONTINUE;
                 if (Index.isSkippedFileName(name)) return FileVisitResult.CONTINUE;
                 String uri = jrtUri(javaHomeUriPath, file);
+                if (catalogClassOnly(catalogClassFilesOnly, name)) {
+                    sink.accept(uri, name, null);
+                    return FileVisitResult.CONTINUE;
+                }
                 // Read eagerly: the sink typically defers to an async task,
                 // and the jrt filesystem may close before that task runs.
                 byte[] bytes;
@@ -65,6 +71,10 @@ final class JrtWalker {
                 return FileVisitResult.CONTINUE;
             }
         });
+    }
+
+    private static boolean catalogClassOnly(boolean catalog, String name) {
+        return catalog && name.endsWith(".class") && !Index.isModuleInfoFileName(name);
     }
 
     /**

@@ -5,8 +5,8 @@ import java.nio.file.Path;
 /** A single {@code .jar} file. */
 public record JarInput(Path jar) implements InputSource {
     @Override
-    public void walk(ResourceSink sink) {
-        JarWalker.walk(this, sink);
+    public void walk(ResourceSink sink, boolean catalogClassFilesOnly) {
+        JarWalker.walk(this, sink, catalogClassFilesOnly);
     }
 
     @Override

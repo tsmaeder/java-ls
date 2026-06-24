@@ -5,6 +5,8 @@ import java.util.List;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.RealClassFileObject;
+import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**
@@ -25,9 +27,14 @@ final class IndexClassfileAttachment {
         TypeEntry refEntry = classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri);
         if (refEntry != null) {
             symbol.classfile = new IndexClassFileObject(refEntry);
-        } else {
-            symbol.classfile = new IndexClassFileObject(missingTypeEntry(jvmName));
+            return;
         }
+        ClassFileEntry classFile = classpath.pick(index.getAllClassFiles(jvmName), ClassFileEntry::sourceUri);
+        if (classFile != null) {
+            symbol.classfile = RealClassFileObject.from(classFile);
+            return;
+        }
+        symbol.classfile = new IndexClassFileObject(missingTypeEntry(jvmName));
     }
 
     static TypeEntry missingTypeEntry(String jvmName) {

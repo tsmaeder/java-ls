@@ -13,7 +13,7 @@ final class JarWalker {
 
     private JarWalker() {}
 
-    static void walk(JarInput in, ResourceSink sink) {
+    static void walk(JarInput in, ResourceSink sink, boolean catalogClassFilesOnly) {
         Path jar = in.jar();
         try (JarFile jf = new JarFile(jar.toFile())) {
             Enumeration<JarEntry> entries = jf.entries();
@@ -26,6 +26,10 @@ final class JarWalker {
                 if (Index.isSkippedFileName(simple)) continue;
 
                 String uri = jarEntryUri(jar, name);
+                if (catalogClassOnly(catalogClassFilesOnly, simple)) {
+                    sink.accept(uri, simple, null);
+                    continue;
+                }
                 // Read bytes eagerly: the sink typically hands the bytes supplier
                 // to an async task, and by the time the task runs the
                 // try-with-resources below would have closed the JarFile.
@@ -43,6 +47,10 @@ final class JarWalker {
             System.err.println("Skipping non-readable jar " + jar + ": "
                     + ex.getClass().getSimpleName() + ": " + ex.getMessage());
         }
+    }
+
+    private static boolean catalogClassOnly(boolean catalog, String simple) {
+        return catalog && simple.endsWith(".class") && !Index.isModuleInfoFileName(simple);
     }
 
     private static String simpleName(String entryName) {

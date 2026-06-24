@@ -73,7 +73,8 @@ public final class IndexService {
         }
         Path workspacePath = resolveWorkspacePath(params, roots, mbt);
         log(MessageType.Info, "Loading mbt.json: " + mbt);
-        return CompletableFuture.runAsync(() -> loadFrom(mbt, workspacePath));
+        boolean minimalClassFiles = !InitializationOptions.indexClassFileContents(params);
+        return CompletableFuture.runAsync(() -> loadFrom(mbt, workspacePath, minimalClassFiles));
     }
    
    public ClasspathOrder classPathFor(String uri) {
@@ -86,7 +87,7 @@ public final class IndexService {
 
    } 
  
-    private void loadFrom(Path mbt, Path workspacePath) {
+    private void loadFrom(Path mbt, Path workspacePath, boolean minimalClassFiles) {
         try {
             MbtInfo info = MbtJson.read(mbt);
             Map<String, String> sourceJarByBinaryJar = new HashMap<>();
@@ -103,13 +104,14 @@ public final class IndexService {
             index.addChangedListener(this::notifyIndexChanged);
             state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar));
             notifyIndexChanged();
-            Scanner scanner = new Scanner();
+            Scanner scanner = new Scanner(minimalClassFiles);
             long t0 = System.nanoTime();
             List<Throwable> failures = scanner.scanAll(sources.values(), index);
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
 
             log(MessageType.Info, "Indexed " + index.size() + " types ("
-                    + index.entryCount() + " entries) from " + sources.size()
+                    + index.entryCount() + " entries, "
+                    + index.classFileSize() + " class files) from " + sources.size()
                     + " sources in " + elapsedMs + " ms"
                     + (failures.isEmpty() ? "" : "; " + failures.size() + " failures"));
             failures.forEach(f -> {

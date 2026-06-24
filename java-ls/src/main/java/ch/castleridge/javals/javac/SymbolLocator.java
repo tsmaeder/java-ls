@@ -40,7 +40,7 @@ import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ArrayType;
 
-import ch.castleridge.javals.indexing.model.TypeEntry;
+import ch.castleridge.javals.indexing.model.IndexedClassRef;
 
 /**
  * Maps a resolved javac {@link Element} to an LSP {@link Location} that
@@ -54,12 +54,12 @@ import ch.castleridge.javals.indexing.model.TypeEntry;
  *       locals, parameters, type parameters, and any same-file
  *       declarations.</li>
  *   <li>Otherwise walk up to the enclosing {@link ClassSymbol}; if its
- *       {@code classfile} is an {@link IndexClassFileObject}, recover the
- *       backing {@link TypeEntry} and parse its
- *       {@link TypeEntry#resourceUri()} via {@link SourceCache}. Then
- *       locate the matching declaration inside that CU by JVM name (for
- *       types), name + parameter-arity (for methods), or name (for
- *       fields/enum constants).</li>
+ *       {@code classfile} is index-backed ({@link IndexClassFileObject} or
+ *       {@link ch.castleridge.javals.indexing.index.RealClassFileObject}),
+ *       recover {@link IndexedClassRef} and parse the companion source via
+ *       {@link SourceCache}. Then locate the matching declaration inside that
+ *       CU by JVM name (for types), name + parameter-arity (for methods), or
+ *       name (for fields/enum constants).</li>
  *   <li>If the enclosing class has no source view in the index (pure
  *       bytecode dependency), return empty - decompiled views are not in
  *       scope here.</li>
@@ -107,10 +107,10 @@ public final class SymbolLocator {
         ClassSymbol enclosing = enclosingClass(element);
         if (enclosing == null) return Optional.empty();
         JavaFileObject classfile = enclosing.classfile;
-        TypeEntry entry = IndexFileManager.asEntry(classfile);
-        if (entry == null) return Optional.empty();
+        IndexedClassRef ref = IndexFileManager.asClassRef(classfile);
+        if (ref == null) return Optional.empty();
 
-        Optional<String> sourceUriOpt = sourceResourceUri(entry, sourceJarByBinaryJar);
+        Optional<String> sourceUriOpt = sourceResourceUri(ref, sourceJarByBinaryJar);
         if (sourceUriOpt.isEmpty()) return Optional.empty();
         String sourceUri = sourceUriOpt.get();
 
@@ -118,7 +118,7 @@ public final class SymbolLocator {
         if (parsedOpt.isEmpty()) return Optional.empty();
         SourceCache.ParsedSource parsed = parsedOpt.get();
 
-        ClassTree owningClass = findClassByJvmName(parsed.cu(), entry.jvmOwnerName());
+        ClassTree owningClass = findClassByJvmName(parsed.cu(), ref.jvmOwnerName());
         if (owningClass == null) return Optional.empty();
 
         Tree decl = pickMember(element, owningClass);
@@ -128,13 +128,14 @@ public final class SymbolLocator {
                 .map(r -> new Location(sourceUri, r));
     }
 
-    static Optional<String> sourceResourceUri(TypeEntry entry, Map<String, String> sourceJarByBinaryJar) {
-        if (entry == null) return Optional.empty();
-        String resourceUri = entry.resourceUri();
+    static Optional<String> sourceResourceUri(IndexedClassRef ref,
+                                              Map<String, String> sourceJarByBinaryJar) {
+        if (ref == null) return Optional.empty();
+        String resourceUri = ref.resourceUri();
         if (resourceUri == null || resourceUri.isBlank()) return Optional.empty();
         if (!resourceUri.endsWith(".class")) return Optional.of(resourceUri);
 
-        String sourceJarUri = sourceJarByBinaryJar.get(entry.sourceUri());
+        String sourceJarUri = sourceJarByBinaryJar.get(ref.sourceUri());
         if (sourceJarUri == null || sourceJarUri.isBlank()) return Optional.empty();
 
         int sep = resourceUri.indexOf("!/");
