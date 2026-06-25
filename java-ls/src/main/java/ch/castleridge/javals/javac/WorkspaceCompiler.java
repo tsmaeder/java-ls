@@ -30,6 +30,8 @@ import ch.castleridge.javals.indexing.index.InMemorySource;
  */
 public final class WorkspaceCompiler {
 
+    private static final String OBJECT_JVM_NAME = "java/lang/Object";
+
     private WorkspaceCompiler() {}
 
     /**
@@ -52,6 +54,15 @@ public final class WorkspaceCompiler {
      * inside the CU are resolved to their declarations.
      */
     public static Result compile(URI uri, CharSequence text, Index index, ClasspathOrder classpath) {
+        // Without java/lang/Object in the index javac cannot establish the
+        // root of the type hierarchy and every name resolution fails. Bail
+        // out before standing up the task rather than producing a flood of
+        // misleading "cannot find symbol" diagnostics.
+        if (!index.contains(OBJECT_JVM_NAME) && !index.containsClassFile(OBJECT_JVM_NAME)) {
+            JavaFileObject input = new InMemorySource(uri, text);
+            return new Result(null, null, null, input, List.of());
+        }
+
         JavacTool tool = JavacTool.create();
         Context ctx = new Context();
         IndexClassReader.preRegister(ctx, index, classpath);
