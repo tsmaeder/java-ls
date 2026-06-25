@@ -136,13 +136,25 @@ public final class IndexService {
         for (MbtDependencyModuleInfo dependencyModuleInfo : info.dependencyModules) {
             String binaryJar = dependencyModuleInfo.jar;
             String sourceJar = dependencyModuleInfo.sources;
-            if (binaryJar != null) {
-                if (!sources.containsKey(dependencyModuleInfo.id)) {
-                    sources.put(dependencyModuleInfo.id, new JarInput(pathFromUri(binaryJar)));
-                    if (sourceJar != null) {
-                        sourceJarByBinaryJar.put(binaryJar, sourceJar);
-                    }
-
+            if (binaryJar == null) {
+                continue;
+            }
+            Path binaryJarPath = pathFromUri(binaryJar);
+            if (binaryJarPath == null) {
+                continue;
+            }
+            if (!sources.containsKey(dependencyModuleInfo.id)) {
+                sources.put(dependencyModuleInfo.id, new JarInput(binaryJarPath));
+                if (sourceJar != null) {
+                    // Key by the normalized file URI that the scanner stamps on
+                    // every indexed entry (JarInput.sourceUri() ==
+                    // binaryJarPath.toUri()), not the raw mbt.json `jar` string.
+                    // The two can differ - e.g. File.toURI() emits `file:/x`
+                    // while Path.toUri() emits `file:///x` - and SymbolLocator
+                    // looks the sources jar up by the entry's stamped sourceUri.
+                    // A mismatch silently disables go-to-definition into a
+                    // dependency's sources jar even though the type resolves.
+                    sourceJarByBinaryJar.put(binaryJarPath.toUri().toString(), sourceJar);
                 }
             }
         }
@@ -243,7 +255,15 @@ public final class IndexService {
         for (String dependencyModuleId : dependencyModuleIds) {
             MbtDependencyModuleInfo dependencyModuleInfo = dependencyModules.get(dependencyModuleId);
             if (dependencyModuleInfo != null && dependencyModuleInfo.jar != null) {
-                classpathEntries.add(UriClasspathEntry.of(dependencyModuleInfo.jar));
+                Path jarPath = pathFromUri(dependencyModuleInfo.jar);
+                if (jarPath == null) {
+                    continue;
+                }
+                // Match the normalized URI the scanner stamps on indexed
+                // entries (see extractInfo) so classpath shadowing/visibility
+                // recognises this jar's types regardless of how the raw
+                // mbt.json URI happens to be spelled.
+                classpathEntries.add(UriClasspathEntry.of(jarPath.toUri().toString()));
             }
         }
     }
