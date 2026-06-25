@@ -76,11 +76,35 @@ public final class WorkspaceCompiler {
         try {
             Iterable<? extends CompilationUnitTree> parsed = task.parse();
             CompilationUnitTree cu = firstOrNull(parsed);
-            task.analyze();
+            try {
+                task.analyze();
+            } catch (RuntimeException | Error e) {
+                throw compileFailed(uri, e, collector);
+            }
             return new Result(task, cu, Trees.instance(task), input, List.copyOf(collector.getDiagnostics()));
         } catch (IOException e) {
             return new Result(task, null, Trees.instance(task), input, List.copyOf(collector.getDiagnostics()));
         }
+    }
+
+    private static RuntimeException compileFailed(URI uri,
+                                                  Throwable cause,
+                                                  DiagnosticCollector<JavaFileObject> collector) {
+        StringBuilder message = new StringBuilder("Compile failed for ").append(uri);
+        List<Diagnostic<? extends JavaFileObject>> diagnostics = collector.getDiagnostics();
+        if (!diagnostics.isEmpty()) {
+            message.append(" (").append(diagnostics.size()).append(" javac diagnostic(s) before failure)");
+            int limit = Math.min(3, diagnostics.size());
+            for (int i = 0; i < limit; i++) {
+                Diagnostic<? extends JavaFileObject> d = diagnostics.get(i);
+                message.append("\n  - ").append(d);
+            }
+            if (diagnostics.size() > limit) {
+                message.append("\n  - ... ").append(diagnostics.size() - limit).append(" more");
+            }
+        }
+        message.append("\nCaused by: ").append(cause);
+        return new RuntimeException(message.toString(), cause);
     }
 
     private static <T> T firstOrNull(Iterable<? extends T> it) {
