@@ -4,5 +4,6 @@ public enum EntryKind {
     TYPE,
     FIELD,
     METHOD,
-    MODULE
+    MODULE,
+    PRUNED_SOURCE
 }

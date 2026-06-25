@@ -18,11 +18,13 @@ import javax.tools.StandardLocation;
 import com.sun.tools.javac.api.ClientCodeWrapper;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.PrunedSourceFileObject;
 import ch.castleridge.javals.indexing.index.RealClassFileObject;
 import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.IndexedClassRef;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.ModuleFileEntry;
+import ch.castleridge.javals.indexing.model.PrunedSourceEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**
@@ -82,11 +84,20 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
             return listIndexedTypes(packageName.replace('.', '/'), recurse);
         }
 
-        if (!kinds.contains(Kind.CLASS)) {
-            return super.list(location, packageName, kinds, recurse);
+        String pkgJvm = packageName.replace('.', '/');
+        boolean indexedLocation = location == StandardLocation.SOURCE_PATH
+                || location == StandardLocation.CLASS_PATH;
+        List<JavaFileObject> result = new ArrayList<>();
+        if (kinds.contains(Kind.SOURCE) && index.hasPrunedSources() && indexedLocation) {
+            result.addAll(listPrunedSources(pkgJvm, recurse));
         }
-
-        return listIndexedTypes(packageName.replace('.', '/'), recurse);
+        if (kinds.contains(Kind.CLASS)) {
+            result.addAll(listIndexedTypes(pkgJvm, recurse));
+        }
+        if (!result.isEmpty()) {
+            return result;
+        }
+        return super.list(location, packageName, kinds, recurse);
     }
 
     @Override
@@ -97,6 +108,9 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
         if (file instanceof RealClassFileObject rcfo) {
             return rcfo.binaryName();
         }
+        if (file instanceof PrunedSourceFileObject psfo) {
+            return psfo.binaryName();
+        }
         if (file instanceof IndexModuleFileObject) {
             return "module-info";
         }
@@ -106,6 +120,11 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
 
     @Override
     public JavaFileObject getJavaFileForInput(Location location, String className, Kind kind) throws IOException {
+        if (kind == Kind.SOURCE && className != null && index.hasPrunedSources()
+                && (location == StandardLocation.SOURCE_PATH || location == StandardLocation.CLASS_PATH)) {
+            JavaFileObject pruned = indexedPrunedSource(className.replace('.', '/'));
+            if (pruned != null) return pruned;
+        }
         if (kind == Kind.CLASS && className != null) {
             if (location instanceof IndexedModuleLocation iml) {
                 if ("module-info".equals(className)) {
@@ -166,6 +185,10 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
     @Override
     public boolean hasLocation(Location location) {
         if (location instanceof IndexedModuleLocation) return true;
+        if (index.hasPrunedSources()
+                && (location == StandardLocation.SOURCE_PATH || location == StandardLocation.CLASS_PATH)) {
+            return true;
+        }
         return super.hasLocation(location);
     }
 
@@ -196,6 +219,9 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
             return new IndexedClassRef(
                     rcfo.toUri().toString(), rcfo.sourceUri(), rcfo.jvmOwnerName());
         }
+        if (file instanceof PrunedSourceFileObject psfo) {
+            return IndexedClassRef.from(psfo.entry(), psfo.jvmOwnerName());
+        }
         return null;
     }
 
@@ -218,6 +244,33 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
             return RealClassFileObject.from(classWinner);
         }
         return new IndexClassFileObject(typeWinner);
+    }
+
+    private JavaFileObject indexedPrunedSource(String jvmName) {
+        PrunedSourceEntry winner = classpath.pick(index.getAllPrunedSourcesByJvmName(jvmName), PrunedSourceEntry::sourceUri);
+        return winner == null ? null : PrunedSourceFileObject.from(winner);
+    }
+
+    private List<JavaFileObject> listPrunedSources(String pkgJvm, boolean recurse) {
+        Map<String, JavaFileObject> winners = new HashMap<>();
+        Map<String, Integer> winnerRank = new HashMap<>();
+        for (PrunedSourceEntry e : index.listPackagePrunedSources(pkgJvm, recurse)) {
+            considerPrunedWinner(e, winners, winnerRank);
+        }
+        return List.copyOf(winners.values());
+    }
+
+    private void considerPrunedWinner(PrunedSourceEntry entry,
+                                    Map<String, JavaFileObject> winners,
+                                    Map<String, Integer> winnerRank) {
+        int rank = classpath.rank(entry.sourceUri());
+        if (rank < 0) return;
+        String key = entry.resourceUri();
+        Integer best = winnerRank.get(key);
+        if (best == null || rank < best) {
+            winners.put(key, PrunedSourceFileObject.from(entry));
+            winnerRank.put(key, rank);
+        }
     }
 
     private List<JavaFileObject> listIndexedTypes(String pkgJvm, boolean recurse) {

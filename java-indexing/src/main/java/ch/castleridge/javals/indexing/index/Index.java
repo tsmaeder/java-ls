@@ -6,6 +6,7 @@ import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.ModuleFileEntry;
+import ch.castleridge.javals.indexing.model.PrunedSourceEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**
@@ -52,6 +53,9 @@ public final class Index {
     private final Map<String, Object> classFileByJvmName = new HashMap<>();
     private final Map<String, Object> classFileByPackage = new HashMap<>();
     private final Map<String, Object> moduleFileByName = new HashMap<>();
+    private final Map<String, Object> prunedByResourceUri = new HashMap<>();
+    private final Map<String, Object> prunedByPackage = new HashMap<>();
+    private final Map<String, Object> prunedByJvmName = new HashMap<>();
     // Modules are addressed by module name, not by JVM binary name, and
     // duplicates across classpath sources are resolved by classpath
     // ordering at lookup time (mirroring the TypeEntry bucket strategy).
@@ -146,6 +150,7 @@ public final class Index {
         Collection<ModuleEntry> modules = other.allModules();
         Collection<ClassFileEntry> classFiles = other.allClassFiles();
         Collection<ModuleFileEntry> moduleFiles = other.allModuleFiles();
+        Collection<PrunedSourceEntry> prunedSources = other.allPrunedSources();
         Map<String, IdentifierBloomFilter> blooms = other.bloomFilters();
 
         synchronized (lock) {
@@ -153,6 +158,7 @@ public final class Index {
             for (ModuleEntry m : modules) addModuleLocked(m);
             for (ClassFileEntry cf : classFiles) addClassFileLocked(cf);
             for (ModuleFileEntry mf : moduleFiles) addModuleFileLocked(mf);
+            for (PrunedSourceEntry ps : prunedSources) addPrunedSourceLocked(ps);
             blooms.forEach(this::registerBloomLocked);
         }
         notifyChanged();
@@ -164,6 +170,7 @@ public final class Index {
                     && byModuleName.isEmpty()
                     && classFileByJvmName.isEmpty()
                     && moduleFileByName.isEmpty()
+                    && prunedByResourceUri.isEmpty()
                     && bloomByResourceUri.isEmpty();
         }
     }
@@ -270,6 +277,10 @@ public final class Index {
             for (Object bucket : classFileByJvmName.values()) {
                 if (bucket instanceof ClassFileEntry) n += 1;
                 else if (bucket != null) n += ((ClassFileEntry[]) bucket).length;
+            }
+            for (Object bucket : prunedByResourceUri.values()) {
+                if (bucket instanceof PrunedSourceEntry) n += 1;
+                else if (bucket != null) n += ((PrunedSourceEntry[]) bucket).length;
             }
             return n;
         }
@@ -542,6 +553,123 @@ public final class Index {
         synchronized (lock) {
             return byModuleName.size();
         }
+    }
+
+    public void addPrunedSource(PrunedSourceEntry entry) {
+        if (entry == null) return;
+        boolean changed;
+        synchronized (lock) {
+            changed = addPrunedSourceLocked(entry);
+        }
+        if (changed) notifyChanged();
+    }
+
+    /** Caller must hold the monitor. */
+    private boolean addPrunedSourceLocked(PrunedSourceEntry entry) {
+        if (entry == null) return false;
+        String resourceUri = entry.resourceUri();
+        if (resourceUri == null) return false;
+        prunedByResourceUri.put(resourceUri, appendPrunedBucket(prunedByResourceUri.get(resourceUri), entry));
+        String pkg = entry.packageJvm() == null ? "" : entry.packageJvm();
+        prunedByPackage.put(pkg, appendPrunedBucket(prunedByPackage.get(pkg), entry));
+        for (String jvm : entry.topLevelBinaryNames()) {
+            prunedByJvmName.put(jvm, appendPrunedBucket(prunedByJvmName.get(jvm), entry));
+        }
+        return true;
+    }
+
+    public List<PrunedSourceEntry> getAllPrunedSourcesByJvmName(String jvmName) {
+        synchronized (lock) {
+            return toPrunedList(prunedByJvmName.get(jvmName));
+        }
+    }
+
+    public PrunedSourceEntry getPrunedSource(String resourceUri) {
+        synchronized (lock) {
+            Object bucket = prunedByResourceUri.get(resourceUri);
+            if (bucket == null) return null;
+            if (bucket instanceof PrunedSourceEntry only) return only;
+            PrunedSourceEntry[] arr = (PrunedSourceEntry[]) bucket;
+            return arr.length == 0 ? null : arr[0];
+        }
+    }
+
+    public List<PrunedSourceEntry> getAllPrunedSources(String resourceUri) {
+        synchronized (lock) {
+            return toPrunedList(prunedByResourceUri.get(resourceUri));
+        }
+    }
+
+    /**
+     * Return every {@link PrunedSourceEntry} whose package is
+     * {@code packageJvm}. May contain duplicates from multiple sources.
+     */
+    public List<PrunedSourceEntry> listPackagePrunedSources(String packageJvm, boolean recurse) {
+        synchronized (lock) {
+            if (recurse) {
+                List<PrunedSourceEntry> entries = new ArrayList<>();
+                String prefix = packageJvm + '/';
+                for (Map.Entry<String, Object> entry : prunedByPackage.entrySet()) {
+                    String packageName = entry.getKey();
+                    if (packageName.startsWith(prefix)) {
+                        addPrunedBucketTo(entry.getValue(), entries);
+                    }
+                }
+                return entries;
+            }
+            return toPrunedList(prunedByPackage.get(packageJvm == null ? "" : packageJvm));
+        }
+    }
+
+    /** Every {@link PrunedSourceEntry} currently stored, including duplicates. */
+    public Collection<PrunedSourceEntry> allPrunedSources() {
+        synchronized (lock) {
+            List<PrunedSourceEntry> out = new ArrayList<>();
+            for (Object bucket : prunedByResourceUri.values()) {
+                addPrunedBucketTo(bucket, out);
+            }
+            return Collections.unmodifiableCollection(out);
+        }
+    }
+
+    public int prunedSourceSize() {
+        synchronized (lock) {
+            return prunedByResourceUri.size();
+        }
+    }
+
+    public boolean hasPrunedSources() {
+        synchronized (lock) {
+            return !prunedByResourceUri.isEmpty();
+        }
+    }
+
+    private static Object appendPrunedBucket(Object prior, PrunedSourceEntry entry) {
+        if (prior == null) return entry;
+        if (prior instanceof PrunedSourceEntry only) {
+            return new PrunedSourceEntry[]{only, entry};
+        }
+        PrunedSourceEntry[] arr = (PrunedSourceEntry[]) prior;
+        PrunedSourceEntry[] grown = new PrunedSourceEntry[arr.length + 1];
+        System.arraycopy(arr, 0, grown, 0, arr.length);
+        grown[arr.length] = entry;
+        return grown;
+    }
+
+    private static List<PrunedSourceEntry> toPrunedList(Object bucket) {
+        if (bucket == null) return List.of();
+        if (bucket instanceof PrunedSourceEntry only) return List.of(only);
+        PrunedSourceEntry[] arr = (PrunedSourceEntry[]) bucket;
+        return arr.length == 0 ? List.of() : List.of(arr);
+    }
+
+    private static void addPrunedBucketTo(Object bucket, List<PrunedSourceEntry> out) {
+        if (bucket == null) return;
+        if (bucket instanceof PrunedSourceEntry only) {
+            out.add(only);
+            return;
+        }
+        for (PrunedSourceEntry e : (PrunedSourceEntry[]) bucket) out.add(e);
     }
 
     private static List<ModuleEntry> toModuleList(Object bucket) {

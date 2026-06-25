@@ -13,6 +13,7 @@ import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
 import javax.tools.JavaFileObject;
+import javax.tools.JavaFileObject.Kind;
 
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.Position;
@@ -40,6 +41,8 @@ import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ArrayType;
 
+import ch.castleridge.javals.indexing.index.PrunedSourceFileObject;
+import ch.castleridge.javals.indexing.index.RealClassFileObject;
 import ch.castleridge.javals.indexing.model.IndexedClassRef;
 
 /**
@@ -92,22 +95,51 @@ public final class SymbolLocator {
                                      Map<String, String> sourceJarByBinaryJar) {
         if (element == null) return Optional.empty();
 
-        TreePath sameCuPath = trees.getPath(element);
-        if (sameCuPath != null && sameCuPath.getCompilationUnit() == openCu) {
-            Tree decl = sameCuPath.getLeaf();
-            return rangeFor(decl, openCu, trees.getSourcePositions())
-                    .map(r -> new Location(openDocUri, r));
+        ClassSymbol enclosing = enclosingClass(element);
+        if (enclosing != null) {
+            JavaFileObject ownerFile = ownerSourceFile(enclosing);
+            String ownerUri = ownerFile == null ? "" : ownerFile.toUri().toString();
+            boolean external = ownerFile == null
+                    || !ownerUri.equals(openDocUri)
+                    || isIndexBacked(ownerFile);
+            if (external) {
+                Optional<Location> indexed = locateThroughIndex(element, sourceJarByBinaryJar, ownerFile);
+                if (indexed.isPresent()) return indexed;
+            }
         }
 
-        return locateThroughIndex(element, sourceJarByBinaryJar);
+        TreePath sameCuPath = trees.getPath(element);
+        if (sameCuPath != null && sameCuPath.getCompilationUnit() == openCu) {
+            Element atPath = trees.getElement(sameCuPath);
+            if (element.equals(atPath)) {
+                Tree decl = sameCuPath.getLeaf();
+                return rangeFor(decl, openCu, trees.getSourcePositions())
+                        .map(r -> new Location(openDocUri, r));
+            }
+        }
+
+        return locateThroughIndex(element, sourceJarByBinaryJar, null);
+    }
+
+    private static JavaFileObject ownerSourceFile(ClassSymbol enclosing) {
+        if (enclosing == null) return null;
+        if (enclosing.sourcefile != null) return enclosing.sourcefile;
+        return enclosing.classfile;
+    }
+
+    private static boolean isIndexBacked(JavaFileObject classfile) {
+        return classfile instanceof PrunedSourceFileObject
+                || classfile instanceof IndexClassFileObject
+                || classfile instanceof RealClassFileObject;
     }
 
     private Optional<Location> locateThroughIndex(Element element,
-                                                  Map<String, String> sourceJarByBinaryJar) {
+                                                  Map<String, String> sourceJarByBinaryJar,
+                                                  JavaFileObject ownerFile) {
         ClassSymbol enclosing = enclosingClass(element);
         if (enclosing == null) return Optional.empty();
-        JavaFileObject classfile = enclosing.classfile;
-        IndexedClassRef ref = IndexFileManager.asClassRef(classfile);
+        JavaFileObject classfile = ownerFile != null ? ownerFile : enclosing.classfile;
+        IndexedClassRef ref = classRefFor(classfile, enclosing);
         if (ref == null) return Optional.empty();
 
         Optional<String> sourceUriOpt = sourceResourceUri(ref, sourceJarByBinaryJar);
@@ -126,6 +158,21 @@ public final class SymbolLocator {
 
         return rangeFor(decl, parsed.cu(), parsed.positions())
                 .map(r -> new Location(sourceUri, r));
+    }
+
+    private static IndexedClassRef classRefFor(JavaFileObject classfile, ClassSymbol enclosing) {
+        if (classfile instanceof PrunedSourceFileObject psfo) {
+            String jvmName = enclosing.flatname.toString().replace('.', '/');
+            return IndexedClassRef.from(psfo.entry(), jvmName);
+        }
+        IndexedClassRef ref = IndexFileManager.asClassRef(classfile);
+        if (ref != null) return ref;
+        if (classfile != null && classfile.getKind() == Kind.SOURCE && enclosing != null) {
+            String uri = classfile.toUri().toString();
+            String jvmName = enclosing.flatname.toString().replace('.', '/');
+            return new IndexedClassRef(uri, uri, jvmName);
+        }
+        return null;
     }
 
     static Optional<String> sourceResourceUri(IndexedClassRef ref,

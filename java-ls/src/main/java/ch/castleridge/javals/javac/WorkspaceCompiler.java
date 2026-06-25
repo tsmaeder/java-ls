@@ -75,11 +75,15 @@ public final class WorkspaceCompiler {
 
         JavaFileObject input = new InMemorySource(uri, text);
 
+        List<String> options = index.hasPrunedSources()
+                ? List.of("-sourcepath", ".")
+                : List.of();
+
         JavacTask task = (JavacTask) tool.getTask(
                 null,
                 fm,
                 collector,
-                List.of(),
+                options,
                 List.of(),
                 List.of(input),
                 ctx);

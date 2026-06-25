@@ -43,27 +43,37 @@ public final class Scanner {
     private final ForkJoinPool pool;
     private final boolean ownsPool;
     private final boolean minimalClassFiles;
+    private final boolean prunedSource;
 
     public Scanner() {
-        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, false);
+        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, false, false);
     }
 
     public Scanner(boolean minimalClassFiles) {
-        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, minimalClassFiles);
+        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, minimalClassFiles, false);
     }
 
     public Scanner(ForkJoinPool pool) {
-        this(pool, false, false);
+        this(pool, false, false, false);
     }
 
     public Scanner(ForkJoinPool pool, boolean minimalClassFiles) {
-        this(pool, false, minimalClassFiles);
+        this(pool, false, minimalClassFiles, false);
     }
 
-    private Scanner(ForkJoinPool pool, boolean owns, boolean minimalClassFiles) {
+    public Scanner(boolean minimalClassFiles, boolean prunedSource) {
+        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, minimalClassFiles, prunedSource);
+    }
+
+    public Scanner(ForkJoinPool pool, boolean minimalClassFiles, boolean prunedSource) {
+        this(pool, false, minimalClassFiles, prunedSource);
+    }
+
+    private Scanner(ForkJoinPool pool, boolean owns, boolean minimalClassFiles, boolean prunedSource) {
         this.pool = pool;
         this.ownsPool = owns;
         this.minimalClassFiles = minimalClassFiles;
+        this.prunedSource = prunedSource;
     }
 
     public List<Throwable> scanAll(Collection<InputSource> sources, Index into) {
@@ -110,15 +120,16 @@ public final class Scanner {
             src.walk((uri, fileName, bytes) -> {
                 if (bytes == null) {
                     try {
-                        indexOne(uri, srcUri, fileName, null, temp, true);
+                        indexOne(uri, srcUri, fileName, null, temp, true, false);
                     } catch (Throwable t) {
                         failures.add(t);
                     }
                     return;
                 }
+                boolean pruneJava = prunedSource && src instanceof DirInput;
                 ForkJoinTask<?> task = pool.submit(() -> {
                     try {
-                        indexOne(uri, srcUri, fileName, bytes.get(), temp, minimalClassFiles);
+                        indexOne(uri, srcUri, fileName, bytes.get(), temp, minimalClassFiles, pruneJava);
                     } catch (Throwable t) {
                         failures.add(t);
                     }
@@ -145,7 +156,7 @@ public final class Scanner {
     }
 
     private static void indexOne(String uri, String sourceUri, String fileName, byte[] content, Index into,
-                               boolean minimalClassFiles) {
+                               boolean minimalClassFiles, boolean prunedJava) {
         if (fileName.endsWith(".class")) {
             if (minimalClassFiles) {
                 if (Index.isModuleInfoFileName(fileName)) {
@@ -158,7 +169,8 @@ public final class Scanner {
             }
             ClassFileIndexer.index(URI.create(uri), URI.create(sourceUri), content, into);
         } else if (fileName.endsWith(".java")) {
-            SourceIndexer.index(URI.create(uri), URI.create(sourceUri), new String(content, StandardCharsets.UTF_8), into);
+            SourceIndexer.index(URI.create(uri), URI.create(sourceUri),
+                    new String(content, StandardCharsets.UTF_8), into, prunedJava);
         }
     }
 }

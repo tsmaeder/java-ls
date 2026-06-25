@@ -21,4 +21,8 @@ public record IndexedClassRef(
     public static IndexedClassRef from(ClassFileEntry entry) {
         return new IndexedClassRef(entry.resourceUri(), entry.sourceUri(), entry.jvmOwnerName());
     }
+
+    public static IndexedClassRef from(PrunedSourceEntry entry, String jvmOwnerName) {
+        return new IndexedClassRef(entry.resourceUri(), entry.sourceUri(), jvmOwnerName);
+    }
 }

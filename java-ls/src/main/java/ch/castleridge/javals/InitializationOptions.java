@@ -46,6 +46,24 @@ final class InitializationOptions {
         return true;
     }
 
+    /**
+     * When {@code true} (default {@code false}), workspace directory sources
+     * are indexed as {@link ch.castleridge.javals.indexing.model.PrunedSourceEntry}
+     * API stubs instead of per-type {@link ch.castleridge.javals.indexing.model.TypeEntry}
+     * records.
+     */
+    static boolean prunedSourceIndexing(InitializeParams params) {
+        if (params == null) return false;
+        Object options = params.getInitializationOptions();
+        if (options instanceof Map<?, ?> map) {
+            return readBoolean(map.get("prunedSourceIndexing"), false);
+        }
+        if (options instanceof JsonObject json) {
+            return readBoolean(json.get("prunedSourceIndexing"), false);
+        }
+        return false;
+    }
+
     private static boolean readBoolean(Object value, boolean defaultValue) {
         if (value == null) return defaultValue;
         if (value instanceof Boolean b) return b;
