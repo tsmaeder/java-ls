@@ -101,7 +101,13 @@ public final class SourceIndexer {
                     indexCompilationUnit(resourceUriStr, sourceUriStr, cu, into);
                 }
                 if (resourceUriStr != null) {
-                    into.registerBloom(resourceUriStr, IdentifierCollector.collectAndBuild(cu));
+                    try {
+                        into.registerBloom(resourceUriStr, IdentifierCollector.collectAndBuild(cu));
+                    } catch (RuntimeException | StackOverflowError e) {
+                        System.err.println("Failed to build identifier bloom filter for " + resourceUriStr
+                                + ": " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                        e.printStackTrace();
+                    }
                 }
             }
         } catch (IOException e) {
