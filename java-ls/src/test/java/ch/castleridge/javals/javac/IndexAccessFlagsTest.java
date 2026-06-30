@@ -9,9 +9,10 @@ import org.objectweb.asm.Opcodes;
 import com.sun.tools.javac.code.Flags;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
-import ch.castleridge.javals.indexing.model.TypeDeclKind;
+import ch.castleridge.javals.indexing.model.SourceTypeEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.source.SourceIndexer;
 
@@ -89,12 +90,11 @@ class IndexAccessFlagsTest {
 
     @Test
     void classFlagsStripAccSuperBitForBytecodeEntries() {
-        TypeEntry bytecode = new TypeEntry(
+        TypeEntry bytecode = new ClassFileTypeEntry(
                 "index:///p/C.class",
                 "index:///bytecode/",
                 "p/C",
                 Opcodes.ACC_PUBLIC | Opcodes.ACC_SUPER,
-                TypeDeclKind.UNKNOWN,
                 null,
                 List.of(),
                 List.of(),
@@ -102,7 +102,7 @@ class IndexAccessFlagsTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                null);
+                List.of());
         long flags = IndexAccessFlags.classFlags(bytecode);
         assertLacks(flags, Opcodes.ACC_SUPER);
         assertHas(flags, Opcodes.ACC_PUBLIC);
@@ -116,32 +116,34 @@ class IndexAccessFlagsTest {
                 "p/C");
         // Source modifiers don't normally include ACC_SUPER, but make
         // sure the masking still applies if it ever slips through.
-        TypeEntry tampered = new TypeEntry(
+        SourceTypeEntry source = (SourceTypeEntry) entry;
+        TypeEntry tampered = new SourceTypeEntry(
                 entry.resourceUri(),
                 entry.sourceUri(),
                 entry.jvmOwnerName(),
                 entry.modifiers() | Opcodes.ACC_SUPER,
-                entry.declKind(),
+                source.declKind(),
                 entry.superRef(),
                 entry.interfaceRefs(),
                 entry.typeParams(),
                 entry.fields(),
                 entry.methods(),
                 entry.innerTypeJvmNames(),
+                entry.permittedSubclasses(),
+                entry.recordComponents(),
                 entry.annotations(),
-                entry.hints());
+                source.hints());
         long flags = IndexAccessFlags.classFlags(tampered);
         assertLacks(flags, Opcodes.ACC_SUPER);
     }
 
     @Test
     void classFlagsMapAccModuleToFlagsModule() {
-        TypeEntry moduleInfo = new TypeEntry(
+        TypeEntry moduleInfo = new ClassFileTypeEntry(
                 "index:///module-info.class",
                 "index:///bytecode/",
                 "io/example/module-info",
                 Opcodes.ACC_MODULE,
-                TypeDeclKind.UNKNOWN,
                 null,
                 List.of(),
                 List.of(),
@@ -149,7 +151,7 @@ class IndexAccessFlagsTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                null);
+                List.of());
         long flags = IndexAccessFlags.classFlags(moduleInfo);
         assertHas(flags, Flags.MODULE);
         assertLacks(flags, Opcodes.ACC_MODULE);

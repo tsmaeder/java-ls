@@ -35,11 +35,11 @@ import com.sun.tools.javac.util.Context;
 
 import ch.castleridge.javals.indexing.bytecode.ClassFileIndexer;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ParameterEntry;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
-import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.Type;
@@ -72,7 +72,7 @@ class IndexCompileTest {
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         index.add(typeWithMethod(SOURCE_URI, "java/lang/String", "<init>"));    
         
-        index.add(new TypeEntry(
+        index.add(new ClassFileTypeEntry(
                 "index:///com/example/Hello.class",
                 SOURCE_URI,
                 "com/example/Hello",
@@ -92,7 +92,7 @@ class IndexCompileTest {
                         List.of())),
                 List.of(),
                 List.of(),
-                null));
+                List.of()));
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
@@ -145,7 +145,7 @@ class IndexCompileTest {
     void indexedFieldIsVisibleToSourceReference() throws Exception {
         Index index = new Index();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
-        index.add(new TypeEntry(
+        index.add(new ClassFileTypeEntry(
                 "index:///com/example/Holder.class",
                 SOURCE_URI,
                 "com/example/Holder",
@@ -163,7 +163,7 @@ class IndexCompileTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                null));
+                List.of()));
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
@@ -200,12 +200,11 @@ class IndexCompileTest {
     void indexedNestedInterfaceIsVisibleAsQualifiedType() throws Exception {
         Index index = new Index();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
-        index.add(new TypeEntry(
+        index.add(new ClassFileTypeEntry(
                 "index:///com/example/Foo.class",
                 SOURCE_URI,
                 "com/example/Foo",
                 Opcodes.ACC_PUBLIC,
-                TypeDeclKind.CLASS,
                 new TypeRef.Resolved("java/lang/Object"),
                 List.of(),
                 List.of(),
@@ -213,13 +212,12 @@ class IndexCompileTest {
                 List.of(),
                 List.of("com/example/Foo$Bar"),
                 List.of(),
-                null));
-        index.add(new TypeEntry(
+                List.of()));
+        index.add(new ClassFileTypeEntry(
                 "index:///com/example/Foo$Bar.class",
                 SOURCE_URI,
                 "com/example/Foo$Bar",
-                Opcodes.ACC_PUBLIC,
-                TypeDeclKind.INTERFACE,
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT,
                 null,
                 List.of(),
                 List.of(),
@@ -227,7 +225,7 @@ class IndexCompileTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                null));
+                List.of()));
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
@@ -339,7 +337,7 @@ class IndexCompileTest {
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         index.add(typeWithMethod(SOURCE_URI, "java/lang/String", "<init>"));
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Number", "<init>"));
-        index.add(new TypeEntry(
+        index.add(new ClassFileTypeEntry(
                 "index:///com/example/Box.class",
                 SOURCE_URI,
                 "com/example/Box",
@@ -351,7 +349,7 @@ class IndexCompileTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                null));
+                List.of()));
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
@@ -393,7 +391,7 @@ class IndexCompileTest {
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         index.add(typeWithMethod(SOURCE_URI, "java/lang/String", "<init>"));
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Number", "<init>"));
-        index.add(new TypeEntry(
+        index.add(new ClassFileTypeEntry(
                 "index:///com/example/Box.class",
                 SOURCE_URI,
                 "com/example/Box",
@@ -424,7 +422,7 @@ class IndexCompileTest {
                         List.of())),
                 List.of(),
                 List.of(),
-                null));
+                List.of()));
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
@@ -2887,7 +2885,7 @@ class IndexCompileTest {
     void ternaryLambdaWithMissingReturnTypeDoesNotCrash() throws Exception {
         Index index = new Index();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
-        index.add(new TypeEntry(
+        index.add(new ClassFileTypeEntry(
                 "index:///com/example/Foo.class",
                 SOURCE_URI,
                 "com/example/Foo",
@@ -2899,8 +2897,8 @@ class IndexCompileTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                null));
-        index.add(new TypeEntry(
+                List.of()));
+        index.add(new ClassFileTypeEntry(
                 "index:///com/example/EventBus.class",
                 SOURCE_URI,
                 "com/example/EventBus",
@@ -2920,8 +2918,8 @@ class IndexCompileTest {
                         List.of())),
                 List.of(),
                 List.of(),
-                null));
-        index.add(new TypeEntry(
+                List.of()));
+        index.add(new ClassFileTypeEntry(
                 "index:///com/example/Codec.class",
                 SOURCE_URI,
                 "com/example/Codec",
@@ -2941,7 +2939,7 @@ class IndexCompileTest {
                         List.of())),
                 List.of(),
                 List.of(),
-                null));
+                List.of()));
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
@@ -3355,7 +3353,7 @@ class IndexCompileTest {
     }
 
     private static TypeEntry typeWithMethod(String srcUri, String jvmName, String methodName) {
-        return new TypeEntry(
+        return new ClassFileTypeEntry(
                 "index:///" + jvmName + "@" + srcUri,
                 srcUri,
                 jvmName,
@@ -3375,6 +3373,6 @@ class IndexCompileTest {
                         List.of())),
                 List.of(),
                 List.of(),
-                null);
+                List.of());
     }
 }

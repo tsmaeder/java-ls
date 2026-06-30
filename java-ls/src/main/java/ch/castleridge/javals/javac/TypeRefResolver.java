@@ -12,6 +12,7 @@ import com.sun.tools.javac.util.Names;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.SourceResolutionHints;
+import ch.castleridge.javals.indexing.model.SourceTypeEntry;
 import ch.castleridge.javals.indexing.model.Type.Parameterized;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeRef;
@@ -84,9 +85,9 @@ final class TypeRefResolver {
      */
     private String qualifyResolved(String jvm, TypeEntry enclosing) {
         if (jvm.contains("/")) return jvm;
-        if (enclosing == null || !enclosing.isSourceEntry()) return jvm;
+        if (!(enclosing instanceof SourceTypeEntry sourceEnclosing)) return jvm;
 
-        SourceResolutionHints hints = enclosing.hints();
+        SourceResolutionHints hints = sourceEnclosing.hints();
         int dollar = jvm.indexOf('$');
         String outerSimple = dollar < 0 ? jvm : jvm.substring(0, dollar);
         String nestedSuffix = dollar < 0 ? "" : jvm.substring(dollar);
@@ -124,29 +125,20 @@ final class TypeRefResolver {
     }
 
     private String resolveSimple(String simple, TypeEntry enclosing) {
-        if (enclosing == null) {
+        if (!(enclosing instanceof SourceTypeEntry sourceEnclosing)) {
             return "java/lang/" + simple;
         }
-        // An Unresolved (bare simple-name) leaf is only ever emitted by the
-        // source indexer; bytecode signatures carry fully-qualified Resolved
-        // refs. So for a non-source enclosing entry there is nothing to resolve
-        // against compilation-unit hints - fall straight back to java.lang and,
-        // crucially, skip the (potentially deep) member-type scope walk below.
-        if (!enclosing.isSourceEntry()) {
-            return "java/lang/" + simple;
-        }
-
-        String cacheKey = enclosing.jvmName() + '\u0001' + simple;
+        String cacheKey = sourceEnclosing.jvmName() + '\u0001' + simple;
         String cached = simpleNameCache.get(cacheKey);
         if (cached != null) {
             return cached;
         }
-        String resolved = resolveSimpleUncached(simple, enclosing);
+        String resolved = resolveSimpleUncached(simple, sourceEnclosing);
         simpleNameCache.put(cacheKey, resolved);
         return resolved;
     }
 
-    private String resolveSimpleUncached(String simple, TypeEntry enclosing) {
+    private String resolveSimpleUncached(String simple, SourceTypeEntry enclosing) {
         // JLS 6.5.5.1: a simple type name is first matched against member
         // types in scope - the enclosing type's own nested types, those it
         // inherits from its supertypes, and (recursively) the same for every
@@ -285,10 +277,10 @@ final class TypeRefResolver {
      * simply stops instead of chasing a phantom supertype.
      */
     private String resolveSupertypeSimpleName(String simple, TypeEntry context) {
-        if (context == null || !context.isSourceEntry()) {
+        if (!(context instanceof SourceTypeEntry sourceContext)) {
             return null;
         }
-        SourceResolutionHints hints = context.hints();
+        SourceResolutionHints hints = sourceContext.hints();
         if (hints.siblingSimpleNames().contains(simple)) {
             String pkg = hints.sourcePackage();
             return pkg.isEmpty() ? simple : pkg + "/" + simple;

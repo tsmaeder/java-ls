@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import ch.castleridge.javals.indexing.model.ClassFileEntry;
+import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.IndexedClassRef;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeRef;
@@ -27,7 +28,7 @@ class SymbolLocatorSourceJarTest {
         String classEntry = "jar:" + binJarUri + "!/com/example/Hello.class";
         String wantJava = "jar:" + srcJarUri + "!/com/example/Hello.java";
 
-        TypeEntry entry = new TypeEntry(
+        TypeEntry entry = new ClassFileTypeEntry(
                 classEntry,
                 binJarUri,
                 "com/example/Hello",
@@ -39,7 +40,7 @@ class SymbolLocatorSourceJarTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                null);
+                List.of());
 
         Optional<String> uri = SymbolLocator.sourceResourceUri(
                 IndexedClassRef.from(entry), Map.of(binJarUri, srcJarUri));
@@ -56,7 +57,7 @@ class SymbolLocatorSourceJarTest {
         String classEntry = "jar:" + binJarUri + "!/java/util/Base64$Encoder.class";
         String wantJava = "jar:" + srcJarUri + "!/java/util/Base64.java";
 
-        TypeEntry entry = new TypeEntry(
+        TypeEntry entry = new ClassFileTypeEntry(
                 classEntry,
                 binJarUri,
                 "java/util/Base64$Encoder",
@@ -68,7 +69,7 @@ class SymbolLocatorSourceJarTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                null);
+                List.of());
 
         Optional<String> uri = SymbolLocator.sourceResourceUri(
                 IndexedClassRef.from(entry), Map.of(binJarUri, srcJarUri));

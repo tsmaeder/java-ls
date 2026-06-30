@@ -9,7 +9,7 @@ import java.util.List;
  * enclosing class, its stored declaration modifiers, and any annotations
  * attached to the declaration.
  *
- * <p>For source-derived entries, {@link #modifiers()} holds only explicit
+ * <p>For source-derived type entries, {@link #modifiers()} holds only explicit
  * source modifiers; JVM classfile access flags are synthesized later by
  * {@code IndexClassReader}. For bytecode-derived entries, {@link #modifiers()}
  * is the ASM access mask and is used as-is at read time.
@@ -31,12 +31,4 @@ public sealed interface IndexEntry permits TypeEntry, FieldEntry, MethodEntry {
 
     EntryKind kind();
 
-    /**
-     * {@code true} when this entry was produced by source indexing rather than
-     * bytecode indexing. Only {@link TypeEntry} overrides this; for member
-     * entries consult the enclosing type.
-     */
-    default boolean isSourceEntry() {
-        return false;
-    }
 }

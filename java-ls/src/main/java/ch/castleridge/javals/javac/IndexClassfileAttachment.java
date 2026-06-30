@@ -7,6 +7,7 @@ import com.sun.tools.javac.code.Symbol.ClassSymbol;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.RealClassFileObject;
 import ch.castleridge.javals.indexing.model.ClassFileEntry;
+import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**
@@ -38,7 +39,7 @@ final class IndexClassfileAttachment {
     }
 
     static TypeEntry missingTypeEntry(String jvmName) {
-        return new TypeEntry(
+        return new ClassFileTypeEntry(
                 "index:///missing/" + jvmName,
                 null,
                 jvmName,
@@ -49,7 +50,6 @@ final class IndexClassfileAttachment {
                 List.of(),
                 List.of(),
                 List.of(),
-                List.of(),
-                null);
+                List.of());
     }
 }

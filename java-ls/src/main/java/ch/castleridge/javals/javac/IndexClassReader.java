@@ -37,6 +37,7 @@ import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ParameterEntry;
 import ch.castleridge.javals.indexing.model.RecordComponentEntry;
+import ch.castleridge.javals.indexing.model.SourceTypeEntry;
 import ch.castleridge.javals.indexing.model.TypeRef;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
@@ -264,8 +265,8 @@ public final class IndexClassReader extends ClassReader {
      * source entries.
      */
     private void enterSyntheticEnumMembersIfNeeded(ClassSymbol c, TypeEntry entry) {
-        if (!entry.isSourceEntry()
-                || entry.declKind() != ch.castleridge.javals.indexing.model.TypeDeclKind.ENUM) {
+        if (!(entry instanceof SourceTypeEntry sourceEntry)
+                || sourceEntry.declKind() != ch.castleridge.javals.indexing.model.TypeDeclKind.ENUM) {
             return;
         }
         Name valuesName = names.fromString("values");
@@ -321,10 +322,10 @@ public final class IndexClassReader extends ClassReader {
         if (superRef != null) {
             return resolveType(superRef, currentModule, entry);
         }
-        if (!entry.isSourceEntry()) {
+        if (!(entry instanceof SourceTypeEntry sourceEntry)) {
             return Type.noType;
         }
-        return switch (entry.declKind()) {
+        return switch (sourceEntry.declKind()) {
             case ENUM -> {
                 ClassSymbol enumSym = resolver.resolveTypeRef(
                         TypeRef.resolved("java/lang/Enum"), currentModule, entry);

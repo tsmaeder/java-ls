@@ -26,6 +26,7 @@ import ch.castleridge.javals.indexing.intern.Interner;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
 import ch.castleridge.javals.indexing.model.ClassFileEntry;
+import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.Descriptors;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
@@ -34,7 +35,6 @@ import ch.castleridge.javals.indexing.model.ModuleFileEntry;
 import ch.castleridge.javals.indexing.model.ParameterEntry;
 import ch.castleridge.javals.indexing.model.RecordComponentEntry;
 import ch.castleridge.javals.indexing.model.SignatureRefs;
-import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.Type;
@@ -592,12 +592,11 @@ public final class ClassFileIndexer {
             // off the type index altogether.
             if (moduleEntry != null) return null;
             if (Index.isSkippedJvmName(jvmName)) return null;
-            return new TypeEntry(
+            return new ClassFileTypeEntry(
                     uri,
                     sourceUri,
                     jvmName,
                     access,
-                    TypeDeclKind.UNKNOWN,
                     superRef,
                     interfaces,
                     typeParams,
@@ -606,8 +605,7 @@ public final class ClassFileIndexer {
                     innerTypes,
                     permittedSubclasses,
                     recordComponents,
-                    annotations,
-                    null);
+                    annotations);
         }
     }
 

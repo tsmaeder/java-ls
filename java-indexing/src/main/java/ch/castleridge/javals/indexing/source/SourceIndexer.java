@@ -55,6 +55,7 @@ import ch.castleridge.javals.indexing.model.ParameterEntry;
 import ch.castleridge.javals.indexing.model.PrunedSourceEntry;
 import ch.castleridge.javals.indexing.model.SourceResolutionHints;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
+import ch.castleridge.javals.indexing.model.SourceTypeEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.Type;
@@ -316,7 +317,7 @@ public final class SourceIndexer {
             }
         }
 
-        TypeEntry entry = new TypeEntry(
+        TypeEntry entry = new SourceTypeEntry(
                 uri,
                 sourceUri,
                 localName,

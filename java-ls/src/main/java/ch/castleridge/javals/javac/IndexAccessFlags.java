@@ -8,8 +8,10 @@ import com.sun.tools.javac.code.Flags;
 
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
+import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
+import ch.castleridge.javals.indexing.model.SourceTypeEntry;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
@@ -22,17 +24,16 @@ final class IndexAccessFlags {
     private IndexAccessFlags() {}
 
     static long classFlags(TypeEntry entry) {
-        int raw = entry.modifiers();
-        if (!entry.isSourceEntry()) {
-            return adjustClassFlags(raw);
-        }
-        int flags = raw;
-        int synthesized = switch (entry.declKind()) {
-            case INTERFACE -> flags | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT;
-            case ENUM -> flags | Opcodes.ACC_ENUM | Opcodes.ACC_FINAL;
-            case ANNOTATION -> flags | Opcodes.ACC_ANNOTATION | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT;
-            case RECORD -> flags | Opcodes.ACC_RECORD | Opcodes.ACC_FINAL;
-            default -> flags;
+        int synthesized = switch (entry) {
+            case SourceTypeEntry source -> switch (source.declKind()) {
+                case INTERFACE -> source.modifiers() | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT;
+                case ENUM -> source.modifiers() | Opcodes.ACC_ENUM | Opcodes.ACC_FINAL;
+                case ANNOTATION ->
+                        source.modifiers() | Opcodes.ACC_ANNOTATION | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT;
+                case RECORD -> source.modifiers() | Opcodes.ACC_RECORD | Opcodes.ACC_FINAL;
+                default -> source.modifiers();
+            };
+            case ClassFileTypeEntry classFile -> classFile.modifiers();
         };
         return adjustClassFlags(synthesized);
     }
@@ -72,23 +73,24 @@ final class IndexAccessFlags {
      */
     static long innerClassFlags(TypeEntry outer, TypeEntry inner) {
         long flags = classFlags(inner);
-        if (inner.isSourceEntry()) {
-            if (isInterfaceOwner(outer)) {
-                flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC;
-            }
-            // A member interface, enum, annotation or record is implicitly
-            // static regardless of the enclosing type's kind (JLS 8.5/9.5).
-            // SourceIndexer only records explicit modifiers, so e.g. an
-            // `interface Listener<C> {}` nested in a generic `class
-            // PoolWaiter<C>` would otherwise be synthesized as a non-static
-            // inner of the generic outer. The reader then wires it as
-            // PoolWaiter<C>.Listener, which no longer matches uses written as
-            // the (correct) static form PoolWaiter.Listener<C> - surfacing as
-            // "improperly formed type, type arguments given on a raw type" and
-            // a cascade of bogus override/abstract-method errors.
-            if (isImplicitlyStaticMember(inner.declKind())) {
-                flags |= Opcodes.ACC_STATIC;
-            }
+        if (!(inner instanceof SourceTypeEntry sourceInner)) {
+            return flags;
+        }
+        if (isInterfaceOwner(outer)) {
+            flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC;
+        }
+        // A member interface, enum, annotation or record is implicitly
+        // static regardless of the enclosing type's kind (JLS 8.5/9.5).
+        // SourceIndexer only records explicit modifiers, so e.g. an
+        // `interface Listener<C> {}` nested in a generic `class
+        // PoolWaiter<C>` would otherwise be synthesized as a non-static
+        // inner of the generic outer. The reader then wires it as
+        // PoolWaiter<C>.Listener, which no longer matches uses written as
+        // the (correct) static form PoolWaiter.Listener<C> - surfacing as
+        // "improperly formed type, type arguments given on a raw type" and
+        // a cascade of bogus override/abstract-method errors.
+        if (isImplicitlyStaticMember(sourceInner.declKind())) {
+            flags |= Opcodes.ACC_STATIC;
         }
         return flags;
     }
@@ -101,14 +103,14 @@ final class IndexAccessFlags {
     }
 
     static int fieldFlags(TypeEntry owner, FieldEntry field) {
-        if (!owner.isSourceEntry()) {
-            return field.modifiers();
+        if (owner instanceof SourceTypeEntry sourceOwner) {
+            int flags = field.modifiers();
+            if (isInterfaceLike(sourceOwner.declKind())) {
+                flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL;
+            }
+            return flags;
         }
-        int flags = field.modifiers();
-        if (isInterfaceLike(owner.declKind())) {
-            flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL;
-        }
-        return flags;
+        return field.modifiers();
     }
 
     static long methodFlags(TypeEntry owner, MethodEntry method) {
@@ -118,7 +120,7 @@ final class IndexAccessFlags {
         if (method.varargs()) {
             flags |= Flags.VARARGS;
         }
-        if (owner.isSourceEntry() && isInterfaceLike(owner.declKind())) {
+        if (owner instanceof SourceTypeEntry sourceOwner && isInterfaceLike(sourceOwner.declKind())) {
             if ((flags & (Opcodes.ACC_PUBLIC | Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) == 0) {
                 flags |= Opcodes.ACC_PUBLIC;
             }
@@ -165,10 +167,10 @@ final class IndexAccessFlags {
     }
 
     private static boolean isInterfaceOwner(TypeEntry owner) {
-        if (owner.isSourceEntry()) {
-            return isInterfaceLike(owner.declKind());
-        }
-        return (owner.modifiers() & Opcodes.ACC_INTERFACE) != 0;
+        return switch (owner) {
+            case SourceTypeEntry source -> isInterfaceLike(source.declKind());
+            case ClassFileTypeEntry classFile -> (classFile.modifiers() & Opcodes.ACC_INTERFACE) != 0;
+        };
     }
 
     private static boolean isInterfaceLike(TypeDeclKind kind) {
