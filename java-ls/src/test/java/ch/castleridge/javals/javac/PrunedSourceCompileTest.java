@@ -57,7 +57,7 @@ class PrunedSourceCompileTest {
         String jrtUri = jrt.sourceUri();
 
         Index index = new Index();
-        assertTrue(new Scanner(false, true).scanAll(List.of(jrt, new DirInput(srcRoot)), index).isEmpty());
+        assertTrue(new Scanner(true, true).scanAll(List.of(jrt, new DirInput(srcRoot)), index).isEmpty());
         assertTrue(index.getAll("demo/Lib").isEmpty(), "workspace sources must not produce TypeEntry records");
         assertEquals(1, index.prunedSourceSize());
 
@@ -119,7 +119,7 @@ class PrunedSourceCompileTest {
         String jrtUri = jrt.sourceUri();
 
         Index index = new Index();
-        assertTrue(new Scanner(false, true).scanAll(List.of(jrt, new DirInput(srcRoot)), index).isEmpty());
+        assertTrue(new Scanner(true, true).scanAll(List.of(jrt, new DirInput(srcRoot)), index).isEmpty());
 
         ClasspathOrder cp = new ClasspathOrder(
                 List.of(UriClasspathEntry.of(srcRoot.toUri().toString()), UriClasspathEntry.of(jrtUri)),
