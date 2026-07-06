@@ -12,7 +12,7 @@ import java.util.Map;
 /**
  * Reads bytes from resource URIs in the custom
  * {@code jrt://<java-home-path>!<path-within-jrt-fs>} form produced by
- * {@link ch.castleridge.javals.indexing.scan.JrtWalker}.
+ * {@link ch.castleridge.javals.indexing.scan.JrtInput}.
  */
 final class JrtResourceReader {
 

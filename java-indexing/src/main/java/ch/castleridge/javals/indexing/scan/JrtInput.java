@@ -1,11 +1,18 @@
 package ch.castleridge.javals.indexing.scan;
 
+import java.io.IOException;
 import java.net.URI;
-import java.net.URLEncoder;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.charset.StandardCharsets;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Map;
+import java.util.stream.Stream;
 
-import ch.castleridge.javals.indexing.index.UriCoding;
+import ch.castleridge.javals.indexing.index.Index;
 
 /**
  * JRT image entries. Specify {@link #ALL} for every module or a concrete
@@ -33,7 +40,19 @@ public final class JrtInput implements InputSource {
 
     @Override
     public void walk(ResourceSink sink, boolean catalogClassFilesOnly) {
-        JrtWalker.walk(this, sink, catalogClassFilesOnly);
+        String javaHomeUriPath = sourceUri();
+        try (FileSystem fs = FileSystems.newFileSystem(
+                URI.create("jrt:/"),
+                Map.of("java.home", javaHome.toString()))) {
+            Path modulesRoot = fs.getPath("modules");
+            try (Stream<Path> list = Files.list(modulesRoot)) {
+                for (Path mod : (Iterable<Path>) list::iterator) {
+                    walkModule(mod, sink, javaHomeUriPath, catalogClassFilesOnly);
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed opening jrt:/ for " + javaHome, e);
+        }
     }
 
     @Override
@@ -41,4 +60,54 @@ public final class JrtInput implements InputSource {
         return "jrt://" + this.javaHome.toUri().getRawPath();
     }
 
+    private static void walkModule(Path moduleRoot, ResourceSink sink, String javaHomeUriPath,
+                                   boolean catalogClassFilesOnly) throws IOException {
+        if (!Files.exists(moduleRoot)) return;
+        Files.walkFileTree(moduleRoot, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                String name = file.getFileName().toString();
+                if (!isIndexable(name)) return FileVisitResult.CONTINUE;
+                if (Index.isSkippedFileName(name)) return FileVisitResult.CONTINUE;
+                String uri = jrtUri(javaHomeUriPath, file);
+                if (catalogClassOnly(catalogClassFilesOnly, name)) {
+                    sink.accept(uri, name, null);
+                    return FileVisitResult.CONTINUE;
+                }
+                // Read eagerly: the sink typically defers to an async task,
+                // and the jrt filesystem may close before that task runs.
+                byte[] bytes;
+                try {
+                    bytes = Files.readAllBytes(file);
+                } catch (IOException ioe) {
+                    System.err.println("Skipping unreadable jrt entry " + uri
+                            + ": " + ioe.getClass().getSimpleName() + ": " + ioe.getMessage());
+                    return FileVisitResult.CONTINUE;
+                }
+                sink.accept(uri, name, () -> bytes);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    private static boolean catalogClassOnly(boolean catalog, String name) {
+        return catalog && name.endsWith(".class") && !Index.isModuleInfoFileName(name);
+    }
+
+    /**
+     * Build the resource URI for {@code file} in the
+     * {@code jrt:///<absolute-java-home>?<path-within-jrt-fs>} form.
+     * Embedding the java home means entries from different JDK installs
+     * can never collide on the same key, and the install is recoverable
+     * from any URI later.
+     */
+    private static String jrtUri(String javaHomeUriPath, Path file) {
+        String inside = file.toUri().getRawPath();
+        if (inside.startsWith("/")) inside = inside.substring(1);
+        return javaHomeUriPath + "!/" + inside;
+    }
+
+    private static boolean isIndexable(String name) {
+        return name.endsWith(".java") || name.endsWith(".class");
+    }
 }
