@@ -73,9 +73,9 @@ public final class IndexService {
         }
         Path workspacePath = resolveWorkspacePath(params, roots, mbt);
         log(MessageType.Info, "Loading mbt.json: " + mbt);
-        boolean minimalClassFiles = !InitializationOptions.indexClassFileContents(params);
+        boolean indexClassFiles = InitializationOptions.indexClassFileContents(params);
         boolean prunedSource = InitializationOptions.prunedSourceIndexing(params);
-        return CompletableFuture.runAsync(() -> loadFrom(mbt, workspacePath, minimalClassFiles, prunedSource));
+        return CompletableFuture.runAsync(() -> loadFrom(mbt, workspacePath, indexClassFiles, prunedSource));
     }
    
    public ClasspathOrder classPathFor(String uri) {
@@ -88,7 +88,7 @@ public final class IndexService {
 
    } 
  
-    private void loadFrom(Path mbt, Path workspacePath, boolean minimalClassFiles, boolean prunedSource) {
+    private void loadFrom(Path mbt, Path workspacePath, boolean indexClassFiles, boolean prunedSource) {
         try {
             MbtInfo info = MbtJson.read(mbt);
             Map<String, String> sourceJarByBinaryJar = new HashMap<>();
@@ -105,7 +105,7 @@ public final class IndexService {
             index.addChangedListener(this::notifyIndexChanged);
             state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar));
             notifyIndexChanged();
-            Scanner scanner = new Scanner(minimalClassFiles, prunedSource);
+            Scanner scanner = new Scanner(indexClassFiles, prunedSource);
             long t0 = System.nanoTime();
             List<Throwable> failures = scanner.scanAll(sources.values(), index);
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;

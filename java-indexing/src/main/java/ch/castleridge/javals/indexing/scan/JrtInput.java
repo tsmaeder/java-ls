@@ -39,7 +39,7 @@ public final class JrtInput implements InputSource {
     }
 
     @Override
-    public void walk(ResourceSink sink, boolean catalogClassFilesOnly) {
+    public void walk(ResourceSink sink, boolean indexClassFiles) {
         String javaHomeUriPath = sourceUri();
         try (FileSystem fs = FileSystems.newFileSystem(
                 URI.create("jrt:/"),
@@ -47,7 +47,7 @@ public final class JrtInput implements InputSource {
             Path modulesRoot = fs.getPath("modules");
             try (Stream<Path> list = Files.list(modulesRoot)) {
                 for (Path mod : (Iterable<Path>) list::iterator) {
-                    walkModule(mod, sink, javaHomeUriPath, catalogClassFilesOnly);
+                    walkModule(mod, sink, javaHomeUriPath, indexClassFiles);
                 }
             }
         } catch (IOException e) {
@@ -61,37 +61,35 @@ public final class JrtInput implements InputSource {
     }
 
     private static void walkModule(Path moduleRoot, ResourceSink sink, String javaHomeUriPath,
-                                   boolean catalogClassFilesOnly) throws IOException {
+                                   boolean indexClassFiles) throws IOException {
         if (!Files.exists(moduleRoot)) return;
         Files.walkFileTree(moduleRoot, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 String name = file.getFileName().toString();
-                if (!isIndexable(name)) return FileVisitResult.CONTINUE;
-                if (Index.isSkippedFileName(name)) return FileVisitResult.CONTINUE;
-                String uri = jrtUri(javaHomeUriPath, file);
-                if (catalogClassOnly(catalogClassFilesOnly, name)) {
-                    sink.accept(uri, name, null);
-                    return FileVisitResult.CONTINUE;
+                if (isIndexable(name)) {
+                    String uri = jrtUri(javaHomeUriPath, file);
+                    if (shouldReadContents(indexClassFiles, name)) {
+                        // Read eagerly: the sink typically defers to an async task,
+                        // and the jrt filesystem may close before that task runs.
+                        try {
+                            byte[] bytes = Files.readAllBytes(file);
+                            sink.accept(uri, name, () -> bytes);
+                        } catch (IOException ioe) {
+                            System.err.println("Skipping unreadable jrt entry " + uri
+                                    + ": " + ioe.getClass().getSimpleName() + ": " + ioe.getMessage());
+                        }
+                    } else {
+                        sink.accept(uri, name, null);
+                    }
                 }
-                // Read eagerly: the sink typically defers to an async task,
-                // and the jrt filesystem may close before that task runs.
-                byte[] bytes;
-                try {
-                    bytes = Files.readAllBytes(file);
-                } catch (IOException ioe) {
-                    System.err.println("Skipping unreadable jrt entry " + uri
-                            + ": " + ioe.getClass().getSimpleName() + ": " + ioe.getMessage());
-                    return FileVisitResult.CONTINUE;
-                }
-                sink.accept(uri, name, () -> bytes);
                 return FileVisitResult.CONTINUE;
             }
         });
     }
 
-    private static boolean catalogClassOnly(boolean catalog, String name) {
-        return catalog && name.endsWith(".class") && !Index.isModuleInfoFileName(name);
+    private static boolean shouldReadContents(boolean indexClassFiles, String name) {
+        return indexClassFiles || !name.endsWith(".class") || Index.isModuleInfoFileName(name);
     }
 
     /**
@@ -108,6 +106,6 @@ public final class JrtInput implements InputSource {
     }
 
     private static boolean isIndexable(String name) {
-        return name.endsWith(".java") || name.endsWith(".class");
+        return (name.endsWith(".java") || name.endsWith(".class")) && !Index.isSkippedFileName(name);
     }
 }

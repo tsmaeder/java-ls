@@ -11,7 +11,7 @@ import ch.castleridge.javals.indexing.index.Index;
 /** A single {@code .jar} file. */
 public record JarInput(Path jar) implements InputSource {
     @Override
-    public void walk(ResourceSink sink, boolean catalogClassFilesOnly) {
+    public void walk(ResourceSink sink, boolean indexClassFiles) {
         try (JarFile jf = new JarFile(jar.toFile())) {
             Enumeration<JarEntry> entries = jf.entries();
             while (entries.hasMoreElements()) {
@@ -19,26 +19,22 @@ public record JarInput(Path jar) implements InputSource {
                 if (e.isDirectory()) continue;
                 String name = e.getName();
                 String simple = simpleName(name);
-                if (!isIndexable(simple)) continue;
-                if (Index.isSkippedFileName(simple)) continue;
-
-                String uri = jarEntryUri(jar, name);
-                if (catalogClassOnly(catalogClassFilesOnly, simple)) {
-                    sink.accept(uri, simple, null);
-                    continue;
+                if (isIndexable(simple)) {
+                    String uri = jarEntryUri(jar, name);
+                    if (shouldReadContents(indexClassFiles, simple)) {
+                        // Read bytes eagerly: the sink typically hands the bytes supplier
+                        // to an async task, and by the time the task runs the
+                        // try-with-resources below would have closed the JarFile.
+                        try {
+                            sink.accept(uri, simple, () -> jf.getInputStream(e).readAllBytes());
+                        } catch (IOException ioe) {
+                            System.err.println("Skipping unreadable jar entry " + jar + "!/" + name
+                                    + ": " + ioe.getClass().getSimpleName() + ": " + ioe.getMessage());
+                        }
+                    } else {
+                        sink.accept(uri, simple, null);
+                    }
                 }
-                // Read bytes eagerly: the sink typically hands the bytes supplier
-                // to an async task, and by the time the task runs the
-                // try-with-resources below would have closed the JarFile.
-                byte[] bytes;
-                try {
-                    bytes = jf.getInputStream(e).readAllBytes();
-                } catch (IOException ioe) {
-                    System.err.println("Skipping unreadable jar entry " + jar + "!/" + name
-                            + ": " + ioe.getClass().getSimpleName() + ": " + ioe.getMessage());
-                    continue;
-                }
-                sink.accept(uri, simple, () -> bytes);
             }
         } catch (IOException | RuntimeException ex) {
             System.err.println("Skipping non-readable jar " + jar + ": "
@@ -55,8 +51,8 @@ public record JarInput(Path jar) implements InputSource {
         return jar.toUri().toString();
     }
 
-    private static boolean catalogClassOnly(boolean catalog, String simple) {
-        return catalog && simple.endsWith(".class") && !Index.isModuleInfoFileName(simple);
+    private static boolean shouldReadContents(boolean indexClassFiles, String name) {
+        return indexClassFiles || !name.endsWith(".class") || Index.isModuleInfoFileName(name);
     }
 
     private static String simpleName(String entryName) {
@@ -65,7 +61,7 @@ public record JarInput(Path jar) implements InputSource {
     }
 
     private static boolean isIndexable(String name) {
-        return name.endsWith(".java") || name.endsWith(".class");
+        return (name.endsWith(".java") || name.endsWith(".class")) && !Index.isSkippedFileName(name);
     }
 
     private static String jarEntryUri(Path jar, String entryName) {

@@ -158,7 +158,7 @@ class JrtScanTest {
     @Test
     void minimalCatalogScanRecordsClassFilesWithoutTypeEntries() {
         Index index = new Index();
-        Scanner scanner = new Scanner(true);
+        Scanner scanner = new Scanner(false);
         List<Throwable> failures = scanner.scanAll(
                 List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
         assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);

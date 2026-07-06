@@ -21,7 +21,7 @@ public sealed interface InputSource permits DirInput, JarInput, JrtInput {
      *        read. {@code module-info.class} and {@code .java} files are
      *        still read.
      */
-    void walk(ResourceSink sink, boolean catalogClassFilesOnly);
+    void walk(ResourceSink sink, boolean indexClassFiles);
 
     /**
      * URI identifying this source as a whole (the jar file, the directory

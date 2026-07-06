@@ -12,21 +12,21 @@ import ch.castleridge.javals.indexing.index.Index;
 /** Directory on the local filesystem, walked recursively. */
 public record DirInput(Path root) implements InputSource {
     @Override
-    public void walk(ResourceSink sink, boolean catalogClassFilesOnly) {
+    public void walk(ResourceSink sink, boolean indexClassFiles) {
         if (!Files.exists(root)) return;
         try {
             Files.walkFileTree(root, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                     String name = file.getFileName().toString();
-                    if (!isIndexable(name)) return FileVisitResult.CONTINUE;
-                    if (Index.isSkippedFileName(name)) return FileVisitResult.CONTINUE;
-                    String uri = file.toUri().toString();
-                    if (catalogClassOnly(catalogClassFilesOnly, name)) {
-                        sink.accept(uri, name, null);
-                        return FileVisitResult.CONTINUE;
+                    if (isIndexable(name)) {
+                        String uri = file.toUri().toString();
+                        if (shouldReadContents(indexClassFiles, name)) {
+                            sink.accept(uri, name, () -> Files.readAllBytes(file));
+                        } else {
+                            sink.accept(uri, name, null);
+                        }
                     }
-                    sink.accept(uri, name, () -> Files.readAllBytes(file));
                     return FileVisitResult.CONTINUE;
                 }
             });
@@ -40,11 +40,11 @@ public record DirInput(Path root) implements InputSource {
         return root.toUri().toString();
     }
 
-    private static boolean catalogClassOnly(boolean catalog, String name) {
-        return catalog && name.endsWith(".class") && !Index.isModuleInfoFileName(name);
+    private static boolean shouldReadContents(boolean indexClassFiles, String name) {
+        return indexClassFiles || !name.endsWith(".class") || Index.isModuleInfoFileName(name);
     }
 
     private static boolean isIndexable(String name) {
-        return name.endsWith(".java") || name.endsWith(".class");
+        return (name.endsWith(".java") || name.endsWith(".class")) && !Index.isSkippedFileName(name);
     }
 }

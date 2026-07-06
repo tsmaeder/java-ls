@@ -1506,8 +1506,7 @@ class IndexCompileTest {
 
     private static Index indexWithJrt() throws Exception {
         Index index = new Index();
-        List<Throwable> failures = new Scanner().scanAll(
-                List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
+        List<Throwable> failures = new Scanner().scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
         return index;
     }

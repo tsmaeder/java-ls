@@ -42,37 +42,37 @@ public final class Scanner {
 
     private final ForkJoinPool pool;
     private final boolean ownsPool;
-    private final boolean minimalClassFiles;
+    private final boolean indexClassFiles;
     private final boolean prunedSource;
 
     public Scanner() {
-        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, false, false);
+        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, true, false);
     }
 
-    public Scanner(boolean minimalClassFiles) {
-        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, minimalClassFiles, false);
+    public Scanner(boolean indexClassFiles) {
+        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, indexClassFiles, false);
     }
 
     public Scanner(ForkJoinPool pool) {
-        this(pool, false, false, false);
+        this(pool, false, true, false);
     }
 
-    public Scanner(ForkJoinPool pool, boolean minimalClassFiles) {
-        this(pool, false, minimalClassFiles, false);
+    public Scanner(ForkJoinPool pool, boolean indexClassFiles) {
+        this(pool, false, indexClassFiles, false);
     }
 
-    public Scanner(boolean minimalClassFiles, boolean prunedSource) {
-        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, minimalClassFiles, prunedSource);
+    public Scanner(boolean indexClassFiles, boolean prunedSource) {
+        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, indexClassFiles, prunedSource);
     }
 
-    public Scanner(ForkJoinPool pool, boolean minimalClassFiles, boolean prunedSource) {
-        this(pool, false, minimalClassFiles, prunedSource);
+    public Scanner(ForkJoinPool pool, boolean indexClassFiles, boolean prunedSource) {
+        this(pool, false, indexClassFiles, prunedSource);
     }
 
-    private Scanner(ForkJoinPool pool, boolean owns, boolean minimalClassFiles, boolean prunedSource) {
+    private Scanner(ForkJoinPool pool, boolean owns, boolean indexClassFiles, boolean prunedSource) {
         this.pool = pool;
         this.ownsPool = owns;
-        this.minimalClassFiles = minimalClassFiles;
+        this.indexClassFiles = indexClassFiles;
         this.prunedSource = prunedSource;
     }
 
@@ -120,7 +120,7 @@ public final class Scanner {
             src.walk((uri, fileName, bytes) -> {
                 if (bytes == null) {
                     try {
-                        indexOne(uri, srcUri, fileName, null, temp, true, false);
+                        indexOne(uri, srcUri, fileName, null, temp, false, false);
                     } catch (Throwable t) {
                         failures.add(t);
                     }
@@ -129,13 +129,13 @@ public final class Scanner {
                 boolean pruneJava = prunedSource && src instanceof DirInput;
                 ForkJoinTask<?> task = pool.submit(() -> {
                     try {
-                        indexOne(uri, srcUri, fileName, bytes.get(), temp, minimalClassFiles, pruneJava);
+                        indexOne(uri, srcUri, fileName, bytes.get(), temp, indexClassFiles, pruneJava);
                     } catch (Throwable t) {
                         failures.add(t);
                     }
                 });
                 indexTasks.add(task);
-            }, minimalClassFiles);
+            }, indexClassFiles);
         } catch (Throwable t) {
             System.err.println("Skipping unreadable source " + srcUri + ": "
                     + t.getClass().getSimpleName() + ": " + t.getMessage());
@@ -156,9 +156,9 @@ public final class Scanner {
     }
 
     private static void indexOne(String uri, String sourceUri, String fileName, byte[] content, Index into,
-                               boolean minimalClassFiles, boolean prunedJava) {
+                               boolean indexClassFiles, boolean prunedJava) {
         if (fileName.endsWith(".class")) {
-            if (minimalClassFiles) {
+            if (!indexClassFiles) {
                 if (Index.isModuleInfoFileName(fileName)) {
                     ClassFileIndexer.indexModuleMinimal(
                             URI.create(uri), URI.create(sourceUri), content, into);
