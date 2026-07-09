@@ -26,7 +26,8 @@ public record JarInput(Path jar) implements InputSource {
                         // to an async task, and by the time the task runs the
                         // try-with-resources below would have closed the JarFile.
                         try {
-                            sink.accept(uri, simple, () -> jf.getInputStream(e).readAllBytes());
+                            byte[] bytes = jf.getInputStream(e).readAllBytes();
+                            sink.accept(uri, simple, () -> bytes);
                         } catch (IOException ioe) {
                             System.err.println("Skipping unreadable jar entry " + jar + "!/" + name
                                     + ": " + ioe.getClass().getSimpleName() + ": " + ioe.getMessage());

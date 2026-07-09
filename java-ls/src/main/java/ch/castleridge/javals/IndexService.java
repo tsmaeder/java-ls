@@ -336,6 +336,8 @@ public final class IndexService {
         for (Path root : roots) {
             Path candidate = root.resolve("mbt.json");
             if (Files.isRegularFile(candidate)) return candidate;
+            candidate = root.resolve(".metals", "mbt.json");
+            if (Files.isRegularFile(candidate)) return candidate;
         }
         return null;
     }
