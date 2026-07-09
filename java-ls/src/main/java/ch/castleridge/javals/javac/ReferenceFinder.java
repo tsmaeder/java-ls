@@ -4,6 +4,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 
 import javax.lang.model.element.Element;
+import javax.lang.model.element.ElementKind;
 import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 
@@ -15,6 +16,9 @@ import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.LineMap;
 import com.sun.source.tree.MemberSelectTree;
+import com.sun.source.tree.MethodInvocationTree;
+import com.sun.source.tree.NewClassTree;
+import com.sun.source.tree.ParameterizedTypeTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.util.SourcePositions;
 import com.sun.source.util.TreePath;
@@ -85,22 +89,52 @@ public final class ReferenceFinder {
             return super.visitMemberSelect(node, unused);
         }
 
-        private void considerReference(Tree node) {
+        @Override
+        public Void visitNewClass(NewClassTree node, Void unused) {
+            // Identifier inside "new Foo()" binds to the type; the constructor
+            // is on the NewClassTree itself.
+            considerReference(constructorNameTree(node));
+            return super.visitNewClass(node, unused);
+        }
+
+        @Override
+        public Void visitMethodInvocation(MethodInvocationTree node, Void unused) {
+            // Regular calls are already covered via Identifier/MemberSelect.
+            // Explicit this()/super() constructor calls bind on the invocation.
+            Element element = trees.getElement(getCurrentPath());
+            if (element != null && element.getKind() == ElementKind.CONSTRUCTOR) {
+                considerReference(node.getMethodSelect());
+            }
+            return super.visitMethodInvocation(node, unused);
+        }
+
+        private void considerReference(Tree highlightNode) {
             TreePath path = getCurrentPath();
             Element element = trees.getElement(path);
             if (element == null) return;
 
             if (targetKey.fileLocal()) {
                 if (targetElement != null && element.equals(targetElement)) {
-                    nameRange(node).ifPresent(r -> results.add(new Location(docUri, r)));
+                    nameRange(highlightNode).ifPresent(r -> results.add(new Location(docUri, r)));
                 }
                 return;
             }
 
             SymbolKey usageKey = SymbolKey.of(element, elements, types, trees).orElse(null);
             if (usageKey != null && targetKey.matches(usageKey)) {
-                nameRange(node).ifPresent(r -> results.add(new Location(docUri, r)));
+                nameRange(highlightNode).ifPresent(r -> results.add(new Location(docUri, r)));
             }
+        }
+
+        private static Tree constructorNameTree(NewClassTree node) {
+            Tree id = node.getIdentifier();
+            if (id instanceof ParameterizedTypeTree parameterized) {
+                id = parameterized.getType();
+            }
+            if (id instanceof MemberSelectTree ms) {
+                return ms;
+            }
+            return id != null ? id : node;
         }
 
         private java.util.Optional<Range> nameRange(Tree node) {

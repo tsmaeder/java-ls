@@ -244,10 +244,11 @@ public final class SymbolLocator {
     }
 
     private static Tree pickMethod(ExecutableElement ee, ClassTree owner) {
-        String wantName = ee.getSimpleName().toString();
-        if (ee.getKind() == ElementKind.CONSTRUCTOR) {
-            wantName = "<init>";
-        }
+        // Source MethodTree names use the class simple name for constructors,
+        // not the JVM "<init>" name.
+        String wantName = ee.getKind() == ElementKind.CONSTRUCTOR
+                ? owner.getSimpleName().toString()
+                : ee.getSimpleName().toString();
         int wantArity = ee.getParameters().size();
         List<String> wantParamSig = paramSimpleNames(ee);
 

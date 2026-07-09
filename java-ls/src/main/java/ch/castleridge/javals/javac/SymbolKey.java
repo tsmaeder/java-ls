@@ -26,6 +26,11 @@ import ch.castleridge.javals.indexing.model.IndexedClassRef;
  * <p>Cross-file keys embed the declaration's {@code resourceUri} so that
  * classpath shadowing (same JVM binary name from different declarations)
  * does not bleed references across copies.
+ *
+ * <p>{@link #simpleName()} is the identifier used for bloom-filter candidate
+ * selection. For constructors that is the enclosing type's simple name
+ * (source ASTs never spell {@code <init>}), while the matching key still
+ * uses the JVM {@code <init>} method name.
  */
 public final class SymbolKey {
 
@@ -85,13 +90,18 @@ public final class SymbolKey {
             if (owner == null) return Optional.empty();
             var ownerBinary = elements.getBinaryName(owner);
             if (ownerBinary == null) return Optional.empty();
-            String name = ee.getKind() == ElementKind.CONSTRUCTOR
-                    ? "<init>"
-                    : ee.getSimpleName().toString();
+            boolean constructor = ee.getKind() == ElementKind.CONSTRUCTOR;
+            // Matching key uses JVM "<init>"; bloom lookup uses the class
+            // simple name because source ASTs and call sites never spell
+            // "<init>" (e.g. "new Foo()" / "Foo() { }").
+            String name = constructor ? "<init>" : ee.getSimpleName().toString();
+            String bloomName = constructor
+                    ? owner.getSimpleName().toString()
+                    : simpleName;
             String descriptor = erasedParamTypes(ee, types);
             return Optional.of(new SymbolKey(
                     "M:" + originUri + "|" + ownerBinary + "#" + name + "(" + descriptor + ")",
-                    simpleName,
+                    bloomName,
                     false));
         }
         if (element instanceof VariableElement ve) {

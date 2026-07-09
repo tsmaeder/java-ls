@@ -113,6 +113,65 @@ class LspDiagnosticsHarnessTest {
     }
 
     @Test
+    void referencesFindsConstructorUsagesViaClassNameBloom(@TempDir Path workspace) throws Exception {
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+
+        Path greeterFile = sourceDir.resolve("Greeter.java");
+        Files.writeString(greeterFile, """
+                package com.example;
+
+                public class Greeter {
+                    public Greeter() {
+                    }
+                }
+                """);
+
+        Path mainFile = sourceDir.resolve("Main.java");
+        Files.writeString(mainFile, """
+                package com.example;
+
+                public class Main {
+                    void run() {
+                        Greeter g = new Greeter();
+                    }
+                }
+                """);
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(TIMEOUT);
+            // Only open the declaration file so the usage file must come from bloom.
+            harness.openAndAwaitDiagnostics(greeterFile, TIMEOUT);
+
+            List<String> greeterLines = Files.readAllLines(greeterFile);
+            int ctorDeclLine = -1;
+            for (int i = 0; i < greeterLines.size(); i++) {
+                if (greeterLines.get(i).contains("public Greeter()")) {
+                    ctorDeclLine = i;
+                    break;
+                }
+            }
+            assertTrue(ctorDeclLine >= 0);
+            int ctorDeclCol = greeterLines.get(ctorDeclLine).indexOf("Greeter");
+            assertTrue(ctorDeclCol >= 0);
+
+            List<Location> ctorRefs = harness.referencesAt(
+                    greeterFile.toUri(), new Position(ctorDeclLine, ctorDeclCol), true);
+            assertTrue(ctorRefs.stream().anyMatch(loc -> loc.getUri().contains("Main.java")),
+                    () -> "expected constructor usage in Main.java via bloom, got: " + ctorRefs);
+            assertTrue(ctorRefs.stream().anyMatch(loc -> loc.getUri().contains("Greeter.java")),
+                    () -> "expected constructor declaration in Greeter.java, got: " + ctorRefs);
+
+            List<String> logs = harness.logMessages();
+            assertTrue(logs.stream().anyMatch(m -> m != null
+                            && m.contains("References: 'Greeter'")
+                            && m.contains("bloom hits")),
+                    () -> "expected bloom lookup by class name Greeter, got: " + logs);
+        }
+    }
+
+    @Test
     void referencesFindsBinaryTypeAcrossFiles(@TempDir Path workspace) throws Exception {
         Path sourceDir = workspace.resolve("src/main/java/com/example");
         Files.createDirectories(sourceDir);
