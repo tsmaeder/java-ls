@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.Location;
@@ -590,6 +591,68 @@ class LspDiagnosticsHarnessTest {
         Path workspace = Path.of("../../test-projects/vert.x").toAbsolutePath().normalize();
         Path jsonObject = workspace.resolve("vertx-core/src/main/java/io/vertx/core/json/JsonObject.java");
         return Files.isDirectory(workspace) && Files.isRegularFile(jsonObject);
+    }
+
+    @Test
+    void completionSuggestsMethodOnCrossFileType(@TempDir Path workspace) throws Exception {
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+
+        Path greeterFile = sourceDir.resolve("Greeter.java");
+        Files.writeString(greeterFile, """
+                package com.example;
+
+                public class Greeter {
+                    public String greet() {
+                        return "hi";
+                    }
+                }
+                """);
+
+        Path mainFile = sourceDir.resolve("Main.java");
+        // No trailing ';' after "g.gre" - completion is triggered on the
+        // buffer exactly as it looks mid-typing, before the statement is
+        // finished.
+        Files.writeString(mainFile, """
+                package com.example;
+
+                public class Main {
+                    void run() {
+                        Greeter g = new Greeter();
+                        g.gre
+                    }
+                }
+                """);
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(TIMEOUT);
+            harness.openAndAwaitDiagnostics(greeterFile, TIMEOUT);
+            harness.openAndAwaitDiagnostics(mainFile, TIMEOUT);
+
+            List<String> mainLines = Files.readAllLines(mainFile);
+            int completionLine = -1;
+            for (int i = 0; i < mainLines.size(); i++) {
+                if (mainLines.get(i).contains("g.gre")) {
+                    completionLine = i;
+                    break;
+                }
+            }
+            assertTrue(completionLine >= 0);
+            int completionCol = mainLines.get(completionLine).indexOf("g.gre") + "g.gre".length();
+
+            List<CompletionItem> items = harness.completionAt(
+                    mainFile.toUri(), new Position(completionLine, completionCol));
+
+            CompletionItem greet = items.stream()
+                    .filter(i -> "greet".equals(i.getLabel()))
+                    .findFirst()
+                    .orElse(null);
+            assertTrue(greet != null,
+                    () -> "expected 'greet' method completion, got: "
+                            + items.stream().map(CompletionItem::getLabel).toList());
+            assertEquals("greet($0)", greet.getInsertText());
+        }
     }
 
     // @Test

@@ -30,6 +30,7 @@ import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.UriCoding;
 import ch.castleridge.javals.javac.ClasspathOrder;
+import ch.castleridge.javals.javac.CompletionProposer;
 import ch.castleridge.javals.javac.DefinitionElementResolver;
 import ch.castleridge.javals.javac.ReferenceFinder;
 import ch.castleridge.javals.javac.SourceCache;
@@ -211,27 +212,63 @@ public class JavaTextDocumentService implements TextDocumentService {
         server.logMessage(MessageType.Info, "Document saved: " + UriCoding.decode(params.getTextDocument().getUri()));
     }
 
+    /**
+     * Compute completion candidates for types, fields and methods at the
+     * cursor. Reuses the cached compile from the last {@link #refreshCompile}
+     * (same as {@link #resolveElementAt}, no version check) so completion
+     * stays cheap; falls back to a synchronous compile of the current
+     * buffer when nothing is cached yet (e.g. right after {@code didOpen}).
+     */
     @Override
     public CompletableFuture<Either<List<CompletionItem>, CompletionList>> completion(CompletionParams params) {
-        // Basic completion example
-        List<CompletionItem> completions = new ArrayList<>();
+        String uri = UriCoding.decode(params.getTextDocument().getUri());
+        Position position = params.getPosition();
+        return CompletableFuture.supplyAsync(() -> Either.forLeft(computeCompletion(uri, position)));
+    }
 
-        CompletionItem item1 = new CompletionItem("public");
-        item1.setKind(CompletionItemKind.Keyword);
-        item1.setDetail("Java keyword");
-        completions.add(item1);
+    private List<CompletionItem> computeCompletion(String uri, Position position) {
+        TextDocumentItem doc = documents.get(uri);
+        if (doc == null)
+            return List.of();
 
-        CompletionItem item2 = new CompletionItem("private");
-        item2.setKind(CompletionItemKind.Keyword);
-        item2.setDetail("Java keyword");
-        completions.add(item2);
+        WorkspaceCompiler.Result compiled = compiledForCompletion(uri, doc);
+        if (compiled == null || compiled.cu() == null)
+            return List.of();
 
-        CompletionItem item3 = new CompletionItem("class");
-        item3.setKind(CompletionItemKind.Keyword);
-        item3.setDetail("Java keyword");
-        completions.add(item3);
+        long offset = positionToOffset(compiled.cu().getLineMap(), position);
+        if (offset < 0)
+            return List.of();
 
-        return CompletableFuture.completedFuture(Either.forLeft(completions));
+        Index index = indexService.index().orElse(null);
+        ClasspathOrder classpath = indexService.classPathFor(uri);
+        return CompletionProposer.propose(compiled, doc.getText(), offset, index, classpath);
+    }
+
+    private WorkspaceCompiler.Result compiledForCompletion(String uri, TextDocumentItem doc) {
+        CachedCompile cached = compileCache.get(uri);
+        if (cached != null && cached.result() != null) {
+            return cached.result();
+        }
+
+        Optional<Index> indexOpt = indexService.index();
+        if (indexOpt.isEmpty())
+            return null;
+
+        URI docUri;
+        try {
+            docUri = URI.create(uri);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+
+        ClasspathOrder classpath = indexService.classPathFor(uri);
+        try {
+            return WorkspaceCompiler.compile(docUri, doc.getText(), indexOpt.get(), classpath);
+        } catch (RuntimeException | Error e) {
+            server.logMessage(MessageType.Error, "Completion compile failed for " + uri + ": " + describe(e));
+            server.logException(e);
+            return null;
+        }
     }
 
     @Override

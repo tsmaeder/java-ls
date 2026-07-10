@@ -248,6 +248,79 @@ public final class Index {
         }
     }
 
+    /**
+     * Search every indexed top-level {@link TypeEntry} for a simple name
+     * starting with {@code prefix}, stopping once {@code limit} matches
+     * are found ({@code limit <= 0} means no cap). Nested/inner classes
+     * (JVM names containing {@code $}) are skipped - callers that need
+     * this (e.g. unimported-type completion) only handle importable
+     * top-level types.
+     *
+     * <p>This is a linear scan over {@link #byJvmName}'s buckets rather
+     * than a dedicated sorted-by-simple-name structure: for realistic
+     * index sizes the scan costs low-single-digit milliseconds, which is
+     * dwarfed by the cost of the surrounding request (e.g. a javac
+     * compile for completion) and not worth adding extra bookkeeping to
+     * the parallelized indexing write path ({@link #addLocked}).
+     */
+    public List<TypeEntry> searchTypesBySimpleNamePrefix(String prefix, int limit) {
+        if (prefix == null) return List.of();
+        synchronized (lock) {
+            List<TypeEntry> out = new ArrayList<>();
+            for (Object bucket : byJvmName.values()) {
+                if (bucket instanceof TypeEntry only) {
+                    addIfMatchesPrefix(only, only.jvmOwnerName(), prefix, out);
+                } else if (bucket != null) {
+                    for (TypeEntry e : (TypeEntry[]) bucket) {
+                        addIfMatchesPrefix(e, e.jvmOwnerName(), prefix, out);
+                        if (limit > 0 && out.size() >= limit) return out;
+                    }
+                }
+                if (limit > 0 && out.size() >= limit) return out;
+            }
+            return out;
+        }
+    }
+
+    /**
+     * Same as {@link #searchTypesBySimpleNamePrefix(String, int)} but over
+     * the minimal {@link ClassFileEntry} catalog (the one populated when
+     * {@code indexClassFiles=false}, the default fast-scan mode - see
+     * {@code ClassFileIndexer.indexClassCatalog}).
+     */
+    public List<ClassFileEntry> searchClassFilesBySimpleNamePrefix(String prefix, int limit) {
+        if (prefix == null) return List.of();
+        synchronized (lock) {
+            List<ClassFileEntry> out = new ArrayList<>();
+            for (Object bucket : classFileByJvmName.values()) {
+                if (bucket instanceof ClassFileEntry only) {
+                    addIfMatchesPrefix(only, only.jvmOwnerName(), prefix, out);
+                } else if (bucket != null) {
+                    for (ClassFileEntry e : (ClassFileEntry[]) bucket) {
+                        addIfMatchesPrefix(e, e.jvmOwnerName(), prefix, out);
+                        if (limit > 0 && out.size() >= limit) return out;
+                    }
+                }
+                if (limit > 0 && out.size() >= limit) return out;
+            }
+            return out;
+        }
+    }
+
+    /**
+     * Append {@code entry} to {@code out} if {@code jvmOwnerName} is a
+     * top-level type (no {@code $}) whose simple name starts with
+     * {@code prefix}. Caller must hold the monitor.
+     */
+    private static <T> void addIfMatchesPrefix(T entry, String jvmOwnerName, String prefix, List<T> out) {
+        if (jvmOwnerName == null || jvmOwnerName.indexOf('$') >= 0) return;
+        int slash = jvmOwnerName.lastIndexOf('/');
+        String simpleName = slash < 0 ? jvmOwnerName : jvmOwnerName.substring(slash + 1);
+        if (simpleName.startsWith(prefix)) {
+            out.add(entry);
+        }
+    }
+
     /** Every {@link TypeEntry} currently stored, including duplicates. */
     public Collection<TypeEntry> all() {
         synchronized (lock) {

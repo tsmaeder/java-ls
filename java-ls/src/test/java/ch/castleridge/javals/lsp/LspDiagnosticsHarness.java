@@ -18,6 +18,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import org.eclipse.lsp4j.CompletionItem;
+import org.eclipse.lsp4j.CompletionParams;
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DidCloseTextDocumentParams;
 import org.eclipse.lsp4j.DidOpenTextDocumentParams;
@@ -258,6 +260,26 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
         List<? extends Location> refs = server.getTextDocumentService().references(params)
                 .get(120, TimeUnit.SECONDS);
         return refs == null ? List.of() : List.copyOf(refs);
+    }
+
+    /**
+     * Request completions at {@code position} in an already-open document
+     * (or open it first via {@link #openAndAwaitDiagnostics}).
+     */
+    public List<CompletionItem> completionAt(URI uri, Position position) throws Exception {
+        CompletionParams params = new CompletionParams();
+        params.setTextDocument(new TextDocumentIdentifier(uri.toString()));
+        params.setPosition(position);
+        var either = server.getTextDocumentService().completion(params).get(30, TimeUnit.SECONDS);
+        if (either == null) {
+            return List.of();
+        }
+        if (either.isLeft()) {
+            List<CompletionItem> left = either.getLeft();
+            return left == null ? List.of() : List.copyOf(left);
+        }
+        var list = either.getRight();
+        return list == null || list.getItems() == null ? List.of() : List.copyOf(list.getItems());
     }
 
     @Override
