@@ -13,7 +13,6 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import javax.lang.model.element.Element;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.util.ElementFilter;
@@ -2691,7 +2690,7 @@ class IndexCompileTest {
     }
 
     @Test
-    void sourceIndexedInterfacePrivateMethodStaysPrivate() throws Exception {
+    void sourceIndexedInterfacePrivateMethodIsOmitted() throws Exception {
         Index index = new Index();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         SourceIndexer.index(
@@ -2705,15 +2704,10 @@ class IndexCompileTest {
                 index);
         TypeEntry api = index.get("com/example/Api");
         assertNotNull(api, "SourceIndexer should emit com/example/Api");
-        MethodEntry hidden = Arrays.stream(api.methods())
-                .filter(m -> m.name().equals("hidden"))
-                .findFirst()
-                .orElseThrow();
-        long hiddenFlags = IndexAccessFlags.methodFlags(api, hidden);
-        assertTrue((hiddenFlags & Opcodes.ACC_PRIVATE) != 0,
-                "hidden() should remain private after flag synthesis");
-        assertTrue((hiddenFlags & Opcodes.ACC_PUBLIC) == 0,
-                "hidden() must not be marked public");
+        assertTrue(Arrays.stream(api.methods()).noneMatch(m -> m.name().equals("hidden")),
+                "private methods must not be indexed");
+        assertTrue(Arrays.stream(api.methods()).anyMatch(m -> m.name().equals("exposed")),
+                "non-private methods must still be indexed");
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
@@ -2747,14 +2741,80 @@ class IndexCompileTest {
         Elements elements = okTask.getElements();
         TypeElement apiType = elements.getTypeElement("com.example.Api");
         assertNotNull(apiType);
-        Element hiddenMethod = ElementFilter.methodsIn(elements.getAllMembers(apiType)).stream()
-                .filter(e -> e.getSimpleName().contentEquals("hidden"))
+        assertTrue(ElementFilter.methodsIn(elements.getAllMembers(apiType)).stream()
+                        .noneMatch(e -> e.getSimpleName().contentEquals("hidden")),
+                "private method must not appear on the symbol loaded from the index");
+    }
+
+    @Test
+    void sourceIndexedPrivateConstructorBlocksInstantiation() throws Exception {
+        Index index = new Index();
+        index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
+        SourceIndexer.index(
+                URI.create("mem:///Factory.java"),
+                URI.create(SOURCE_URI),
+                "package com.example;\n"
+                        + "public class Factory {\n"
+                        + "    private Factory() {}\n"
+                        + "    public static Factory create() { return null; }\n"
+                        + "}\n",
+                index);
+        TypeEntry factory = index.get("com/example/Factory");
+        assertNotNull(factory);
+        MethodEntry ctor = Arrays.stream(factory.methods())
+                .filter(m -> m.name().equals("<init>"))
                 .findFirst()
                 .orElseThrow();
-        assertTrue(hiddenMethod.getModifiers().contains(Modifier.PRIVATE),
-                "hidden() symbol should be private");
-        assertTrue(!hiddenMethod.getModifiers().contains(Modifier.PUBLIC),
-                "hidden() symbol must not be public");
+        assertTrue((ctor.modifiers() & Opcodes.ACC_PRIVATE) != 0,
+                "private constructor must remain in the index");
+
+        ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        JavaFileObject bad = new SimpleJavaFileObject(
+                URI.create("test:///UseFactory.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return "import com.example.Factory;\n"
+                        + "public class UseFactory {\n"
+                        + "  Factory f = new Factory();\n"
+                        + "}\n";
+            }
+        };
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(bad), context);
+        task.analyze();
+        assertTrue(diagnostics.getDiagnostics().stream()
+                        .anyMatch(d -> d.getKind() == Diagnostic.Kind.ERROR),
+                "new Factory() must fail when only a private ctor is indexed");
+
+        Context okContext = new Context();
+        IndexClassReader.preRegister(okContext, index, cp);
+        IndexFileManager okFm = new IndexFileManager(std, index, cp);
+        JavaFileObject ok = new SimpleJavaFileObject(
+                URI.create("test:///UseFactoryOk.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return "import com.example.Factory;\n"
+                        + "public class UseFactoryOk {\n"
+                        + "  Factory f = Factory.create();\n"
+                        + "}\n";
+            }
+        };
+        DiagnosticCollector<JavaFileObject> okDiagnostics = new DiagnosticCollector<>();
+        JavacTask okTask = (JavacTask) tool.getTask(
+                null, okFm, okDiagnostics, List.of(), List.of(), List.of(ok), okContext);
+        okTask.analyze();
+        List<Diagnostic<? extends JavaFileObject>> okErrors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : okDiagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) okErrors.add(d);
+        }
+        assertTrue(okErrors.isEmpty(), () -> "Factory.create() should compile, got: " + okErrors);
     }
 
     @Test

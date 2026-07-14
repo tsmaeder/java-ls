@@ -23,6 +23,7 @@ import org.objectweb.asm.TypeReference;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.scan.ClassFileUris;
 import ch.castleridge.javals.indexing.intern.Interner;
+import ch.castleridge.javals.indexing.model.AccessVisibility;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
 import ch.castleridge.javals.indexing.model.ClassFileEntry;
@@ -44,6 +45,10 @@ import ch.castleridge.javals.indexing.model.TypeRef;
 /**
  * Reads a single {@code .class} file with ASM and appends a {@link TypeEntry}
  * plus its field/method entries into the supplied {@link Index}.
+ *
+ * <p>Only members that might be visible from another compilation unit are
+ * stored: private fields and methods are skipped (private {@code <init>}
+ * constructors are kept), and private nested types are omitted entirely.
  *
  * <p>Code, debug info and stack map frames are skipped because the index only
  * needs declaration shape and annotations.
@@ -248,6 +253,9 @@ public final class ClassFileIndexer {
         @Override
         public FieldVisitor visitField(int fAccess, String name, String descriptor,
                                        String fSignature, Object value) {
+            if (!AccessVisibility.shouldIndexMember(fAccess, name)) {
+                return null;
+            }
             final List<AnnotationRef> fAnnotations = new ArrayList<>();
             Type parsedFieldType = fSignature != null
                     ? SignatureRefs.parseType(fSignature)
@@ -299,6 +307,9 @@ public final class ClassFileIndexer {
         @Override
         public MethodVisitor visitMethod(int mAccess, String name, String descriptor,
                                          String mSignature, String[] exceptions) {
+            if (!AccessVisibility.shouldIndexMember(mAccess, name)) {
+                return null;
+            }
             final List<AnnotationRef> mAnnotations = new ArrayList<>();
             Descriptors.MethodRefs parts = Descriptors.parseMethod(descriptor);
             SignatureRefs.MethodRefs generic = mSignature == null
@@ -447,7 +458,8 @@ public final class ClassFileIndexer {
             if (name != null && name.equals(jvmName)) {
                 this.access |= (access & INNER_CLASS_ACCESS_MASK);
             }
-            if (outerName != null && outerName.equals(jvmName)) {
+            if (outerName != null && outerName.equals(jvmName)
+                    && AccessVisibility.shouldIndexType(access)) {
                 innerTypes.add(Interner.intern(name));
             }
         }
@@ -594,6 +606,8 @@ public final class ClassFileIndexer {
             // off the type index altogether.
             if (moduleEntry != null) return null;
             if (Index.isSkippedJvmName(jvmName)) return null;
+            // Private nested types are never visible from another CU.
+            if (!AccessVisibility.shouldIndexType(access)) return null;
             return new ClassFileTypeEntry(
                     uri,
                     sourceUri,

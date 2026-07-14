@@ -16,8 +16,8 @@ import com.sun.tools.javac.util.Names;
 
 /**
  * Transforms a parsed compilation unit into an API stub: drops private
- * members, strips non-constant field initializers, and replaces method
- * bodies with type-appropriate default returns.
+ * members (except constructors), strips non-constant field initializers,
+ * and replaces method bodies with type-appropriate default returns.
  */
 public final class SourcePruner {
 
@@ -59,7 +59,9 @@ public final class SourcePruner {
                 }
                 case METHODDEF -> {
                     JCTree.JCMethodDecl method = (JCTree.JCMethodDecl) member;
-                    if (isPrivate(method.mods)) continue;
+                    // Keep private constructors so a type with only private
+                    // ctors is not mis-synthesized as having a public default.
+                    if (isPrivate(method.mods) && method.name != names.init) continue;
                     stubMethodBody(method, make, names);
                     kept.add(method);
                 }

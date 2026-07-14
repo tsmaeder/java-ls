@@ -47,6 +47,7 @@ import com.sun.tools.javac.util.Context;
 import ch.castleridge.javals.indexing.index.InMemorySource;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.intern.Interner;
+import ch.castleridge.javals.indexing.model.AccessVisibility;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
 import ch.castleridge.javals.indexing.model.EmptyArrays;
@@ -64,7 +65,9 @@ import ch.castleridge.javals.indexing.model.TypeRef;
 
 /**
  * Parses a single Java source file and emits {@link TypeEntry} records for
- * every declared type (nested types included).
+ * every type that might be visible from another compilation unit (nested
+ * types included; private nested types are omitted). Private fields and
+ * methods are omitted except constructors ({@code <init>}).
  *
  * <p>We do <em>no</em> cross-file name resolution here: every reference that
  * cannot be decided from the compilation unit alone (identifier that is not
@@ -309,10 +312,24 @@ public final class SourceIndexer {
 
         for (Tree member : ct.getMembers()) {
             if (member instanceof VariableTree vt) {
+                int fieldFlags = modifierFlags(vt.getModifiers());
+                if (isEnumConstant(vt)) {
+                    fieldFlags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_ENUM;
+                }
+                if (!AccessVisibility.shouldIndexMember(fieldFlags, vt.getName().toString())) {
+                    continue;
+                }
                 fields.add(toFieldEntry(vt, classTypeParams, localName));
             } else if (member instanceof MethodTree mt) {
+                String methodName = mt.getName().toString();
+                if (!AccessVisibility.shouldIndexMember(modifierFlags(mt.getModifiers()), methodName)) {
+                    continue;
+                }
                 methods.add(toMethodEntry(mt, classTypeParams, localName));
             } else if (member instanceof ClassTree inner) {
+                if (!AccessVisibility.shouldIndexType(modifierFlags(inner.getModifiers()))) {
+                    continue;
+                }
                 nested.add(inner);
                 String innerName = Interner.intern(localName + "$" + inner.getSimpleName().toString());
                 innerTypes.add(innerName);

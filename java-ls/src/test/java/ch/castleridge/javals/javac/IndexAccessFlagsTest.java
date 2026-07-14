@@ -60,14 +60,10 @@ class IndexAccessFlagsTest {
         // Static interface methods are not "default" methods.
         assertLacks(IndexAccessFlags.methodFlags(entry, s), Flags.DEFAULT);
 
-        MethodEntry p = method(entry, "p");
-        assertHas(IndexAccessFlags.methodFlags(entry, p), Opcodes.ACC_PRIVATE);
-        assertLacks(IndexAccessFlags.methodFlags(entry, p), Opcodes.ACC_PUBLIC);
-
-        MethodEntry ps = method(entry, "ps");
-        assertHas(IndexAccessFlags.methodFlags(entry, ps), Opcodes.ACC_PRIVATE);
-        assertHas(IndexAccessFlags.methodFlags(entry, ps), Opcodes.ACC_STATIC);
-        assertLacks(IndexAccessFlags.methodFlags(entry, ps), Opcodes.ACC_PUBLIC);
+        assertTrue(Arrays.stream(entry.methods()).noneMatch(m -> m.name().equals("p")),
+                "private interface methods must not be indexed");
+        assertTrue(Arrays.stream(entry.methods()).noneMatch(m -> m.name().equals("ps")),
+                "private static interface methods must not be indexed");
     }
 
     @Test

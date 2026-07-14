@@ -28,6 +28,22 @@ import ch.castleridge.javals.indexing.scan.Scanner;
 class SourcePrunerTest {
 
     @Test
+    void keepsPrivateConstructorInPrunedStub() throws Exception {
+        String pruned = prune("""
+                package demo;
+                public class Factory {
+                    private Factory() {}
+                    public static Factory create() { return null; }
+                }
+                """);
+
+        assertTrue(pruned.contains("Factory()"),
+                "private constructor must remain so stub has no implicit public default ctor");
+        assertTrue(pruned.contains("create"));
+        assertTrue(pruned.contains("private"));
+    }
+
+    @Test
     void dropsPrivateMembersAndStubsMethodBodies() throws Exception {
         String pruned = prune("""
                 package demo;
