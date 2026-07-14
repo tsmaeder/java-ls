@@ -19,14 +19,14 @@ public record ClassFileTypeEntry(
         AnnotationRef[] annotations) implements TypeEntry {
 
     public ClassFileTypeEntry {
-        interfaceRefs = EmptyArrays.copyOrEmpty(interfaceRefs, EmptyArrays.TYPE);
-        typeParams = EmptyArrays.copyOrEmpty(typeParams, EmptyArrays.TYPE_PARAM);
-        fields = EmptyArrays.copyOrEmpty(fields, EmptyArrays.FIELD);
-        methods = EmptyArrays.copyOrEmpty(methods, EmptyArrays.METHOD);
-        innerTypeJvmNames = EmptyArrays.copyOrEmpty(innerTypeJvmNames, EmptyArrays.STRING);
-        permittedSubclasses = EmptyArrays.copyOrEmpty(permittedSubclasses, EmptyArrays.TYPE_REF);
-        recordComponents = EmptyArrays.copyOrEmpty(recordComponents, EmptyArrays.RECORD_COMPONENT);
-        annotations = EmptyArrays.copyOrEmpty(annotations, EmptyArrays.ANNOTATION_REF);
+        interfaceRefs = EmptyArrays.orEmpty(interfaceRefs, EmptyArrays.TYPE);
+        typeParams = EmptyArrays.orEmpty(typeParams, EmptyArrays.TYPE_PARAM);
+        fields = EmptyArrays.orEmpty(fields, EmptyArrays.FIELD);
+        methods = EmptyArrays.orEmpty(methods, EmptyArrays.METHOD);
+        innerTypeJvmNames = EmptyArrays.orEmpty(innerTypeJvmNames, EmptyArrays.STRING);
+        permittedSubclasses = EmptyArrays.orEmpty(permittedSubclasses, EmptyArrays.TYPE_REF);
+        recordComponents = EmptyArrays.orEmpty(recordComponents, EmptyArrays.RECORD_COMPONENT);
+        annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION_REF);
     }
 
     /** Backward-compatible constructor without {@link #recordComponents()}. */

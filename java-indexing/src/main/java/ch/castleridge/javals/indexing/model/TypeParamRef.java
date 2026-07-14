@@ -25,7 +25,7 @@ public record TypeParamRef(String name, Type[] bounds) {
         }
         bounds = (bounds == null || bounds.length == 0)
                 ? OBJECT_BOUND
-                : EmptyArrays.copyOrEmpty(bounds, EmptyArrays.TYPE);
+                : EmptyArrays.orEmpty(bounds, EmptyArrays.TYPE);
     }
 
     /** Convenience for the common case of "no declared bound". */

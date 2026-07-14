@@ -25,7 +25,7 @@ public record AnnotationRef(TypeRef annotationType, Map<String, AnnotationValue>
         if (annotationType == null) {
             throw new IllegalArgumentException("annotationType must not be null");
         }
-        values = values == null ? Map.of() : Map.copyOf(values);
+        values = values == null ? Map.of() : values;
     }
 
     /** Best-effort name: binary name when resolved, else the simple name. */

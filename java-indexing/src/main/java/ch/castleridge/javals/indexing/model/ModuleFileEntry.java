@@ -14,6 +14,6 @@ public record ModuleFileEntry(
         if (name == null || name.isEmpty()) {
             throw new IllegalArgumentException("module name must be non-empty");
         }
-        packages = EmptyArrays.copyOrEmpty(packages, EmptyArrays.STRING);
+        packages = EmptyArrays.orEmpty(packages, EmptyArrays.STRING);
     }
 }

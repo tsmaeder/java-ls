@@ -91,7 +91,7 @@ public sealed interface AnnotationValue {
      */
     record Arr(AnnotationValue[] elements) implements AnnotationValue {
         public Arr {
-            elements = EmptyArrays.copyOrEmpty(elements, EmptyArrays.ANNOTATION_VALUE);
+            elements = EmptyArrays.orEmpty(elements, EmptyArrays.ANNOTATION_VALUE);
         }
     }
 

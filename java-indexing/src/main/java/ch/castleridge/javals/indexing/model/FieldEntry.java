@@ -31,7 +31,7 @@ public record FieldEntry(
         AnnotationRef[] annotations) implements IndexEntry {
 
     public FieldEntry {
-        annotations = EmptyArrays.copyOrEmpty(annotations, EmptyArrays.ANNOTATION_REF);
+        annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION_REF);
     }
 
     /** Backward-compatible constructor without a constant value. */

@@ -1,6 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -29,13 +28,13 @@ public final class EmptyArrays {
 
     /**
      * Returns {@code empty} when {@code src} is null or zero-length; otherwise
-     * a defensive copy of {@code src}.
+     * {@code src} itself (callers transfer ownership).
      */
-    public static <T> T[] copyOrEmpty(T[] src, T[] empty) {
+    public static <T> T[] orEmpty(T[] src, T[] empty) {
         if (src == null || src.length == 0) {
             return empty;
         }
-        return Arrays.copyOf(src, src.length);
+        return src;
     }
 
     /**

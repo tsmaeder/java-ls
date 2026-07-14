@@ -51,7 +51,7 @@ public final class Descriptors {
         }
         Type ret = parseOne(descriptor, pos);
         if (ret == null) ret = Type.Primitive.VOID;
-        return new MethodRefs(ret, List.copyOf(params));
+        return new MethodRefs(ret, params);
     }
 
     private static Type parseOne(String desc, int[] pos) {
@@ -96,7 +96,7 @@ public final class Descriptors {
     /** Return value of {@link #parseMethod(String)}. */
     public record MethodRefs(Type returnType, List<Type> paramTypes) {
         public MethodRefs {
-            paramTypes = paramTypes == null ? List.of() : List.copyOf(paramTypes);
+            paramTypes = paramTypes == null ? List.of() : paramTypes;
         }
     }
 }

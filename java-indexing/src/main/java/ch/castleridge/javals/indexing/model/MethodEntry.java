@@ -34,10 +34,10 @@ public record MethodEntry(
         AnnotationRef[] annotations) implements IndexEntry {
 
     public MethodEntry {
-        parameters = EmptyArrays.copyOrEmpty(parameters, EmptyArrays.PARAMETER);
-        throwsTypes = EmptyArrays.copyOrEmpty(throwsTypes, EmptyArrays.TYPE);
-        typeParams = EmptyArrays.copyOrEmpty(typeParams, EmptyArrays.TYPE_PARAM);
-        annotations = EmptyArrays.copyOrEmpty(annotations, EmptyArrays.ANNOTATION_REF);
+        parameters = EmptyArrays.orEmpty(parameters, EmptyArrays.PARAMETER);
+        throwsTypes = EmptyArrays.orEmpty(throwsTypes, EmptyArrays.TYPE);
+        typeParams = EmptyArrays.orEmpty(typeParams, EmptyArrays.TYPE_PARAM);
+        annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION_REF);
     }
 
     /**

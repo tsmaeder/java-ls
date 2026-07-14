@@ -29,8 +29,8 @@ public record SourceResolutionHints(
 
     public SourceResolutionHints {
         sourcePackage = sourcePackage == null ? "" : sourcePackage;
-        singleTypeImports = singleTypeImports == null ? Map.of() : Map.copyOf(singleTypeImports);
-        onDemandImports = EmptyArrays.copyOrEmpty(onDemandImports, EmptyArrays.STRING);
-        siblingSimpleNames = siblingSimpleNames == null ? Set.of() : Set.copyOf(siblingSimpleNames);
+        singleTypeImports = singleTypeImports == null ? Map.of() : singleTypeImports;
+        onDemandImports = EmptyArrays.orEmpty(onDemandImports, EmptyArrays.STRING);
+        siblingSimpleNames = siblingSimpleNames == null ? Set.of() : siblingSimpleNames;
     }
 }

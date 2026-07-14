@@ -25,15 +25,15 @@ public final class SignatureRefs {
             Type returnType,
             List<Type> throwsTypes) {
         public MethodRefs {
-            typeParams = typeParams == null ? List.of() : List.copyOf(typeParams);
-            paramTypes = paramTypes == null ? List.of() : List.copyOf(paramTypes);
-            throwsTypes = throwsTypes == null ? List.of() : List.copyOf(throwsTypes);
+            typeParams = typeParams == null ? List.of() : typeParams;
+            paramTypes = paramTypes == null ? List.of() : paramTypes;
+            throwsTypes = throwsTypes == null ? List.of() : throwsTypes;
         }
     }
 
     public record ClassRefs(Type superClass, List<Type> interfaces) {
         public ClassRefs {
-            interfaces = interfaces == null ? List.of() : List.copyOf(interfaces);
+            interfaces = interfaces == null ? List.of() : interfaces;
         }
     }
 
@@ -245,7 +245,7 @@ public final class SignatureRefs {
 
         List<TypeParamRef> result() {
             flush();
-            return collected.isEmpty() ? List.of() : List.copyOf(collected);
+            return collected.isEmpty() ? List.of() : collected;
         }
     }
 

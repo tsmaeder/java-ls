@@ -33,12 +33,12 @@ public record ModuleEntry(
         if (name == null || name.isEmpty()) {
             throw new IllegalArgumentException("module name must be non-empty");
         }
-        requires = EmptyArrays.copyOrEmpty(requires, EmptyArrays.REQUIRES);
-        exports = EmptyArrays.copyOrEmpty(exports, EmptyArrays.EXPORTS);
-        opens = EmptyArrays.copyOrEmpty(opens, EmptyArrays.OPENS);
-        uses = EmptyArrays.copyOrEmpty(uses, EmptyArrays.STRING);
-        provides = EmptyArrays.copyOrEmpty(provides, EmptyArrays.PROVIDES);
-        packages = EmptyArrays.copyOrEmpty(packages, EmptyArrays.STRING);
+        requires = EmptyArrays.orEmpty(requires, EmptyArrays.REQUIRES);
+        exports = EmptyArrays.orEmpty(exports, EmptyArrays.EXPORTS);
+        opens = EmptyArrays.orEmpty(opens, EmptyArrays.OPENS);
+        uses = EmptyArrays.orEmpty(uses, EmptyArrays.STRING);
+        provides = EmptyArrays.orEmpty(provides, EmptyArrays.PROVIDES);
+        packages = EmptyArrays.orEmpty(packages, EmptyArrays.STRING);
     }
 
     public EntryKind kind() {
@@ -60,7 +60,7 @@ public record ModuleEntry(
             if (packageJvm == null) {
                 throw new IllegalArgumentException("exports.packageJvm must not be null");
             }
-            toModules = EmptyArrays.copyOrEmpty(toModules, EmptyArrays.STRING);
+            toModules = EmptyArrays.orEmpty(toModules, EmptyArrays.STRING);
         }
     }
 
@@ -70,7 +70,7 @@ public record ModuleEntry(
             if (packageJvm == null) {
                 throw new IllegalArgumentException("opens.packageJvm must not be null");
             }
-            toModules = EmptyArrays.copyOrEmpty(toModules, EmptyArrays.STRING);
+            toModules = EmptyArrays.orEmpty(toModules, EmptyArrays.STRING);
         }
     }
 
@@ -80,7 +80,7 @@ public record ModuleEntry(
             if (serviceJvm == null || serviceJvm.isEmpty()) {
                 throw new IllegalArgumentException("provides.serviceJvm must be non-empty");
             }
-            implJvms = EmptyArrays.copyOrEmpty(implJvms, EmptyArrays.STRING);
+            implJvms = EmptyArrays.orEmpty(implJvms, EmptyArrays.STRING);
         }
     }
 }

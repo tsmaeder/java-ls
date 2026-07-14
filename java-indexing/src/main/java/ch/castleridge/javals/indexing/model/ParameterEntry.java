@@ -21,7 +21,7 @@ public record ParameterEntry(
         if (type == null) {
             throw new IllegalArgumentException("type must not be null");
         }
-        annotations = EmptyArrays.copyOrEmpty(annotations, EmptyArrays.ANNOTATION_REF);
+        annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION_REF);
     }
 
     /** Convenience for the common name-only / no-annotations case. */

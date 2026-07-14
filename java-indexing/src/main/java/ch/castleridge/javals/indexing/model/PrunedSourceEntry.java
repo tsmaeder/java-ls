@@ -16,7 +16,7 @@ public record PrunedSourceEntry(
         CharSequence prunedText) {
 
     public PrunedSourceEntry {
-        topLevelBinaryNames = EmptyArrays.copyOrEmpty(topLevelBinaryNames, EmptyArrays.STRING);
+        topLevelBinaryNames = EmptyArrays.orEmpty(topLevelBinaryNames, EmptyArrays.STRING);
     }
 
     public String jvmOwnerName() {

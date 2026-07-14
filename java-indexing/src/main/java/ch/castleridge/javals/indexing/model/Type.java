@@ -72,7 +72,7 @@ public sealed interface Type
             if (inner == null) {
                 throw new IllegalArgumentException("inner must not be null");
             }
-            annotations = EmptyArrays.copyOrEmpty(annotations, EmptyArrays.ANNOTATION_REF);
+            annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION_REF);
             if (annotations.length == 0) {
                 throw new IllegalArgumentException("annotations must be non-empty - "
                         + "use the bare inner Type when there are no annotations");
@@ -157,7 +157,7 @@ public sealed interface Type
             if (raw == null) {
                 throw new IllegalArgumentException("raw must not be null");
             }
-            typeArgs = EmptyArrays.copyOrEmpty(typeArgs, EmptyArrays.TYPE);
+            typeArgs = EmptyArrays.orEmpty(typeArgs, EmptyArrays.TYPE);
         }
     }
 
