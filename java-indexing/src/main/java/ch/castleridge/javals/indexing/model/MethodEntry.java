@@ -1,8 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
  * A single method (or constructor) declaration attached to a
  * {@link TypeEntry}. Return type, parameter types and thrown types are
@@ -25,24 +22,22 @@ import java.util.List;
  * table.
  */
 public record MethodEntry(
-        String resourceUri,
-        String jvmOwnerName,
         int modifiers,
         String name,
         Type returnType,
-        List<ParameterEntry> parameters,
-        List<Type> throwsTypes,
-        List<TypeParamRef> typeParams,
+        ParameterEntry[] parameters,
+        Type[] throwsTypes,
+        TypeParamRef[] typeParams,
         boolean varargs,
         boolean hasBody,
         AnnotationValue annotationDefault,
-        List<AnnotationRef> annotations) implements IndexEntry {
+        AnnotationRef[] annotations) implements IndexEntry {
 
     public MethodEntry {
-        parameters = parameters == null ? List.of() : List.copyOf(parameters);
-        throwsTypes = throwsTypes == null ? List.of() : List.copyOf(throwsTypes);
-        typeParams = typeParams == null ? List.of() : List.copyOf(typeParams);
-        annotations = annotations == null ? List.of() : List.copyOf(annotations);
+        parameters = EmptyArrays.copyOrEmpty(parameters, EmptyArrays.PARAMETER);
+        throwsTypes = EmptyArrays.copyOrEmpty(throwsTypes, EmptyArrays.TYPE);
+        typeParams = EmptyArrays.copyOrEmpty(typeParams, EmptyArrays.TYPE_PARAM);
+        annotations = EmptyArrays.copyOrEmpty(annotations, EmptyArrays.ANNOTATION_REF);
     }
 
     /**
@@ -60,39 +55,39 @@ public record MethodEntry(
      * callers that only need {@link Type}s and don't care about names,
      * modifiers or per-parameter annotations.
      */
-    public List<Type> paramTypes() {
-        if (parameters.isEmpty()) return List.of();
-        List<Type> out = new ArrayList<>(parameters.size());
-        for (ParameterEntry p : parameters) out.add(p.type());
-        return List.copyOf(out);
+    public Type[] paramTypes() {
+        if (parameters.length == 0) {
+            return EmptyArrays.TYPE;
+        }
+        Type[] out = new Type[parameters.length];
+        for (int i = 0; i < parameters.length; i++) {
+            out[i] = parameters[i].type();
+        }
+        return out;
     }
 
     /** Backward-compatible constructor without method type parameters. */
     public MethodEntry(
-            String resourceUri,
-            String jvmOwnerName,
             int modifiers,
             String name,
             Type returnType,
-            List<Type> paramTypes,
-            List<Type> throwsTypes,
-            List<AnnotationRef> annotations) {
-        this(resourceUri, jvmOwnerName, modifiers, name, returnType,
-                paramTypesOf(paramTypes), throwsTypes, List.of(), false, true, null, annotations);
+            Type[] paramTypes,
+            Type[] throwsTypes,
+            AnnotationRef[] annotations) {
+        this(modifiers, name, returnType,
+                paramTypesOf(paramTypes), throwsTypes, EmptyArrays.TYPE_PARAM, false, true, null, annotations);
     }
 
     /** Backward-compatible constructor without varargs/hasBody. */
     public MethodEntry(
-            String resourceUri,
-            String jvmOwnerName,
             int modifiers,
             String name,
             Type returnType,
-            List<Type> paramTypes,
-            List<Type> throwsTypes,
-            List<TypeParamRef> typeParams,
-            List<AnnotationRef> annotations) {
-        this(resourceUri, jvmOwnerName, modifiers, name, returnType,
+            Type[] paramTypes,
+            Type[] throwsTypes,
+            TypeParamRef[] typeParams,
+            AnnotationRef[] annotations) {
+        this(modifiers, name, returnType,
                 paramTypesOf(paramTypes), throwsTypes, typeParams, false, true, null, annotations);
     }
 
@@ -106,30 +101,30 @@ public record MethodEntry(
      * canonical constructor directly.
      */
     public static MethodEntry ofTypes(
-            String resourceUri,
-            String jvmOwnerName,
             int modifiers,
             String name,
             Type returnType,
-            List<Type> paramTypes,
-            List<Type> throwsTypes,
-            List<TypeParamRef> typeParams,
+            Type[] paramTypes,
+            Type[] throwsTypes,
+            TypeParamRef[] typeParams,
             boolean varargs,
             boolean hasBody,
             AnnotationValue annotationDefault,
-            List<AnnotationRef> annotations) {
-        return new MethodEntry(resourceUri, jvmOwnerName, modifiers, name, returnType,
+            AnnotationRef[] annotations) {
+        return new MethodEntry(modifiers, name, returnType,
                 paramTypesOf(paramTypes), throwsTypes, typeParams, varargs, hasBody,
                 annotationDefault, annotations);
     }
 
-    private static List<ParameterEntry> paramTypesOf(List<Type> types) {
-        if (types == null || types.isEmpty()) return List.of();
-        List<ParameterEntry> out = new ArrayList<>(types.size());
-        for (Type t : types) {
-            out.add(new ParameterEntry(null, 0, t, List.of()));
+    private static ParameterEntry[] paramTypesOf(Type[] types) {
+        if (types == null || types.length == 0) {
+            return EmptyArrays.PARAMETER;
         }
-        return List.copyOf(out);
+        ParameterEntry[] out = new ParameterEntry[types.length];
+        for (int i = 0; i < types.length; i++) {
+            out[i] = new ParameterEntry(null, 0, types[i], EmptyArrays.ANNOTATION_REF);
+        }
+        return out;
     }
 
     @Override

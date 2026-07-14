@@ -1,6 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -55,26 +54,26 @@ public sealed interface Type
     /**
      * A decorator that attaches type-use annotations to an inner
      * {@link Type} without forcing every variant to carry an
-     * annotations list itself (which would balloon the canonical
+     * annotations array itself (which would balloon the canonical
      * constructors and force {@link Primitive} to stop being an enum).
      *
      * <p>The inner Type may itself be another {@code Annotated}; the
      * outermost annotations are the ones that apply at this position in
      * the type tree. {@link Annotated#annotations()} is always non-empty
-     * (callers should use the bare inner {@link Type} when the list
+     * (callers should use the bare inner {@link Type} when the array
      * would be empty).
      *
      * <p>{@link Annotated#unwrap()} strips any annotation wrappers and
      * returns the underlying inner type, which is what symbol-level
      * resolution typically cares about.
      */
-    record Annotated(Type inner, List<AnnotationRef> annotations) implements Type {
+    record Annotated(Type inner, AnnotationRef[] annotations) implements Type {
         public Annotated {
             if (inner == null) {
                 throw new IllegalArgumentException("inner must not be null");
             }
-            annotations = annotations == null ? List.of() : List.copyOf(annotations);
-            if (annotations.isEmpty()) {
+            annotations = EmptyArrays.copyOrEmpty(annotations, EmptyArrays.ANNOTATION_REF);
+            if (annotations.length == 0) {
                 throw new IllegalArgumentException("annotations must be non-empty - "
                         + "use the bare inner Type when there are no annotations");
             }
@@ -84,13 +83,13 @@ public sealed interface Type
          * Convenience factory that returns {@code inner} directly when
          * {@code annotations} is empty, avoiding pointless wrapping.
          */
-        public static Type wrap(Type inner, List<AnnotationRef> annotations) {
-            if (annotations == null || annotations.isEmpty()) return inner;
+        public static Type wrap(Type inner, AnnotationRef[] annotations) {
+            if (annotations == null || annotations.length == 0) return inner;
             if (inner instanceof Annotated a) {
-                List<AnnotationRef> merged = new java.util.ArrayList<>(a.annotations().size() + annotations.size());
-                merged.addAll(a.annotations());
-                merged.addAll(annotations);
-                return new Annotated(a.inner(), List.copyOf(merged));
+                AnnotationRef[] merged = new AnnotationRef[a.annotations().length + annotations.length];
+                System.arraycopy(a.annotations(), 0, merged, 0, a.annotations().length);
+                System.arraycopy(annotations, 0, merged, a.annotations().length, annotations.length);
+                return new Annotated(a.inner(), merged);
             }
             return new Annotated(inner, annotations);
         }
@@ -153,12 +152,12 @@ public sealed interface Type
      * A parameterized type such as {@code List<String>} or
      * {@code Expectation<? super T>}.
      */
-    record Parameterized(TypeRef raw, List<Type> typeArgs) implements Type {
+    record Parameterized(TypeRef raw, Type[] typeArgs) implements Type {
         public Parameterized {
             if (raw == null) {
                 throw new IllegalArgumentException("raw must not be null");
             }
-            typeArgs = typeArgs == null ? List.of() : List.copyOf(typeArgs);
+            typeArgs = EmptyArrays.copyOrEmpty(typeArgs, EmptyArrays.TYPE);
         }
     }
 

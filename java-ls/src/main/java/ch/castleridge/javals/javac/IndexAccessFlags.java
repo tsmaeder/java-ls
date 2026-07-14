@@ -1,7 +1,5 @@
 package ch.castleridge.javals.javac;
 
-import java.util.List;
-
 import org.objectweb.asm.Opcodes;
 
 import com.sun.tools.javac.code.Flags;
@@ -152,7 +150,7 @@ final class IndexAccessFlags {
      * symbol would otherwise miss (attaching the {@code Attribute.Compound}
      * alone is not enough).
      */
-    static long withDeprecation(long flags, List<AnnotationRef> annotations) {
+    static long withDeprecation(long flags, AnnotationRef[] annotations) {
         if (annotations == null) return flags;
         for (AnnotationRef ref : annotations) {
             if (!"java/lang/Deprecated".equals(ref.jvmName())) continue;

@@ -1,7 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.util.List;
-
 /**
  * A single formal parameter of a {@link MethodEntry}.
  *
@@ -17,17 +15,17 @@ public record ParameterEntry(
         String name,
         int modifiers,
         Type type,
-        List<AnnotationRef> annotations) {
+        AnnotationRef[] annotations) {
 
     public ParameterEntry {
         if (type == null) {
             throw new IllegalArgumentException("type must not be null");
         }
-        annotations = annotations == null ? List.of() : List.copyOf(annotations);
+        annotations = EmptyArrays.copyOrEmpty(annotations, EmptyArrays.ANNOTATION_REF);
     }
 
     /** Convenience for the common name-only / no-annotations case. */
     public static ParameterEntry of(Type type) {
-        return new ParameterEntry(null, 0, type, List.of());
+        return new ParameterEntry(null, 0, type, EmptyArrays.ANNOTATION_REF);
     }
 }

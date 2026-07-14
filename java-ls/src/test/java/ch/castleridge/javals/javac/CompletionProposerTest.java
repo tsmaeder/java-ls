@@ -15,6 +15,7 @@ import com.sun.source.tree.CompilationUnitTree;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
+import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.Type;
@@ -298,13 +299,12 @@ class CompletionProposerTest {
                 "java/lang/Object",
                 0x0001,
                 null,
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(ctor("java/lang/Object")),
-                List.of(),
-                List.of(),
-                List.of());
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                new MethodEntry[]{ctor("java/lang/Object")},
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF);
     }
 
     private static ClassFileTypeEntry stringType() {
@@ -314,13 +314,12 @@ class CompletionProposerTest {
                 "java/lang/String",
                 0x0011 /* ACC_PUBLIC | ACC_FINAL */,
                 TypeRef.resolved("java/lang/Object"),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(ctor("java/lang/String")),
-                List.of(),
-                List.of(),
-                List.of());
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                new MethodEntry[]{ctor("java/lang/String")},
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF);
     }
 
     private static ClassFileTypeEntry widgetType() {
@@ -330,27 +329,25 @@ class CompletionProposerTest {
                 "com/example/Widget",
                 0x0001,
                 TypeRef.resolved("java/lang/Object"),
-                List.of(),
-                List.of(),
-                List.of(new FieldEntry(
-                        "index:///com/example/Widget.class#value",
-                        "com/example/Widget",
-                        0x0001 /* ACC_PUBLIC */,
-                        "value",
-                        Type.Primitive.INT,
-                        List.of())),
-                List.of(ctor("com/example/Widget"), new MethodEntry(
-                        "index:///com/example/Widget.class#getName",
-                        "com/example/Widget",
-                        0x0001 /* ACC_PUBLIC */,
-                        "getName",
-                        TypeRef.resolved("java/lang/String"),
-                        List.of(),
-                        List.of(),
-                        List.of())),
-                List.of(),
-                List.of(),
-                List.of());
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                new FieldEntry[]{
+                        new FieldEntry(
+                                0x0001 /* ACC_PUBLIC */,
+                                "value",
+                                Type.Primitive.INT,
+                                EmptyArrays.ANNOTATION_REF)},
+                new MethodEntry[]{
+                        ctor("com/example/Widget"),
+                        new MethodEntry(
+                                0x0001 /* ACC_PUBLIC */,
+                                "getName",
+                                TypeRef.resolved("java/lang/String"),
+                                EmptyArrays.TYPE,
+                                EmptyArrays.TYPE,
+                                EmptyArrays.ANNOTATION_REF)},
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF);
     }
 
     private static ClassFileTypeEntry constantsType() {
@@ -360,19 +357,17 @@ class CompletionProposerTest {
                 "com/example/Constants",
                 0x0001,
                 TypeRef.resolved("java/lang/Object"),
-                List.of(),
-                List.of(),
-                List.of(new FieldEntry(
-                        "index:///com/example/Constants.class#MAX",
-                        "com/example/Constants",
-                        0x0019 /* ACC_PUBLIC | ACC_STATIC | ACC_FINAL */,
-                        "MAX",
-                        Type.Primitive.INT,
-                        List.of())),
-                List.of(ctor("com/example/Constants")),
-                List.of(),
-                List.of(),
-                List.of());
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                new FieldEntry[]{
+                        new FieldEntry(
+                                0x0019 /* ACC_PUBLIC | ACC_STATIC | ACC_FINAL */,
+                                "MAX",
+                                Type.Primitive.INT,
+                                EmptyArrays.ANNOTATION_REF)},
+                new MethodEntry[]{ctor("com/example/Constants")},
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF);
     }
 
     private static ClassFileTypeEntry classFileType(String sourceUri, String jvmOwnerName) {
@@ -382,25 +377,22 @@ class CompletionProposerTest {
                 jvmOwnerName,
                 0x0001,
                 TypeRef.resolved("java/lang/Object"),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(ctor(jvmOwnerName)),
-                List.of(),
-                List.of(),
-                List.of());
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                new MethodEntry[]{ctor(jvmOwnerName)},
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF);
     }
 
     private static MethodEntry ctor(String jvmOwnerName) {
         return new MethodEntry(
-                "index:///" + jvmOwnerName + "#<init>",
-                jvmOwnerName,
                 0x0001 /* ACC_PUBLIC */,
                 "<init>",
                 Type.Primitive.VOID,
-                List.of(),
-                List.of(),
-                List.of());
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE,
+                EmptyArrays.ANNOTATION_REF);
     }
 
     // ---- helpers ----

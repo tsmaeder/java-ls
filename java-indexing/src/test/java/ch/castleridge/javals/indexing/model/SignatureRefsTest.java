@@ -1,5 +1,7 @@
 package ch.castleridge.javals.indexing.model;
 
+import java.util.Arrays;
+
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.MethodVisitor;
@@ -21,7 +23,7 @@ class SignatureRefsTest {
         assertNotNull(refs);
         assertEquals(1, refs.paramTypes().size());
         Type.Parameterized param = assertInstanceOf(Type.Parameterized.class, refs.paramTypes().get(0));
-        Type.Wildcard wildcard = assertInstanceOf(Type.Wildcard.class, param.typeArgs().get(0));
+        Type.Wildcard wildcard = assertInstanceOf(Type.Wildcard.class, param.typeArgs()[0]);
         assertEquals(Type.Wildcard.BoundKind.SUPER, wildcard.kind());
         assertInstanceOf(Type.TypeVariable.class, wildcard.bound());
     }
@@ -39,7 +41,7 @@ class SignatureRefsTest {
                 assertInstanceOf(Type.Parameterized.class, refs.interfaces().get(1));
         TypeRef.Resolved raw = assertInstanceOf(TypeRef.Resolved.class, completionStage.raw());
         assertEquals("java/util/concurrent/CompletionStage", raw.jvmBinaryName());
-        Type.TypeVariable typeArg = assertInstanceOf(Type.TypeVariable.class, completionStage.typeArgs().get(0));
+        Type.TypeVariable typeArg = assertInstanceOf(Type.TypeVariable.class, completionStage.typeArgs()[0]);
         assertEquals("U", typeArg.name());
     }
 
@@ -60,11 +62,11 @@ class SignatureRefsTest {
 
         TypeEntry cf = index.get("pkg/Cf");
         assertNotNull(cf);
-        assertEquals(1, cf.interfaceRefs().size());
-        Type.Parameterized cs = assertInstanceOf(Type.Parameterized.class, cf.interfaceRefs().get(0));
+        assertEquals(1, cf.interfaceRefs().length);
+        Type.Parameterized cs = assertInstanceOf(Type.Parameterized.class, cf.interfaceRefs()[0]);
         assertEquals("java/util/concurrent/CompletionStage",
                 assertInstanceOf(TypeRef.Resolved.class, cs.raw()).jvmBinaryName());
-        assertEquals("T", assertInstanceOf(Type.TypeVariable.class, cs.typeArgs().get(0)).name());
+        assertEquals("T", assertInstanceOf(Type.TypeVariable.class, cs.typeArgs()[0]).name());
     }
 
     @Test
@@ -75,23 +77,23 @@ class SignatureRefsTest {
 
         TypeParamRef t = params.get(0);
         assertEquals("T", t.name());
-        assertEquals(2, t.bounds().size());
-        Type.Parameterized comparable = assertInstanceOf(Type.Parameterized.class, t.bounds().get(0));
+        assertEquals(2, t.bounds().length);
+        Type.Parameterized comparable = assertInstanceOf(Type.Parameterized.class, t.bounds()[0]);
         assertEquals("java/lang/Comparable",
                 assertInstanceOf(TypeRef.Resolved.class, comparable.raw()).jvmBinaryName());
         Type.TypeVariable comparableArg =
-                assertInstanceOf(Type.TypeVariable.class, comparable.typeArgs().get(0));
+                assertInstanceOf(Type.TypeVariable.class, comparable.typeArgs()[0]);
         assertEquals("T", comparableArg.name());
         assertEquals("java/io/Serializable",
-                assertInstanceOf(TypeRef.Resolved.class, t.bounds().get(1)).jvmBinaryName());
+                assertInstanceOf(TypeRef.Resolved.class, t.bounds()[1]).jvmBinaryName());
 
         TypeParamRef u = params.get(1);
         assertEquals("U", u.name());
         // Object-only bound is normalised by TypeParamRef back to the
         // canonical singleton list - nothing fancy required from callers.
-        assertEquals(1, u.bounds().size());
+        assertEquals(1, u.bounds().length);
         assertEquals("java/lang/Object",
-                assertInstanceOf(TypeRef.Resolved.class, u.bounds().get(0)).jvmBinaryName());
+                assertInstanceOf(TypeRef.Resolved.class, u.bounds()[0]).jvmBinaryName());
     }
 
     @Test
@@ -102,9 +104,9 @@ class SignatureRefsTest {
         assertEquals(1, refs.typeParams().size());
         TypeParamRef e = refs.typeParams().get(0);
         assertEquals("E", e.name());
-        assertEquals(1, e.bounds().size());
+        assertEquals(1, e.bounds().length);
         assertEquals("java/lang/Throwable",
-                assertInstanceOf(TypeRef.Resolved.class, e.bounds().get(0)).jvmBinaryName());
+                assertInstanceOf(TypeRef.Resolved.class, e.bounds()[0]).jvmBinaryName());
     }
 
     @Test
@@ -129,12 +131,12 @@ class SignatureRefsTest {
                 cw.toByteArray(),
                 index);
 
-        MethodEntry expecting = index.get("pkg/Future").methods().stream()
+        MethodEntry expecting = Arrays.stream(index.get("pkg/Future").methods())
                 .filter(m -> m.name().equals("expecting"))
                 .findFirst()
                 .orElseThrow();
-        Type.Parameterized param = assertInstanceOf(Type.Parameterized.class, expecting.paramTypes().get(0));
-        Type.Wildcard wildcard = assertInstanceOf(Type.Wildcard.class, param.typeArgs().get(0));
+        Type.Parameterized param = assertInstanceOf(Type.Parameterized.class, expecting.paramTypes()[0]);
+        Type.Wildcard wildcard = assertInstanceOf(Type.Wildcard.class, param.typeArgs()[0]);
         assertEquals(Type.Wildcard.BoundKind.SUPER, wildcard.kind());
     }
 }

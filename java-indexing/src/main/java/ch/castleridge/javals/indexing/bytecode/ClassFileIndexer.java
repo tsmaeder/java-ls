@@ -28,6 +28,7 @@ import ch.castleridge.javals.indexing.model.AnnotationValue;
 import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.Descriptors;
+import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
@@ -168,7 +169,8 @@ public final class ClassFileIndexer {
 
         ModuleFileEntry toModuleFileEntry() {
             if (moduleName == null) return null;
-            return new ModuleFileEntry(uri, sourceUri, moduleName, packages);
+            return new ModuleFileEntry(uri, sourceUri, moduleName,
+                    EmptyArrays.toArray(packages, EmptyArrays.STRING));
         }
     }
 
@@ -279,19 +281,17 @@ public final class ClassFileIndexer {
                     // the first cut.
                     if (typePath != null) return null;
                     return CapturingAnnotationVisitor.forDeclaration(d, ann ->
-                            fieldTypeSlot[0] = Type.Annotated.wrap(fieldTypeSlot[0], List.of(ann)));
+                            fieldTypeSlot[0] = Type.Annotated.wrap(fieldTypeSlot[0], new AnnotationRef[]{ann}));
                 }
 
                 @Override
                 public void visitEnd() {
                     fields.add(new FieldEntry(
-                            uri,
-                            jvmName,
                             fAccess,
                             fieldName,
                             fieldTypeSlot[0],
                             constantValue,
-                            fAnnotations));
+                            EmptyArrays.toArray(fAnnotations, EmptyArrays.ANNOTATION_REF)));
                 }
             };
         }
@@ -388,18 +388,18 @@ public final class ClassFileIndexer {
                     int sort = new TypeReference(typeRef).getSort();
                     return switch (sort) {
                         case TypeReference.METHOD_RETURN -> CapturingAnnotationVisitor.forDeclaration(d, ann ->
-                                returnTypeSlot[0] = Type.Annotated.wrap(returnTypeSlot[0], List.of(ann)));
+                                returnTypeSlot[0] = Type.Annotated.wrap(returnTypeSlot[0], new AnnotationRef[]{ann}));
                         case TypeReference.METHOD_FORMAL_PARAMETER -> {
                             int idx = new TypeReference(typeRef).getFormalParameterIndex();
                             if (idx < 0 || idx >= paramTypeSlots.length) yield null;
                             yield CapturingAnnotationVisitor.forDeclaration(d, ann ->
-                                    paramTypeSlots[idx] = Type.Annotated.wrap(paramTypeSlots[idx], List.of(ann)));
+                                    paramTypeSlots[idx] = Type.Annotated.wrap(paramTypeSlots[idx], new AnnotationRef[]{ann}));
                         }
                         case TypeReference.THROWS -> {
                             int idx = new TypeReference(typeRef).getExceptionIndex();
                             if (idx < 0 || idx >= throwsSlots.length) yield null;
                             yield CapturingAnnotationVisitor.forDeclaration(d, ann ->
-                                    throwsSlots[idx] = Type.Annotated.wrap(throwsSlots[idx], List.of(ann)));
+                                    throwsSlots[idx] = Type.Annotated.wrap(throwsSlots[idx], new AnnotationRef[]{ann}));
                         }
                         default -> null;
                     };
@@ -407,27 +407,25 @@ public final class ClassFileIndexer {
 
                 @Override
                 public void visitEnd() {
-                    List<ParameterEntry> params = new ArrayList<>(paramTypes.size());
+                    ParameterEntry[] params = new ParameterEntry[paramTypes.size()];
                     for (int i = 0; i < paramTypes.size(); i++) {
-                        params.add(new ParameterEntry(
+                        params[i] = new ParameterEntry(
                                 parameterNames[i],
                                 parameterModifiers[i],
                                 paramTypeSlots[i],
-                                parameterAnnotations[i]));
+                                EmptyArrays.toArray(parameterAnnotations[i], EmptyArrays.ANNOTATION_REF));
                     }
                     methods.add(new MethodEntry(
-                            uri,
-                            jvmName,
                             mAccess,
                             methodName,
                             returnTypeSlot[0],
-                            List.copyOf(params),
-                            List.of(throwsSlots),
-                            methodTypeParams,
+                            params,
+                            throwsSlots,
+                            EmptyArrays.toArray(methodTypeParams, EmptyArrays.TYPE_PARAM),
                             varargs,
                             hasBody,
                             annotationDefaultSlot[0],
-                            mAnnotations));
+                            EmptyArrays.toArray(mAnnotations, EmptyArrays.ANNOTATION_REF)));
                 }
             };
         }
@@ -493,7 +491,7 @@ public final class ClassFileIndexer {
                     if (packaze == null) return;
                     exports.add(new ModuleEntry.Exports(
                             Interner.intern(packaze),
-                            modules == null ? List.of() : asInternedList(modules),
+                            asInternedArray(modules),
                             access));
                 }
 
@@ -502,7 +500,7 @@ public final class ClassFileIndexer {
                     if (packaze == null) return;
                     opens.add(new ModuleEntry.Opens(
                             Interner.intern(packaze),
-                            modules == null ? List.of() : asInternedList(modules),
+                            asInternedArray(modules),
                             access));
                 }
 
@@ -517,7 +515,7 @@ public final class ClassFileIndexer {
                     if (service == null) return;
                     provides.add(new ModuleEntry.Provides(
                             Interner.intern(service),
-                            providers == null ? List.of() : asInternedList(providers)));
+                            asInternedArray(providers)));
                 }
 
                 @Override
@@ -528,24 +526,27 @@ public final class ClassFileIndexer {
                             modName,
                             modVersion,
                             modFlags,
-                            requires,
-                            exports,
-                            opens,
-                            uses,
-                            provides,
-                            List.copyOf(modulePackages),
+                            EmptyArrays.toArray(requires, EmptyArrays.REQUIRES),
+                            EmptyArrays.toArray(exports, EmptyArrays.EXPORTS),
+                            EmptyArrays.toArray(opens, EmptyArrays.OPENS),
+                            EmptyArrays.toArray(uses, EmptyArrays.STRING),
+                            EmptyArrays.toArray(provides, EmptyArrays.PROVIDES),
+                            EmptyArrays.toArray(modulePackages, EmptyArrays.STRING),
                             mainClass);
                 }
             };
         }
 
-        private static List<String> asInternedList(String[] arr) {
-            if (arr.length == 0) return List.of();
-            List<String> out = new ArrayList<>(arr.length);
+        private static String[] asInternedArray(String[] arr) {
+            if (arr == null || arr.length == 0) return EmptyArrays.STRING;
+            String[] out = new String[arr.length];
+            int n = 0;
             for (String s : arr) {
-                if (s != null) out.add(Interner.intern(s));
+                if (s != null) out[n++] = Interner.intern(s);
             }
-            return List.copyOf(out);
+            if (n == 0) return EmptyArrays.STRING;
+            if (n == out.length) return out;
+            return java.util.Arrays.copyOf(out, n);
         }
 
         @Override
@@ -576,7 +577,8 @@ public final class ClassFileIndexer {
                 @Override
                 public void visitEnd() {
                     recordComponents.add(new RecordComponentEntry(
-                            componentName, finalComponentType, componentAnnotations));
+                            componentName, finalComponentType,
+                            EmptyArrays.toArray(componentAnnotations, EmptyArrays.ANNOTATION_REF)));
                 }
             };
         }
@@ -598,14 +600,14 @@ public final class ClassFileIndexer {
                     jvmName,
                     access,
                     superRef,
-                    interfaces,
-                    typeParams,
-                    fields,
-                    methods,
-                    innerTypes,
-                    permittedSubclasses,
-                    recordComponents,
-                    annotations);
+                    EmptyArrays.toArray(interfaces, EmptyArrays.TYPE),
+                    EmptyArrays.toArray(typeParams, EmptyArrays.TYPE_PARAM),
+                    EmptyArrays.toArray(fields, EmptyArrays.FIELD),
+                    EmptyArrays.toArray(methods, EmptyArrays.METHOD),
+                    EmptyArrays.toArray(innerTypes, EmptyArrays.STRING),
+                    EmptyArrays.toArray(permittedSubclasses, EmptyArrays.TYPE_REF),
+                    EmptyArrays.toArray(recordComponents, EmptyArrays.RECORD_COMPONENT),
+                    EmptyArrays.toArray(annotations, EmptyArrays.ANNOTATION_REF));
         }
     }
 
@@ -702,7 +704,8 @@ public final class ClassFileIndexer {
                         new AnnotationRef(TypeRef.resolved(jvmNameFor(descriptor)), values));
                 case NESTED -> valueSink.accept(new AnnotationValue.Nested(
                         new AnnotationRef(TypeRef.resolved(jvmNameFor(descriptor)), values)));
-                case ARRAY -> valueSink.accept(new AnnotationValue.Arr(arrayElements));
+                case ARRAY -> valueSink.accept(new AnnotationValue.Arr(
+                        EmptyArrays.toArray(arrayElements, EmptyArrays.ANNOTATION_VALUE)));
                 case SINGLE_VALUE -> {
                     // AnnotationDefault may have zero or one captured value.
                     // If zero, there's nothing to deliver and the entry
@@ -761,11 +764,12 @@ public final class ClassFileIndexer {
                 return new AnnotationValue.Primitive(value);
             }
             if (value.getClass().isArray()) {
-                List<AnnotationValue> elements = new ArrayList<>();
                 int n = java.lang.reflect.Array.getLength(value);
+                if (n == 0) return new AnnotationValue.Arr(EmptyArrays.ANNOTATION_VALUE);
+                AnnotationValue[] elements = new AnnotationValue[n];
                 for (int i = 0; i < n; i++) {
                     Object e = java.lang.reflect.Array.get(value, i);
-                    elements.add(primitiveOrStringOrClassOrArray(e));
+                    elements[i] = primitiveOrStringOrClassOrArray(e);
                 }
                 return new AnnotationValue.Arr(elements);
             }

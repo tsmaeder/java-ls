@@ -375,7 +375,7 @@ public final class IndexClassReader extends ClassReader {
     }
 
     private void enterCanonicalRecordConstructor(ClassSymbol c, TypeEntry entry) {
-        if (entry.recordComponents().isEmpty()) return;
+        if (entry.recordComponents().length == 0) return;
 
         ListBuffer<Type> argtypes = new ListBuffer<>();
         for (RecordComponentEntry rc : entry.recordComponents()) {
@@ -511,7 +511,7 @@ public final class IndexClassReader extends ClassReader {
      * non-listed subtypes.
      */
     private void readPermittedSubclasses(ClassSymbol c, TypeEntry entry) {
-        if (entry.permittedSubclasses().isEmpty()) return;
+        if (entry.permittedSubclasses().length == 0) return;
         ListBuffer<Symbol> permitted = new ListBuffer<>();
         for (TypeRef ref : entry.permittedSubclasses()) {
             ClassSymbol sym = resolver.resolveTypeRef(ref, currentModule, entry);
@@ -529,7 +529,7 @@ public final class IndexClassReader extends ClassReader {
      * synthesized accessor methods have been entered.
      */
     private void readRecordComponents(ClassSymbol c, TypeEntry entry) {
-        if (entry.recordComponents().isEmpty()) return;
+        if (entry.recordComponents().length == 0) return;
         ListBuffer<RecordComponent> components = new ListBuffer<>();
         for (RecordComponentEntry rc : entry.recordComponents()) {
             Type type = resolveType(rc.type(), currentModule, entry);
@@ -575,7 +575,7 @@ public final class IndexClassReader extends ClassReader {
      */
     private List<VarSymbol> readParameters(MethodEntry method, MethodSymbol m,
                                            ModuleSymbol module, TypeEntry entry) {
-        if (method.parameters().isEmpty()) return List.nil();
+        if (method.parameters().length == 0) return List.nil();
         ListBuffer<VarSymbol> params = new ListBuffer<>();
         int index = 0;
         for (ParameterEntry p : method.parameters()) {
@@ -711,11 +711,11 @@ public final class IndexClassReader extends ClassReader {
      * references (e.g. {@code <T extends Comparable<U>, U>}) resolve
      * through {@link #lookupTypeVar(String)}.
      */
-    private List<Type> enterTypeParams(java.util.List<TypeParamRef> refs,
+    private List<Type> enterTypeParams(TypeParamRef[] refs,
                                        Symbol owner,
                                        ModuleSymbol module,
                                        TypeEntry entry) {
-        if (refs.isEmpty()) return List.nil();
+        if (refs.length == 0) return List.nil();
         ListBuffer<Type> out = new ListBuffer<>();
         for (TypeParamRef tp : refs) {
             TypeVar tv = newTypeVar(tp.name(), owner);
@@ -725,9 +725,9 @@ public final class IndexClassReader extends ClassReader {
         List<Type> formals = out.toList();
         int idx = 0;
         for (Type formal : formals) {
-            TypeParamRef ref = refs.get(idx++);
+            TypeParamRef ref = refs[idx++];
             if (!(formal instanceof TypeVar tv)) continue;
-            if (ref.bounds().isEmpty()) continue;
+            if (ref.bounds().length == 0) continue;
 
             ListBuffer<Type> resolved = new ListBuffer<>();
             boolean allInterfaces = true;

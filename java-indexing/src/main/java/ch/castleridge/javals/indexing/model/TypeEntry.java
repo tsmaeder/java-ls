@@ -1,30 +1,32 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.util.List;
-
 /**
  * Common surface for indexed type declarations regardless of origin
  * (source parser or classfile parser). Origin-specific payload is carried
  * by {@link SourceTypeEntry} and {@link ClassFileTypeEntry}.
  */
 public sealed interface TypeEntry extends IndexEntry permits SourceTypeEntry, ClassFileTypeEntry {
+    String resourceUri();
+
     String sourceUri();
+
+    String jvmOwnerName();
 
     Type superRef();
 
-    List<Type> interfaceRefs();
+    Type[] interfaceRefs();
 
-    List<TypeParamRef> typeParams();
+    TypeParamRef[] typeParams();
 
-    List<FieldEntry> fields();
+    FieldEntry[] fields();
 
-    List<MethodEntry> methods();
+    MethodEntry[] methods();
 
-    List<String> innerTypeJvmNames();
+    String[] innerTypeJvmNames();
 
-    List<TypeRef> permittedSubclasses();
+    TypeRef[] permittedSubclasses();
 
-    List<RecordComponentEntry> recordComponents();
+    RecordComponentEntry[] recordComponents();
 
     default String jvmName() {
         return jvmOwnerName();

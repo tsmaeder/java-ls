@@ -1,7 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.util.List;
-
 /**
  * Indexed type declaration produced from source parsing.
  */
@@ -12,25 +10,25 @@ public record SourceTypeEntry(
         int modifiers,
         TypeDeclKind declKind,
         Type superRef,
-        List<Type> interfaceRefs,
-        List<TypeParamRef> typeParams,
-        List<FieldEntry> fields,
-        List<MethodEntry> methods,
-        List<String> innerTypeJvmNames,
-        List<TypeRef> permittedSubclasses,
-        List<RecordComponentEntry> recordComponents,
-        List<AnnotationRef> annotations,
+        Type[] interfaceRefs,
+        TypeParamRef[] typeParams,
+        FieldEntry[] fields,
+        MethodEntry[] methods,
+        String[] innerTypeJvmNames,
+        TypeRef[] permittedSubclasses,
+        RecordComponentEntry[] recordComponents,
+        AnnotationRef[] annotations,
         SourceResolutionHints hints) implements TypeEntry {
 
     public SourceTypeEntry {
-        interfaceRefs = interfaceRefs == null ? List.of() : List.copyOf(interfaceRefs);
-        typeParams = typeParams == null ? List.of() : List.copyOf(typeParams);
-        fields = fields == null ? List.of() : List.copyOf(fields);
-        methods = methods == null ? List.of() : List.copyOf(methods);
-        innerTypeJvmNames = innerTypeJvmNames == null ? List.of() : List.copyOf(innerTypeJvmNames);
-        permittedSubclasses = permittedSubclasses == null ? List.of() : List.copyOf(permittedSubclasses);
-        recordComponents = recordComponents == null ? List.of() : List.copyOf(recordComponents);
-        annotations = annotations == null ? List.of() : List.copyOf(annotations);
+        interfaceRefs = EmptyArrays.copyOrEmpty(interfaceRefs, EmptyArrays.TYPE);
+        typeParams = EmptyArrays.copyOrEmpty(typeParams, EmptyArrays.TYPE_PARAM);
+        fields = EmptyArrays.copyOrEmpty(fields, EmptyArrays.FIELD);
+        methods = EmptyArrays.copyOrEmpty(methods, EmptyArrays.METHOD);
+        innerTypeJvmNames = EmptyArrays.copyOrEmpty(innerTypeJvmNames, EmptyArrays.STRING);
+        permittedSubclasses = EmptyArrays.copyOrEmpty(permittedSubclasses, EmptyArrays.TYPE_REF);
+        recordComponents = EmptyArrays.copyOrEmpty(recordComponents, EmptyArrays.RECORD_COMPONENT);
+        annotations = EmptyArrays.copyOrEmpty(annotations, EmptyArrays.ANNOTATION_REF);
     }
 
     /** Backward-compatible constructor without {@link #recordComponents()}. */
@@ -41,16 +39,16 @@ public record SourceTypeEntry(
             int modifiers,
             TypeDeclKind declKind,
             Type superRef,
-            List<Type> interfaceRefs,
-            List<TypeParamRef> typeParams,
-            List<FieldEntry> fields,
-            List<MethodEntry> methods,
-            List<String> innerTypeJvmNames,
-            List<TypeRef> permittedSubclasses,
-            List<AnnotationRef> annotations,
+            Type[] interfaceRefs,
+            TypeParamRef[] typeParams,
+            FieldEntry[] fields,
+            MethodEntry[] methods,
+            String[] innerTypeJvmNames,
+            TypeRef[] permittedSubclasses,
+            AnnotationRef[] annotations,
             SourceResolutionHints hints) {
         this(resourceUri, sourceUri, jvmOwnerName, modifiers, declKind,
                 superRef, interfaceRefs, typeParams, fields, methods,
-                innerTypeJvmNames, permittedSubclasses, List.of(), annotations, hints);
+                innerTypeJvmNames, permittedSubclasses, EmptyArrays.RECORD_COMPONENT, annotations, hints);
     }
 }

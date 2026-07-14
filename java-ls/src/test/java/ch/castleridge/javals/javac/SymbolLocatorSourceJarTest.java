@@ -10,6 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
+import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.IndexedClassRef;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeRef;
@@ -34,13 +35,12 @@ class SymbolLocatorSourceJarTest {
                 "com/example/Hello",
                 0,
                 TypeRef.resolved("java/lang/Object"),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of());
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF);
 
         Optional<String> uri = SymbolLocator.sourceResourceUri(
                 IndexedClassRef.from(entry), Map.of(binJarUri, srcJarUri));
@@ -63,13 +63,12 @@ class SymbolLocatorSourceJarTest {
                 "java/util/Base64$Encoder",
                 0,
                 TypeRef.resolved("java/lang/Object"),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of());
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF);
 
         Optional<String> uri = SymbolLocator.sourceResourceUri(
                 IndexedClassRef.from(entry), Map.of(binJarUri, srcJarUri));

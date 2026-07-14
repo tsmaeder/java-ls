@@ -4,6 +4,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
@@ -66,16 +67,16 @@ class ClassFileIndexerAnnotationValuesTest {
 
             TypeEntry v = index.get("V");
             assertNotNull(v);
-            MethodEntry m = v.methods().stream().filter(me -> me.name().equals("m")).findFirst().orElseThrow();
+            MethodEntry m = Arrays.stream(v.methods()).filter(me -> me.name().equals("m")).findFirst().orElseThrow();
 
             AnnotationRef strs = findAnnotation(m.annotations(), "Strs");
             assertNotNull(strs, "@Strs must be indexed");
             AnnotationValue val = strs.values().get("value");
             assertInstanceOf(AnnotationValue.Arr.class, val);
             AnnotationValue.Arr arr = (AnnotationValue.Arr) val;
-            assertEquals(2, arr.elements().size());
-            assertEquals("a", ((AnnotationValue.Str) arr.elements().get(0)).value());
-            assertEquals("b", ((AnnotationValue.Str) arr.elements().get(1)).value());
+            assertEquals(2, arr.elements().length);
+            assertEquals("a", ((AnnotationValue.Str) arr.elements()[0]).value());
+            assertEquals("b", ((AnnotationValue.Str) arr.elements()[1]).value());
 
             AnnotationRef deprecated = findAnnotation(m.annotations(), "java/lang/Deprecated");
             assertNotNull(deprecated, "@Deprecated must be indexed");
@@ -116,7 +117,7 @@ class ClassFileIndexerAnnotationValuesTest {
 
             TypeEntry use = index.get("Use");
             assertNotNull(use);
-            AnnotationRef pin = findAnnotation(use.fields().get(0).annotations(), "Pin");
+            AnnotationRef pin = findAnnotation(use.fields()[0].annotations(), "Pin");
             assertNotNull(pin, "@Pin annotation must be indexed on field f");
 
             AnnotationValue klass = pin.values().get("klass");
@@ -169,7 +170,7 @@ class ClassFileIndexerAnnotationValuesTest {
             MethodEntry tags = methodNamed(t, "tags");
             assertTrue(tags.hasAnnotationDefault());
             assertInstanceOf(AnnotationValue.Arr.class, tags.annotationDefault());
-            assertEquals(0, ((AnnotationValue.Arr) tags.annotationDefault()).elements().size());
+            assertEquals(0, ((AnnotationValue.Arr) tags.annotationDefault()).elements().length);
 
             // A method on a normal class has no AnnotationDefault.
             byte[] regularBytes = compile(outDir, "Reg.java", """
@@ -217,13 +218,13 @@ class ClassFileIndexerAnnotationValuesTest {
         return Files.readAllBytes(outDir.resolve(className + ".class"));
     }
 
-    private static AnnotationRef findAnnotation(List<AnnotationRef> refs, String jvmName) {
+    private static AnnotationRef findAnnotation(AnnotationRef[] refs, String jvmName) {
         for (AnnotationRef r : refs) if (r.jvmName().equals(jvmName)) return r;
         return null;
     }
 
     private static MethodEntry methodNamed(TypeEntry t, String name) {
-        return t.methods().stream().filter(m -> m.name().equals(name)).findFirst().orElseThrow();
+        return Arrays.stream(t.methods()).filter(m -> m.name().equals(name)).findFirst().orElseThrow();
     }
 
     private static void cleanup(Path dir) throws java.io.IOException {

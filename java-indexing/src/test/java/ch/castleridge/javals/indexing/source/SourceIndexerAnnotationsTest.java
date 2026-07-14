@@ -1,7 +1,7 @@
 package ch.castleridge.javals.indexing.source;
 
 import java.net.URI;
-import java.util.List;
+import java.util.Arrays;
 
 import org.junit.jupiter.api.Test;
 
@@ -73,9 +73,9 @@ class SourceIndexerAnnotationsTest {
         AnnotationValue value = suppress.values().get("value");
         assertInstanceOf(AnnotationValue.Arr.class, value);
         AnnotationValue.Arr arr = (AnnotationValue.Arr) value;
-        assertEquals(2, arr.elements().size());
-        assertEquals("a", ((AnnotationValue.Str) arr.elements().get(0)).value());
-        assertEquals("b", ((AnnotationValue.Str) arr.elements().get(1)).value());
+        assertEquals(2, arr.elements().length);
+        assertEquals("a", ((AnnotationValue.Str) arr.elements()[0]).value());
+        assertEquals("b", ((AnnotationValue.Str) arr.elements()[1]).value());
 
         AnnotationRef deprecated = findAnnotation(m.annotations(), "Deprecated");
         assertNotNull(deprecated);
@@ -156,12 +156,12 @@ class SourceIndexerAnnotationsTest {
         assertInstanceOf(AnnotationValue.EnumConst.class, value);
     }
 
-    private static AnnotationRef findAnnotation(List<AnnotationRef> refs, String name) {
+    private static AnnotationRef findAnnotation(AnnotationRef[] refs, String name) {
         for (AnnotationRef r : refs) if (r.jvmName().equals(name)) return r;
         return null;
     }
 
     private static MethodEntry methodNamed(TypeEntry t, String name) {
-        return t.methods().stream().filter(m -> m.name().equals(name)).findFirst().orElseThrow();
+        return Arrays.stream(t.methods()).filter(m -> m.name().equals(name)).findFirst().orElseThrow();
     }
 }

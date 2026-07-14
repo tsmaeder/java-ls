@@ -89,19 +89,16 @@ public final class IndexModuleFileObject extends AbstractJavaFileObject {
                     mv.visitRequire(r.moduleName(), r.flags(), r.version());
                 }
                 for (ModuleEntry.Exports e : entry.exports()) {
-                    mv.visitExport(e.packageJvm(), e.flags(),
-                            e.toModules().toArray(new String[0]));
+                    mv.visitExport(e.packageJvm(), e.flags(), e.toModules());
                 }
                 for (ModuleEntry.Opens o : entry.opens()) {
-                    mv.visitOpen(o.packageJvm(), o.flags(),
-                            o.toModules().toArray(new String[0]));
+                    mv.visitOpen(o.packageJvm(), o.flags(), o.toModules());
                 }
                 for (String u : entry.uses()) {
                     mv.visitUse(u);
                 }
                 for (ModuleEntry.Provides p : entry.provides()) {
-                    mv.visitProvide(p.serviceJvm(),
-                            p.implJvms().toArray(new String[0]));
+                    mv.visitProvide(p.serviceJvm(), p.implJvms());
                 }
                 mv.visitEnd();
             }

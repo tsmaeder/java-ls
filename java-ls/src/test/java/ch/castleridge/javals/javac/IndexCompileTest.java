@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -36,6 +37,7 @@ import com.sun.tools.javac.util.Context;
 import ch.castleridge.javals.indexing.bytecode.ClassFileIndexer;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
+import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ParameterEntry;
@@ -78,21 +80,19 @@ class IndexCompileTest {
                 "com/example/Hello",
                 0x0001 /* ACC_PUBLIC */,
                 new TypeRef.Resolved("java/lang/Object"),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(new MethodEntry(
-                        "index:///com/example/Hello.class",
-                        "com/example/Hello",
-                        0x0009 /* ACC_PUBLIC | ACC_STATIC */,
-                        "greet",
-                        Type.Primitive.VOID,
-                        List.of(),
-                        List.of(),
-                        List.of())),
-                List.of(),
-                List.of(),
-                List.of()));
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                new MethodEntry[]{
+                        new MethodEntry(
+                                0x0009 /* ACC_PUBLIC | ACC_STATIC */,
+                                "greet",
+                                Type.Primitive.VOID,
+                                EmptyArrays.TYPE,
+                                EmptyArrays.TYPE,
+                                EmptyArrays.ANNOTATION_REF)},
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF));
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
@@ -151,19 +151,17 @@ class IndexCompileTest {
                 "com/example/Holder",
                 0x0001,
                 new TypeRef.Resolved("java/lang/Object"),
-                List.of(),
-                List.of(),
-                List.of(new FieldEntry(
-                        "index:///com/example/Holder.class",
-                        "com/example/Holder",
-                        0x0019 /* ACC_PUBLIC | ACC_STATIC | ACC_FINAL */,
-                        "COUNT",
-                        Type.Primitive.INT,
-                        List.of())),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of()));
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                new FieldEntry[]{
+                        new FieldEntry(
+                                0x0019 /* ACC_PUBLIC | ACC_STATIC | ACC_FINAL */,
+                                "COUNT",
+                                Type.Primitive.INT,
+                                EmptyArrays.ANNOTATION_REF)},
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF));
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
@@ -206,26 +204,24 @@ class IndexCompileTest {
                 "com/example/Foo",
                 Opcodes.ACC_PUBLIC,
                 new TypeRef.Resolved("java/lang/Object"),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of("com/example/Foo$Bar"),
-                List.of(),
-                List.of()));
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                new String[]{"com/example/Foo$Bar"},
+                EmptyArrays.ANNOTATION_REF));
         index.add(new ClassFileTypeEntry(
                 "index:///com/example/Foo$Bar.class",
                 SOURCE_URI,
                 "com/example/Foo$Bar",
                 Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT,
                 null,
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of()));
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF));
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
@@ -343,13 +339,12 @@ class IndexCompileTest {
                 "com/example/Box",
                 0x0001 /* ACC_PUBLIC */,
                 new TypeRef.Resolved("java/lang/Object"),
-                List.of(),
-                List.of(TypeParamRef.of("T")),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of()));
+                EmptyArrays.TYPE,
+                new TypeParamRef[]{TypeParamRef.of("T")},
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF));
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
@@ -397,32 +392,29 @@ class IndexCompileTest {
                 "com/example/Box",
                 0x0001 /* ACC_PUBLIC */,
                 new TypeRef.Resolved("java/lang/Object"),
-                List.of(),
-                List.of(TypeParamRef.of("T")),
-                List.of(new FieldEntry(
-                        "index:///com/example/Box.class#value",
-                        "com/example/Box",
-                        0x0001,
-                        "value",
-                        Type.typeVariable("T"),
-                        null,
-                        List.of())),
-                List.of(new MethodEntry(
-                        "index:///com/example/Box.class#get",
-                        "com/example/Box",
-                        0x0009 /* ACC_PUBLIC | ACC_STATIC */,
-                        "get",
-                        Type.typeVariable("R"),
-                        List.of(new ParameterEntry("x", 0, Type.typeVariable("R"), List.of())),
-                        List.of(),
-                        List.of(TypeParamRef.of("R")),
-                        false,
-                        false,
-                        null,
-                        List.of())),
-                List.of(),
-                List.of(),
-                List.of()));
+                EmptyArrays.TYPE,
+                new TypeParamRef[]{TypeParamRef.of("T")},
+                new FieldEntry[]{
+                        new FieldEntry(
+                                0x0001,
+                                "value",
+                                Type.typeVariable("T"),
+                                EmptyArrays.ANNOTATION_REF)},
+                new MethodEntry[]{
+                        new MethodEntry(
+                                0x0009 /* ACC_PUBLIC | ACC_STATIC */,
+                                "get",
+                                Type.typeVariable("R"),
+                                new ParameterEntry[]{
+                                        new ParameterEntry("x", 0, Type.typeVariable("R"), EmptyArrays.ANNOTATION_REF)},
+                                EmptyArrays.TYPE,
+                                new TypeParamRef[]{TypeParamRef.of("R")},
+                                false,
+                                false,
+                                null,
+                                EmptyArrays.ANNOTATION_REF)},
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF));
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
@@ -634,7 +626,7 @@ class IndexCompileTest {
 
         TypeEntry varargType = index.get("VarargHolder");
         assertNotNull(varargType);
-        MethodEntry allMethod = varargType.methods().stream()
+        MethodEntry allMethod = Arrays.stream(varargType.methods())
                 .filter(m -> m.name().equals("all"))
                 .findFirst()
                 .orElseThrow();
@@ -1123,8 +1115,8 @@ class IndexCompileTest {
 
             TypeEntry markedEntry = index.get("com/example/Marked");
             assertNotNull(markedEntry);
-            assertFalse(markedEntry.annotations().isEmpty());
-            assertInstanceOf(TypeRef.Unresolved.class, markedEntry.annotations().get(0).annotationType());
+            assertTrue(markedEntry.annotations().length > 0);
+            assertInstanceOf(TypeRef.Unresolved.class, markedEntry.annotations()[0].annotationType());
 
             ClasspathOrder cp = classPathOf(List.of(pinUri, SOURCE_URI, jrtUri));
             JavacTool tool = JavacTool.create();
@@ -1746,15 +1738,15 @@ class IndexCompileTest {
         assertNotNull(afterRoundTrip, "synthesised java.base should re-index");
 
         assertEquals(original.name(), afterRoundTrip.name());
-        assertEquals(original.requires().size(), afterRoundTrip.requires().size(),
+        assertEquals(original.requires().length, afterRoundTrip.requires().length,
                 "requires count must be preserved");
-        assertEquals(original.exports().size(), afterRoundTrip.exports().size(),
+        assertEquals(original.exports().length, afterRoundTrip.exports().length,
                 "exports count must be preserved");
-        assertEquals(original.opens().size(), afterRoundTrip.opens().size(),
+        assertEquals(original.opens().length, afterRoundTrip.opens().length,
                 "opens count must be preserved");
-        assertEquals(original.uses().size(), afterRoundTrip.uses().size(),
+        assertEquals(original.uses().length, afterRoundTrip.uses().length,
                 "uses count must be preserved");
-        assertEquals(original.provides().size(), afterRoundTrip.provides().size(),
+        assertEquals(original.provides().length, afterRoundTrip.provides().length,
                 "provides count must be preserved");
     }
 
@@ -1780,12 +1772,12 @@ class IndexCompileTest {
                 "io.example",
                 null,
                 0,
-                List.of(new ModuleEntry.Requires("java.base", 0, null)),
-                List.of(new ModuleEntry.Exports("io/example/buffer", List.of(), 0)),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of("io/example/buffer"),
+                new ModuleEntry.Requires[]{new ModuleEntry.Requires("java.base", 0, null)},
+                new ModuleEntry.Exports[]{new ModuleEntry.Exports("io/example/buffer", EmptyArrays.STRING, 0)},
+                EmptyArrays.OPENS,
+                EmptyArrays.STRING,
+                EmptyArrays.PROVIDES,
+                new String[]{"io/example/buffer"},
                 null));
 
         SourceIndexer.index(
@@ -2051,9 +2043,9 @@ class IndexCompileTest {
 
             ModuleEntry comExample = index.getModule("com.example");
             assertNotNull(comExample, "com.example should be indexed");
-            assertTrue(comExample.exports().stream().anyMatch(e -> e.packageJvm().equals("com/example/api")),
+            assertTrue(Arrays.stream(comExample.exports()).anyMatch(e -> e.packageJvm().equals("com/example/api")),
                     () -> "com.example should export com/example/api; got: " + comExample.exports());
-            assertTrue(comExample.requires().stream().anyMatch(r -> r.moduleName().equals("java.base")),
+            assertTrue(Arrays.stream(comExample.requires()).anyMatch(r -> r.moduleName().equals("java.base")),
                     () -> "com.example should require java.base; got: " + comExample.requires());
 
             // Verify the file manager surfaces the module via
@@ -2178,7 +2170,7 @@ class IndexCompileTest {
             // Sanity-check that the indexer wrapped the return TypeRef in
             // an Annotated decorator.
             TypeEntry withTypeUse = index.get("WithTypeUse");
-            MethodEntry hello = withTypeUse.methods().stream()
+            MethodEntry hello = Arrays.stream(withTypeUse.methods())
                     .filter(m -> m.name().equals("hello"))
                     .findFirst().orElseThrow();
             assertTrue(hello.returnType() instanceof Type.Annotated,
@@ -2273,15 +2265,15 @@ class IndexCompileTest {
             // Sanity-check the indexer captured what we expect before we
             // even hand it to javac.
             TypeEntry withParamsType = index.get("WithParams");
-            MethodEntry take = withParamsType.methods().stream()
+            MethodEntry take = Arrays.stream(withParamsType.methods())
                     .filter(m -> m.name().equals("take"))
                     .findFirst().orElseThrow();
-            assertEquals(2, take.parameters().size());
-            assertEquals("s", take.parameters().get(0).name());
-            assertEquals("n", take.parameters().get(1).name());
-            assertTrue((take.parameters().get(1).modifiers() & Opcodes.ACC_FINAL) != 0,
+            assertEquals(2, take.parameters().length);
+            assertEquals("s", take.parameters()[0].name());
+            assertEquals("n", take.parameters()[1].name());
+            assertTrue((take.parameters()[1].modifiers() & Opcodes.ACC_FINAL) != 0,
                     "Second parameter should carry ACC_FINAL");
-            assertEquals(1, take.parameters().get(0).annotations().size(),
+            assertEquals(1, take.parameters()[0].annotations().length,
                     "First parameter should carry @Tag");
 
             ClasspathOrder cp = classPathOf(List.of(paramsUri, jrtUri));
@@ -2362,7 +2354,7 @@ class IndexCompileTest {
 
             TypeEntry pointEntry = index.get("Point");
             assertNotNull(pointEntry);
-            assertEquals(2, pointEntry.recordComponents().size(),
+            assertEquals(2, pointEntry.recordComponents().length,
                     () -> "ClassFileIndexer should capture record components from Record attribute");
 
             ClasspathOrder cp = classPathOf(List.of(recUri, jrtUri));
@@ -2713,7 +2705,7 @@ class IndexCompileTest {
                 index);
         TypeEntry api = index.get("com/example/Api");
         assertNotNull(api, "SourceIndexer should emit com/example/Api");
-        MethodEntry hidden = api.methods().stream()
+        MethodEntry hidden = Arrays.stream(api.methods())
                 .filter(m -> m.name().equals("hidden"))
                 .findFirst()
                 .orElseThrow();
@@ -2784,7 +2776,7 @@ class IndexCompileTest {
         assertNotNull(index.get("java/util/Base64$Encoder"), "Base64$Encoder must be indexed from jrt");
         TypeEntry jsonUtil = index.get("io/vertx/core/json/impl/JsonUtil");
         assertNotNull(jsonUtil, "JsonUtil must be indexed from vert.x sources");
-        FieldEntry encoderField = jsonUtil.fields().stream()
+        FieldEntry encoderField = Arrays.stream(jsonUtil.fields())
                 .filter(f -> "BASE64_ENCODER".equals(f.name()))
                 .findFirst()
                 .orElseThrow();
@@ -2890,55 +2882,50 @@ class IndexCompileTest {
                 "com/example/Foo",
                 0x0001,
                 new TypeRef.Resolved("java/lang/Object"),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of()));
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF));
         index.add(new ClassFileTypeEntry(
                 "index:///com/example/EventBus.class",
                 SOURCE_URI,
                 "com/example/EventBus",
                 0x0001,
                 new TypeRef.Resolved("java/lang/Object"),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(new MethodEntry(
-                        "index:///com/example/EventBus.class",
-                        "com/example/EventBus",
-                        0x0001,
-                        "codecSelector",
-                        Type.Primitive.VOID,
-                        List.of(new TypeRef.Resolved("java/util/function/Function")),
-                        List.of(),
-                        List.of())),
-                List.of(),
-                List.of(),
-                List.of()));
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                new MethodEntry[]{
+                        new MethodEntry(
+                                0x0001,
+                                "codecSelector",
+                                Type.Primitive.VOID,
+                                new Type[]{new TypeRef.Resolved("java/util/function/Function")},
+                                EmptyArrays.TYPE,
+                                EmptyArrays.ANNOTATION_REF)},
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF));
         index.add(new ClassFileTypeEntry(
                 "index:///com/example/Codec.class",
                 SOURCE_URI,
                 "com/example/Codec",
                 0x0001,
                 new TypeRef.Resolved("java/lang/Object"),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(new MethodEntry(
-                        "index:///com/example/Codec.class",
-                        "com/example/Codec",
-                        0x0001,
-                        "name",
-                        new TypeRef.Resolved("com/missing/MissingType"),
-                        List.of(),
-                        List.of(),
-                        List.of())),
-                List.of(),
-                List.of(),
-                List.of()));
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                new MethodEntry[]{
+                        new MethodEntry(
+                                0x0001,
+                                "name",
+                                new TypeRef.Resolved("com/missing/MissingType"),
+                                EmptyArrays.TYPE,
+                                EmptyArrays.TYPE,
+                                EmptyArrays.ANNOTATION_REF)},
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF));
 
         ClasspathOrder cp = classPathOf(List.of(SOURCE_URI));
 
@@ -3358,20 +3345,18 @@ class IndexCompileTest {
                 jvmName,
                 0x0001,
                 null,
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(new MethodEntry(
-                        "index:///" + jvmName + "@" + srcUri + "#" + methodName,
-                        jvmName,
-                        0x0009,
-                        methodName,
-                        Type.Primitive.VOID,
-                        List.of(),
-                        List.of(),
-                        List.of())),
-                List.of(),
-                List.of(),
-                List.of());
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                new MethodEntry[]{
+                        new MethodEntry(
+                                0x0009,
+                                methodName,
+                                Type.Primitive.VOID,
+                                EmptyArrays.TYPE,
+                                EmptyArrays.TYPE,
+                                EmptyArrays.ANNOTATION_REF)},
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF);
     }
 }

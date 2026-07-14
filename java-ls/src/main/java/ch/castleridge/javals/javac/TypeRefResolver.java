@@ -230,7 +230,7 @@ final class TypeRefResolver {
         if (type.superRef() != null) {
             out.add(type.superRef());
         }
-        out.addAll(type.interfaceRefs());
+        out.addAll(java.util.Arrays.asList(type.interfaceRefs()));
         return out;
     }
 

@@ -3,6 +3,7 @@ package ch.castleridge.javals.javac;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -44,7 +45,7 @@ class SymbolLocatorStaticFieldTest {
 
         TypeEntry formatter = index.get("java/time/format/DateTimeFormatter");
         assertNotNull(formatter, "DateTimeFormatter must be indexed from jrt");
-        FieldEntry isoInstant = formatter.fields().stream()
+        FieldEntry isoInstant = Arrays.stream(formatter.fields())
                 .filter(f -> "ISO_INSTANT".equals(f.name()))
                 .findFirst()
                 .orElse(null);

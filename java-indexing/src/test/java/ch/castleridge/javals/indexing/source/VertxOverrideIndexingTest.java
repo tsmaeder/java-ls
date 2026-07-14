@@ -3,6 +3,7 @@ package ch.castleridge.javals.indexing.source;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 
 import org.junit.jupiter.api.Test;
 
@@ -45,8 +46,8 @@ class VertxOverrideIndexingTest {
         Type.Parameterized future = (Type.Parameterized) start.returnType();
         assertInstanceOf(TypeRef.Unresolved.class, future.raw());
         assertEquals("Future", ((TypeRef.Unresolved) future.raw()).simpleName());
-        assertEquals(1, future.typeArgs().size());
-        assertInstanceOf(Type.Wildcard.class, future.typeArgs().get(0));
+        assertEquals(1, future.typeArgs().length);
+        assertInstanceOf(Type.Wildcard.class, future.typeArgs()[0]);
     }
 
     @Test
@@ -67,10 +68,10 @@ class VertxOverrideIndexingTest {
         TypeEntry eb = index.get("io/vertx/core/eventbus/impl/EventBusImpl");
         assertNotNull(eb);
         MethodEntry next = method(eb, "nextHandler");
-        assertEquals(2, next.paramTypes().size());
-        Type.Parameterized seq = assertInstanceOf(Type.Parameterized.class, next.paramTypes().get(0));
-        assertEquals(1, seq.typeArgs().size());
-        Type arg = seq.typeArgs().get(0);
+        assertEquals(2, next.paramTypes().length);
+        Type.Parameterized seq = assertInstanceOf(Type.Parameterized.class, next.paramTypes()[0]);
+        assertEquals(1, seq.typeArgs().length);
+        Type arg = seq.typeArgs()[0];
         assertTrue(arg instanceof TypeRef.Unresolved || arg instanceof TypeRef.Resolved,
                 "HandlerHolder type arg should be a class ref, not a type variable; got " + arg);
         if (arg instanceof TypeRef.Unresolved u) {
@@ -86,15 +87,15 @@ class VertxOverrideIndexingTest {
         TypeEntry eb = index.get("io/vertx/core/eventbus/impl/EventBusImpl");
         assertNotNull(eb);
         MethodEntry next = method(eb, "nextHandler");
-        Type.Parameterized seq = assertInstanceOf(Type.Parameterized.class, next.paramTypes().get(0));
-        Type arg = seq.typeArgs().get(0);
+        Type.Parameterized seq = assertInstanceOf(Type.Parameterized.class, next.paramTypes()[0]);
+        Type arg = seq.typeArgs()[0];
         assertInstanceOf(TypeRef.Resolved.class, arg);
         assertEquals("io/vertx/core/eventbus/impl/HandlerHolder",
                 ((TypeRef.Resolved) arg).jvmBinaryName());
     }
 
     private static MethodEntry method(TypeEntry owner, String name) {
-        return owner.methods().stream()
+        return Arrays.stream(owner.methods())
                 .filter(m -> m.name().equals(name))
                 .findFirst()
                 .orElseThrow();

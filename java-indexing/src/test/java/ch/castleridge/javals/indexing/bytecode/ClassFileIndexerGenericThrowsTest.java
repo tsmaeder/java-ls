@@ -3,6 +3,7 @@ package ch.castleridge.javals.indexing.bytecode;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
@@ -61,12 +62,12 @@ class ClassFileIndexerGenericThrowsTest {
 
             TypeEntry sneaky = index.get("Sneaky");
             assertNotNull(sneaky);
-            MethodEntry rethrow = sneaky.methods().stream()
+            MethodEntry rethrow = Arrays.stream(sneaky.methods())
                     .filter(m -> m.name().equals("rethrow"))
                     .findFirst()
                     .orElseThrow();
-            assertEquals(1, rethrow.throwsTypes().size());
-            Type thrown = rethrow.throwsTypes().get(0);
+            assertEquals(1, rethrow.throwsTypes().length);
+            Type thrown = rethrow.throwsTypes()[0];
             assertInstanceOf(Type.TypeVariable.class, thrown);
             assertEquals("E", ((Type.TypeVariable) thrown).name());
         } finally {
@@ -111,13 +112,13 @@ class ClassFileIndexerGenericThrowsTest {
 
             TypeEntry throwsClass = index.get("Throws");
             assertNotNull(throwsClass);
-            MethodEntry fail = throwsClass.methods().stream()
+            MethodEntry fail = Arrays.stream(throwsClass.methods())
                     .filter(m -> m.name().equals("fail"))
                     .findFirst()
                     .orElseThrow();
-            assertEquals(1, fail.throwsTypes().size());
-            assertInstanceOf(TypeRef.Resolved.class, fail.throwsTypes().get(0));
-            assertEquals("java/io/IOException", ((TypeRef.Resolved) fail.throwsTypes().get(0)).jvmBinaryName());
+            assertEquals(1, fail.throwsTypes().length);
+            assertInstanceOf(TypeRef.Resolved.class, fail.throwsTypes()[0]);
+            assertEquals("java/io/IOException", ((TypeRef.Resolved) fail.throwsTypes()[0]).jvmBinaryName());
         } finally {
             Files.walk(outDir)
                     .sorted(java.util.Comparator.reverseOrder())

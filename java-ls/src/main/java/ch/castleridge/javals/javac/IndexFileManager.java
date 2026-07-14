@@ -305,7 +305,7 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
             return true;
         }
         ModuleFileEntry moduleFile = moduleFileEntry(moduleName);
-        return moduleFile != null && moduleFile.packages().contains(packageJvm);
+        return moduleFile != null && containsPackage(moduleFile.packages(), packageJvm);
     }
 
     private ModuleEntry moduleEntry(String moduleName) {
@@ -340,7 +340,7 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
     }
 
     private static boolean moduleOwnsPackage(ModuleEntry module, String packageJvm) {
-        if (module.packages().contains(packageJvm)) return true;
+        if (containsPackage(module.packages(), packageJvm)) return true;
         for (ModuleEntry.Exports e : module.exports()) {
             if (e.packageJvm().equals(packageJvm)) return true;
         }
@@ -350,19 +350,13 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
         return false;
     }
 
-    /**
-     * Materialise the indexed module {@code moduleName} as a synthetic
-     * {@link IndexModuleFileObject} backed by ASM-generated
-     * {@code module-info.class} bytes, or {@code null} if no indexed
-     * {@link ModuleEntry} matches (or none of its candidates pass the
-     * classpath filter).
-     *
-     * <p>Returned independently of {@link #getJavaFileForInput} so
-     * consumers that drive their own module discovery (LSP module
-     * symbol search, completion proposers) can fetch synthesised
-     * module-info files without going through the full file-manager
-     * dance.
-     */
+    private static boolean containsPackage(String[] packages, String packageJvm) {
+        for (String p : packages) {
+            if (p.equals(packageJvm)) return true;
+        }
+        return false;
+    }
+
     /**
      * Synthetic {@link Location} that pins a single indexed module
      * inside an enclosing module-oriented location.
@@ -416,6 +410,19 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
         }
     }
 
+    /**
+     * Materialise the indexed module {@code moduleName} as a synthetic
+     * {@link IndexModuleFileObject} backed by ASM-generated
+     * {@code module-info.class} bytes, or {@code null} if no indexed
+     * {@link ModuleEntry} matches (or none of its candidates pass the
+     * classpath filter).
+     *
+     * <p>Returned independently of {@link #getJavaFileForInput} so
+     * consumers that drive their own module discovery (LSP module
+     * symbol search, completion proposers) can fetch synthesised
+     * module-info files without going through the full file-manager
+     * dance.
+     */
     public IndexModuleFileObject moduleFile(String moduleName) {
         if (moduleName == null) return null;
         List<ModuleEntry> candidates = index.getAllModules(moduleName);

@@ -1,7 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.util.List;
-
 /**
  * A formal type parameter declared on a {@link TypeEntry} (class) or, in
  * the future, a {@link MethodEntry}.
@@ -13,23 +11,25 @@ import java.util.List;
  * references like {@code Function<? super T, U>} parse and type-check
  * structurally.
  *
- * <p>The {@link #bounds()} list is never empty: a parameter with no
+ * <p>The {@link #bounds()} array is never empty: a parameter with no
  * declared bound is normalised to {@code [java/lang/Object]} so callers
  * can synthesize a {@code TypeVar} unconditionally.
  */
-public record TypeParamRef(String name, List<Type> bounds) {
+public record TypeParamRef(String name, Type[] bounds) {
+
+    private static final Type[] OBJECT_BOUND = new Type[]{TypeRef.resolved("java/lang/Object")};
 
     public TypeParamRef {
         if (name == null || name.isEmpty()) {
             throw new IllegalArgumentException("name must be non-empty");
         }
-        bounds = (bounds == null || bounds.isEmpty())
-                ? List.of(TypeRef.resolved("java/lang/Object"))
-                : List.copyOf(bounds);
+        bounds = (bounds == null || bounds.length == 0)
+                ? OBJECT_BOUND
+                : EmptyArrays.copyOrEmpty(bounds, EmptyArrays.TYPE);
     }
 
     /** Convenience for the common case of "no declared bound". */
     public static TypeParamRef of(String name) {
-        return new TypeParamRef(name, List.of());
+        return new TypeParamRef(name, EmptyArrays.TYPE);
     }
 }

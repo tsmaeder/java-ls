@@ -15,7 +15,7 @@ class IndexClassFileTest {
     void classFileBucketsSupportDuplicatesAndMerge() {
         Index left = new Index();
         left.addClassFile(new ClassFileEntry("jar:///a!/Foo.class", "jar:///a", "com/Foo"));
-        left.addModuleFile(new ModuleFileEntry("jar:///a!/module-info.class", "jar:///a", "mod.a", java.util.List.of("com")));
+        left.addModuleFile(new ModuleFileEntry("jar:///a!/module-info.class", "jar:///a", "mod.a", new String[] {"com"}));
 
         Index right = new Index();
         right.addClassFile(new ClassFileEntry("jar:///b!/Foo.class", "jar:///b", "com/Foo"));

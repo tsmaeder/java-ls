@@ -1,13 +1,12 @@
 package ch.castleridge.javals.javac;
 
-import java.util.List;
-
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.RealClassFileObject;
 import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
+import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**
@@ -45,11 +44,13 @@ final class IndexClassfileAttachment {
                 jvmName,
                 0,
                 null,
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of());
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.TYPE_REF,
+                EmptyArrays.RECORD_COMPONENT,
+                EmptyArrays.ANNOTATION_REF);
     }
 }

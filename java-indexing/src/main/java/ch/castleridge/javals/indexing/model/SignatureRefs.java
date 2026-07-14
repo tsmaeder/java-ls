@@ -236,7 +236,8 @@ public final class SignatureRefs {
 
         void flush() {
             if (currentName != null) {
-                collected.add(new TypeParamRef(currentName, currentBounds));
+                collected.add(new TypeParamRef(currentName,
+                        EmptyArrays.toArray(currentBounds, EmptyArrays.TYPE)));
                 currentName = null;
                 currentBounds = null;
             }
@@ -350,7 +351,7 @@ public final class SignatureRefs {
             TypeRef raw = TypeRef.resolved(className);
             Type type = typeArgs.isEmpty()
                     ? raw
-                    : new Type.Parameterized(raw, List.copyOf(typeArgs));
+                    : new Type.Parameterized(raw, EmptyArrays.toArray(typeArgs, EmptyArrays.TYPE));
             emit(type);
         }
     }

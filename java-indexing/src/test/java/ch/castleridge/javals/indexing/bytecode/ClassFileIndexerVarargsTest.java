@@ -3,6 +3,7 @@ package ch.castleridge.javals.indexing.bytecode;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
@@ -50,7 +51,7 @@ class ClassFileIndexerVarargsTest {
 
             TypeEntry v = index.get("V");
             assertNotNull(v);
-            MethodEntry all = v.methods().stream().filter(m -> m.name().equals("all")).findFirst().orElseThrow();
+            MethodEntry all = Arrays.stream(v.methods()).filter(m -> m.name().equals("all")).findFirst().orElseThrow();
             assertTrue(all.varargs(), "varargs bit should be captured on MethodEntry");
             assertTrue((all.modifiers() & Opcodes.ACC_VARARGS) != 0,
                     "modifiers should retain ACC_VARARGS from classfile");

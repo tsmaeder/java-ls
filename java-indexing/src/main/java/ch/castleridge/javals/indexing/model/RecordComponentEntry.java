@@ -1,7 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.util.List;
-
 /**
  * A single record component declared in the header of a record type.
  *
@@ -23,7 +21,7 @@ import java.util.List;
 public record RecordComponentEntry(
         String name,
         Type type,
-        List<AnnotationRef> annotations) {
+        AnnotationRef[] annotations) {
 
     public RecordComponentEntry {
         if (name == null || name.isEmpty()) {
@@ -32,6 +30,6 @@ public record RecordComponentEntry(
         if (type == null) {
             throw new IllegalArgumentException("type must not be null");
         }
-        annotations = annotations == null ? List.of() : List.copyOf(annotations);
+        annotations = EmptyArrays.copyOrEmpty(annotations, EmptyArrays.ANNOTATION_REF);
     }
 }

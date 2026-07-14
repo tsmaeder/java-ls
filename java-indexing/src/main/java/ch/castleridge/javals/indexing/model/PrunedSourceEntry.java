@@ -1,7 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.util.List;
-
 /**
  * A single indexed Java source file reduced to an API stub: package,
  * imports, and externally visible type declarations with method bodies
@@ -14,11 +12,11 @@ public record PrunedSourceEntry(
         String packageJvm,
         String relativeName,
         String primaryBinaryName,
-        List<String> topLevelBinaryNames,
+        String[] topLevelBinaryNames,
         CharSequence prunedText) {
 
     public PrunedSourceEntry {
-        topLevelBinaryNames = topLevelBinaryNames == null ? List.of() : List.copyOf(topLevelBinaryNames);
+        topLevelBinaryNames = EmptyArrays.copyOrEmpty(topLevelBinaryNames, EmptyArrays.STRING);
     }
 
     public String jvmOwnerName() {

@@ -1,7 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.util.List;
-
 /**
  * Typed representation of a single annotation element value.
  *
@@ -91,9 +89,9 @@ public sealed interface AnnotationValue {
      * {@code @SuppressWarnings({"a", "b"})}. {@code elements} preserves
      * source order.
      */
-    record Arr(List<AnnotationValue> elements) implements AnnotationValue {
+    record Arr(AnnotationValue[] elements) implements AnnotationValue {
         public Arr {
-            elements = elements == null ? List.of() : List.copyOf(elements);
+            elements = EmptyArrays.copyOrEmpty(elements, EmptyArrays.ANNOTATION_VALUE);
         }
     }
 

@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.model.ClassFileEntry;
+import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.SourceTypeEntry;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -78,14 +79,14 @@ class IndexGlobalNameSearchTest {
                 0,
                 TypeDeclKind.CLASS,
                 null,
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.TYPE_REF,
+                EmptyArrays.RECORD_COMPONENT,
+                EmptyArrays.ANNOTATION_REF,
                 null);
     }
 }

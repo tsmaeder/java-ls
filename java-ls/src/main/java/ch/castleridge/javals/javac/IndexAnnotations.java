@@ -114,13 +114,13 @@ final class IndexAnnotations {
 
     /** Convert a list of indexed annotation refs into javac compound attributes. */
 
-    List<Attribute.Compound> toCompounds(java.util.List<AnnotationRef> refs,
+    List<Attribute.Compound> toCompounds(AnnotationRef[] refs,
 
             ModuleSymbol module,
 
             TypeEntry enclosing) {
 
-        if (refs == null || refs.isEmpty())
+        if (refs == null || refs.length == 0)
             return List.nil();
 
         ListBuffer<Attribute.Compound> out = new ListBuffer<>();
@@ -158,13 +158,13 @@ final class IndexAnnotations {
      * 
      */
 
-    List<Attribute.TypeCompound> toTypeCompounds(java.util.List<AnnotationRef> refs,
+    List<Attribute.TypeCompound> toTypeCompounds(AnnotationRef[] refs,
 
             ModuleSymbol module,
 
             TypeEntry enclosing) {
 
-        if (refs == null || refs.isEmpty())
+        if (refs == null || refs.length == 0)
             return List.nil();
 
         ListBuffer<Attribute.TypeCompound> out = new ListBuffer<>();
@@ -380,7 +380,7 @@ final class IndexAnnotations {
 
                     : (expectedType != null ? expectedType : syms.objectType);
 
-            Attribute[] arrAttrs = new Attribute[arr.elements().size()];
+            Attribute[] arrAttrs = new Attribute[arr.elements().length];
 
             int i = 0;
 

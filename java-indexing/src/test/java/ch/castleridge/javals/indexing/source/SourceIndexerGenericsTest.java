@@ -1,6 +1,7 @@
 package ch.castleridge.javals.indexing.source;
 
 import java.net.URI;
+import java.util.Arrays;
 
 import org.junit.jupiter.api.Test;
 
@@ -32,12 +33,12 @@ class SourceIndexerGenericsTest {
         MethodEntry expecting = method(entry, "expecting");
         assertInstanceOf(Type.Parameterized.class, expecting.returnType());
         Type.Parameterized returnType = (Type.Parameterized) expecting.returnType();
-        assertInstanceOf(Type.TypeVariable.class, returnType.typeArgs().get(0));
+        assertInstanceOf(Type.TypeVariable.class, returnType.typeArgs()[0]);
 
-        assertEquals(1, expecting.paramTypes().size());
-        Type.Parameterized param = assertInstanceOf(Type.Parameterized.class, expecting.paramTypes().get(0));
-        assertEquals(1, param.typeArgs().size());
-        Type.Wildcard wildcard = assertInstanceOf(Type.Wildcard.class, param.typeArgs().get(0));
+        assertEquals(1, expecting.paramTypes().length);
+        Type.Parameterized param = assertInstanceOf(Type.Parameterized.class, expecting.paramTypes()[0]);
+        assertEquals(1, param.typeArgs().length);
+        Type.Wildcard wildcard = assertInstanceOf(Type.Wildcard.class, param.typeArgs()[0]);
         assertEquals(Type.Wildcard.BoundKind.SUPER, wildcard.kind());
         assertInstanceOf(Type.TypeVariable.class, wildcard.bound());
         assertEquals("T", ((Type.TypeVariable) wildcard.bound()).name());
@@ -68,7 +69,7 @@ class SourceIndexerGenericsTest {
                         + "}\n",
                 "p/Foo");
 
-        FieldEntry field = entry.fields().stream()
+        FieldEntry field = Arrays.stream(entry.fields())
                 .filter(f -> f.name().equals("field"))
                 .findFirst()
                 .orElseThrow();
@@ -87,8 +88,8 @@ class SourceIndexerGenericsTest {
                 "ch/castleridge/javals/test/Future");
 
         MethodEntry expecting = method(entry, "expecting");
-        Type.Parameterized param = assertInstanceOf(Type.Parameterized.class, expecting.paramTypes().get(0));
-        Type.Wildcard wildcard = assertInstanceOf(Type.Wildcard.class, param.typeArgs().get(0));
+        Type.Parameterized param = assertInstanceOf(Type.Parameterized.class, expecting.paramTypes()[0]);
+        Type.Wildcard wildcard = assertInstanceOf(Type.Wildcard.class, param.typeArgs()[0]);
         assertEquals(Type.Wildcard.BoundKind.SUPER, wildcard.kind());
     }
 
@@ -106,7 +107,7 @@ class SourceIndexerGenericsTest {
                 }
                 """, "example/Util");
 
-        FieldEntry encoder = entry.fields().stream()
+        FieldEntry encoder = Arrays.stream(entry.fields())
                 .filter(f -> "ENCODER".equals(f.name()))
                 .findFirst()
                 .orElseThrow();
@@ -123,7 +124,7 @@ class SourceIndexerGenericsTest {
     }
 
     private static MethodEntry method(TypeEntry owner, String name) {
-        return owner.methods().stream()
+        return Arrays.stream(owner.methods())
                 .filter(m -> m.name().equals(name))
                 .findFirst()
                 .orElseThrow();

@@ -1,7 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.util.List;
-
 /**
  * A single field declaration attached to a {@link TypeEntry}.
  *
@@ -26,27 +24,23 @@ import java.util.List;
  * downstream code falls back to the same behaviour as before.
  */
 public record FieldEntry(
-        String resourceUri,
-        String jvmOwnerName,
         int modifiers,
         String name,
         Type type,
         Object constantValue,
-        List<AnnotationRef> annotations) implements IndexEntry {
+        AnnotationRef[] annotations) implements IndexEntry {
 
     public FieldEntry {
-        annotations = annotations == null ? List.of() : List.copyOf(annotations);
+        annotations = EmptyArrays.copyOrEmpty(annotations, EmptyArrays.ANNOTATION_REF);
     }
 
     /** Backward-compatible constructor without a constant value. */
     public FieldEntry(
-            String resourceUri,
-            String jvmOwnerName,
             int modifiers,
             String name,
             Type type,
-            List<AnnotationRef> annotations) {
-        this(resourceUri, jvmOwnerName, modifiers, name, type, null, annotations);
+            AnnotationRef[] annotations) {
+        this(modifiers, name, type, null, annotations);
     }
 
     @Override

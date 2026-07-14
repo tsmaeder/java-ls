@@ -49,6 +49,7 @@ import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.intern.Interner;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
+import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ParameterEntry;
@@ -140,7 +141,7 @@ public final class SourceIndexer {
         relativeName = Interner.intern(relativeName);
         into.addPrunedSource(new PrunedSourceEntry(
                 resourceUri, sourceUri, packageJvm, relativeName, primaryBinaryName,
-                topLevelNames, prunedText));
+                EmptyArrays.toArray(topLevelNames, EmptyArrays.STRING), prunedText));
     }
 
     private static List<String> topLevelBinaryNames(CompilationUnitTree cu, String packageJvm) {
@@ -233,7 +234,8 @@ public final class SourceIndexer {
         }
 
         SourceResolutionHints hints = new SourceResolutionHints(
-                packageJvm, singleTypeImports, onDemandImports, siblings);
+                packageJvm, singleTypeImports,
+                EmptyArrays.toArray(onDemandImports, EmptyArrays.STRING), siblings);
 
         Deque<String> enclosing = new ArrayDeque<>();
         for (Tree t : cu.getTypeDecls()) {
@@ -307,9 +309,9 @@ public final class SourceIndexer {
 
         for (Tree member : ct.getMembers()) {
             if (member instanceof VariableTree vt) {
-                fields.add(toFieldEntry(uri, localName, vt, classTypeParams, localName));
+                fields.add(toFieldEntry(vt, classTypeParams, localName));
             } else if (member instanceof MethodTree mt) {
-                methods.add(toMethodEntry(uri, localName, mt, classTypeParams, localName));
+                methods.add(toMethodEntry(mt, classTypeParams, localName));
             } else if (member instanceof ClassTree inner) {
                 nested.add(inner);
                 String innerName = Interner.intern(localName + "$" + inner.getSimpleName().toString());
@@ -324,13 +326,13 @@ public final class SourceIndexer {
                 modifiers,
                 declKind,
                 superRef,
-                interfaceRefs,
-                declaredTypeParams,
-                fields,
-                methods,
-                innerTypes,
-                permittedSubclasses,
-                List.of(),
+                EmptyArrays.toArray(interfaceRefs, EmptyArrays.TYPE),
+                EmptyArrays.toArray(declaredTypeParams, EmptyArrays.TYPE_PARAM),
+                EmptyArrays.toArray(fields, EmptyArrays.FIELD),
+                EmptyArrays.toArray(methods, EmptyArrays.METHOD),
+                EmptyArrays.toArray(innerTypes, EmptyArrays.STRING),
+                EmptyArrays.toArray(permittedSubclasses, EmptyArrays.TYPE_REF),
+                EmptyArrays.RECORD_COMPONENT,
                 annotationsOf(ct.getModifiers(), localName),
                 hints);
         into.add(entry);
@@ -345,7 +347,7 @@ public final class SourceIndexer {
         }
     }
 
-    private static FieldEntry toFieldEntry(String uri, String owner, VariableTree vt,
+    private static FieldEntry toFieldEntry(VariableTree vt,
                                            Set<String> typeParams, String ownerJvm) {
         int flags = modifierFlags(vt.getModifiers());
         if (isEnumConstant(vt)) {
@@ -361,8 +363,6 @@ public final class SourceIndexer {
             constantValue = literalConstantValue(vt.getInitializer());
         }
         return new FieldEntry(
-                uri,
-                owner,
                 flags,
                 Interner.intern(vt.getName().toString()),
                 toTypeRef(vt.getType(), typeParams, ownerJvm),
@@ -402,7 +402,7 @@ public final class SourceIndexer {
         return null;
     }
 
-    private static MethodEntry toMethodEntry(String uri, String owner, MethodTree mt,
+    private static MethodEntry toMethodEntry(MethodTree mt,
                                              Set<String> classTypeParams, String ownerJvm) {
         Set<String> methodTypeParams = new HashSet<>(classTypeParams);
         for (TypeParameterTree tp : mt.getTypeParameters()) {
@@ -438,14 +438,12 @@ public final class SourceIndexer {
                 ? toAnnotationValue(dt, ownerJvm)
                 : null;
         return new MethodEntry(
-                uri,
-                owner,
                 modifierFlags(mt.getModifiers()),
                 name,
                 returnRef,
-                paramEntries,
-                throwsRefs,
-                declaredMethodTypeParams,
+                EmptyArrays.toArray(paramEntries, EmptyArrays.PARAMETER),
+                EmptyArrays.toArray(throwsRefs, EmptyArrays.TYPE),
+                EmptyArrays.toArray(declaredMethodTypeParams, EmptyArrays.TYPE_PARAM),
                 isVarArgs(mt),
                 mt.getBody() != null,
                 defaultValue,
@@ -464,7 +462,7 @@ public final class SourceIndexer {
         for (Tree b : boundTrees) {
             bounds.add(toTypeRef(b, visibleTypeParams, ownerJvm));
         }
-        return new TypeParamRef(name, bounds);
+        return new TypeParamRef(name, EmptyArrays.toArray(bounds, EmptyArrays.TYPE));
     }
 
     private static Type toTypeRef(Tree t, Set<String> typeParams, String ownerJvm) {
@@ -476,7 +474,7 @@ public final class SourceIndexer {
                 AnnotationRef ref = toAnnotationRef(a, ownerJvm);
                 if (ref != null) typeUseAnnotations.add(ref);
             }
-            return Type.Annotated.wrap(inner, typeUseAnnotations);
+            return Type.Annotated.wrap(inner, EmptyArrays.toArray(typeUseAnnotations, EmptyArrays.ANNOTATION_REF));
         }
         if (t instanceof PrimitiveTypeTree pt) {
             return switch (pt.getPrimitiveTypeKind()) {
@@ -510,7 +508,7 @@ public final class SourceIndexer {
             for (Tree arg : pt.getTypeArguments()) {
                 args.add(toTypeRef(arg, typeParams, ownerJvm));
             }
-            return new Type.Parameterized(raw, args);
+            return new Type.Parameterized(raw, EmptyArrays.toArray(args, EmptyArrays.TYPE));
         }
         if (t instanceof IdentifierTree id) {
             String name = id.getName().toString();
@@ -657,13 +655,13 @@ public final class SourceIndexer {
         return f;
     }
 
-    private static List<AnnotationRef> annotationsOf(ModifiersTree mods, String ownerJvm) {
-        if (mods == null || mods.getAnnotations().isEmpty()) return List.of();
+    private static AnnotationRef[] annotationsOf(ModifiersTree mods, String ownerJvm) {
+        if (mods == null || mods.getAnnotations().isEmpty()) return EmptyArrays.ANNOTATION_REF;
         List<AnnotationRef> out = new ArrayList<>();
         for (AnnotationTree a : mods.getAnnotations()) {
             out.add(toAnnotationRef(a, ownerJvm));
         }
-        return out;
+        return EmptyArrays.toArray(out, EmptyArrays.ANNOTATION_REF);
     }
 
     /**
@@ -741,11 +739,11 @@ public final class SourceIndexer {
         if (expr instanceof NewArrayTree arr) {
             List<? extends ExpressionTree> inits = arr.getInitializers();
             if (inits == null) {
-                return new AnnotationValue.Arr(List.of());
+                return new AnnotationValue.Arr(EmptyArrays.ANNOTATION_VALUE);
             }
-            List<AnnotationValue> elements = new ArrayList<>(inits.size());
-            for (ExpressionTree e : inits) {
-                elements.add(toAnnotationValue(e, ownerJvm));
+            AnnotationValue[] elements = new AnnotationValue[inits.size()];
+            for (int i = 0; i < inits.size(); i++) {
+                elements[i] = toAnnotationValue(inits.get(i), ownerJvm);
             }
             return new AnnotationValue.Arr(elements);
         }

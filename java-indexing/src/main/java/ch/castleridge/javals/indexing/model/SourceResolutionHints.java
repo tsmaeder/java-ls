@@ -1,6 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -25,13 +24,13 @@ import java.util.Set;
 public record SourceResolutionHints(
         String sourcePackage,
         Map<String, String> singleTypeImports,
-        List<String> onDemandImports,
+        String[] onDemandImports,
         Set<String> siblingSimpleNames) {
 
     public SourceResolutionHints {
         sourcePackage = sourcePackage == null ? "" : sourcePackage;
         singleTypeImports = singleTypeImports == null ? Map.of() : Map.copyOf(singleTypeImports);
-        onDemandImports = onDemandImports == null ? List.of() : List.copyOf(onDemandImports);
+        onDemandImports = EmptyArrays.copyOrEmpty(onDemandImports, EmptyArrays.STRING);
         siblingSimpleNames = siblingSimpleNames == null ? Set.of() : Set.copyOf(siblingSimpleNames);
     }
 }

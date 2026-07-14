@@ -1,6 +1,7 @@
 package ch.castleridge.javals.javac;
 
 import java.net.URI;
+import java.util.Arrays;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,7 @@ import com.sun.tools.javac.code.Flags;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
+import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.SourceTypeEntry;
@@ -96,13 +98,12 @@ class IndexAccessFlagsTest {
                 "p/C",
                 Opcodes.ACC_PUBLIC | Opcodes.ACC_SUPER,
                 null,
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of());
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF);
         long flags = IndexAccessFlags.classFlags(bytecode);
         assertLacks(flags, Opcodes.ACC_SUPER);
         assertHas(flags, Opcodes.ACC_PUBLIC);
@@ -145,13 +146,12 @@ class IndexAccessFlagsTest {
                 "io/example/module-info",
                 Opcodes.ACC_MODULE,
                 null,
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of());
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF);
         long flags = IndexAccessFlags.classFlags(moduleInfo);
         assertHas(flags, Flags.MODULE);
         assertLacks(flags, Opcodes.ACC_MODULE);
@@ -182,14 +182,14 @@ class IndexAccessFlagsTest {
     }
 
     private static FieldEntry field(TypeEntry owner, String name) {
-        return owner.fields().stream()
+        return Arrays.stream(owner.fields())
                 .filter(f -> f.name().equals(name))
                 .findFirst()
                 .orElseThrow();
     }
 
     private static MethodEntry method(TypeEntry owner, String name) {
-        return owner.methods().stream()
+        return Arrays.stream(owner.methods())
                 .filter(m -> m.name().equals(name))
                 .findFirst()
                 .orElseThrow();
