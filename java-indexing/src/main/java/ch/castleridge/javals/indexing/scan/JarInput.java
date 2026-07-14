@@ -9,7 +9,12 @@ import java.util.jar.JarFile;
 import ch.castleridge.javals.indexing.index.Index;
 
 /** A single {@code .jar} file. */
-public record JarInput(Path jar) implements InputSource {
+public record JarInput(Path jar, ScanCollector collector) implements InputSource {
+
+    public JarInput(Path jar) {
+        this(jar, null);
+    }
+
     @Override
     public void walk(ResourceSink sink, boolean indexClassFiles) {
         try (JarFile jf = new JarFile(jar.toFile())) {
@@ -21,12 +26,16 @@ public record JarInput(Path jar) implements InputSource {
                 String simple = simpleName(name);
                 if (isIndexable(simple)) {
                     String uri = jarEntryUri(jar, name);
+                    recordStats(simple, e.getSize());
                     if (shouldReadContents(indexClassFiles, simple)) {
                         // Read bytes eagerly: the sink typically hands the bytes supplier
                         // to an async task, and by the time the task runs the
                         // try-with-resources below would have closed the JarFile.
                         try {
                             byte[] bytes = jf.getInputStream(e).readAllBytes();
+                            if (collector != null && simple.endsWith(".class") && e.getSize() < 0) {
+                                collector.addClassFileBytes(bytes.length);
+                            }
                             sink.accept(uri, simple, () -> bytes);
                         } catch (IOException ioe) {
                             System.err.println("Skipping unreadable jar entry " + jar + "!/" + name
@@ -40,6 +49,15 @@ public record JarInput(Path jar) implements InputSource {
         } catch (IOException | RuntimeException ex) {
             System.err.println("Skipping non-readable jar " + jar + ": "
                     + ex.getClass().getSimpleName() + ": " + ex.getMessage());
+        }
+    }
+
+    private void recordStats(String simple, long entrySize) {
+        if (collector == null) return;
+        if (simple.endsWith(".java")) {
+            collector.addSourceFile();
+        } else if (simple.endsWith(".class") && entrySize >= 0) {
+            collector.addClassFileBytes(entrySize);
         }
     }
 

@@ -10,7 +10,12 @@ import java.nio.file.attribute.BasicFileAttributes;
 import ch.castleridge.javals.indexing.index.Index;
 
 /** Directory on the local filesystem, walked recursively. */
-public record DirInput(Path root) implements InputSource {
+public record DirInput(Path root, ScanCollector collector) implements InputSource {
+
+    public DirInput(Path root) {
+        this(root, null);
+    }
+
     @Override
     public void walk(ResourceSink sink, boolean indexClassFiles) {
         if (!Files.exists(root)) return;
@@ -21,6 +26,7 @@ public record DirInput(Path root) implements InputSource {
                     String name = file.getFileName().toString();
                     if (isIndexable(name)) {
                         String uri = file.toUri().toString();
+                        recordStats(name, attrs.size());
                         if (shouldReadContents(indexClassFiles, name)) {
                             sink.accept(uri, name, () -> Files.readAllBytes(file));
                         } else {
@@ -32,6 +38,15 @@ public record DirInput(Path root) implements InputSource {
             });
         } catch (IOException e) {
             throw new RuntimeException("Failed walking " + root, e);
+        }
+    }
+
+    private void recordStats(String name, long size) {
+        if (collector == null) return;
+        if (name.endsWith(".java")) {
+            collector.addSourceFile();
+        } else if (name.endsWith(".class")) {
+            collector.addClassFileBytes(size);
         }
     }
 

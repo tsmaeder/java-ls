@@ -269,7 +269,7 @@ public final class HeapSizeEstimator {
         return (n + ALIGN - 1L) & ~(ALIGN - 1L);
     }
 
-    static String formatBytes(long bytes) {
+    public static String formatBytes(long bytes) {
         if (bytes < 1024L) return bytes + " B";
         double kb = bytes / 1024.0;
         if (kb < 1024.0) return String.format("%.1f KiB", kb);

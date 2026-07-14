@@ -33,9 +33,15 @@ import ch.castleridge.javals.indexing.index.Index;
  */
 public final class JrtInput implements InputSource {
     public final Path javaHome;
+    private final ScanCollector collector;
 
     public JrtInput(Path javaHome) {
+        this(javaHome, null);
+    }
+
+    public JrtInput(Path javaHome, ScanCollector collector) {
         this.javaHome = javaHome;
+        this.collector = collector;
     }
 
     @Override
@@ -60,8 +66,8 @@ public final class JrtInput implements InputSource {
         return "jrt://" + this.javaHome.toUri().getRawPath();
     }
 
-    private static void walkModule(Path moduleRoot, ResourceSink sink, String javaHomeUriPath,
-                                   boolean indexClassFiles) throws IOException {
+    private void walkModule(Path moduleRoot, ResourceSink sink, String javaHomeUriPath,
+                            boolean indexClassFiles) throws IOException {
         if (!Files.exists(moduleRoot)) return;
         Files.walkFileTree(moduleRoot, new SimpleFileVisitor<>() {
             @Override
@@ -69,11 +75,15 @@ public final class JrtInput implements InputSource {
                 String name = file.getFileName().toString();
                 if (isIndexable(name)) {
                     String uri = jrtUri(javaHomeUriPath, file);
+                    recordStats(name, attrs.size());
                     if (shouldReadContents(indexClassFiles, name)) {
                         // Read eagerly: the sink typically defers to an async task,
                         // and the jrt filesystem may close before that task runs.
                         try {
                             byte[] bytes = Files.readAllBytes(file);
+                            if (collector != null && name.endsWith(".class") && attrs.size() < 0) {
+                                collector.addClassFileBytes(bytes.length);
+                            }
                             sink.accept(uri, name, () -> bytes);
                         } catch (IOException ioe) {
                             System.err.println("Skipping unreadable jrt entry " + uri
@@ -86,6 +96,15 @@ public final class JrtInput implements InputSource {
                 return FileVisitResult.CONTINUE;
             }
         });
+    }
+
+    private void recordStats(String name, long size) {
+        if (collector == null) return;
+        if (name.endsWith(".java")) {
+            collector.addSourceFile();
+        } else if (name.endsWith(".class")) {
+            collector.addClassFileBytes(size);
+        }
     }
 
     private static boolean shouldReadContents(boolean indexClassFiles, String name) {

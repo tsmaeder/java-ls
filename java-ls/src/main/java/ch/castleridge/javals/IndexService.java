@@ -12,6 +12,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
+import ch.castleridge.javals.indexing.cli.HeapSizeEstimator;
 import ch.castleridge.javals.indexing.mbt.*;
 import ch.castleridge.javals.indexing.scan.*;
 import ch.castleridge.javals.indexing.scan.Scanner;
@@ -93,9 +94,10 @@ public final class IndexService {
             MbtInfo info = MbtJson.read(mbt);
             Map<String, String> sourceJarByBinaryJar = new HashMap<>();
             Map<String, ClasspathOrder> classpathsByNamespace = new HashMap<>();
-            Map<String, InputSource> sources = new HashMap<>(); 
+            Map<String, InputSource> sources = new HashMap<>();
+            ScanCollector collector = new ScanCollector();
 
-            extractInfo(info, workspacePath, sourceJarByBinaryJar, classpathsByNamespace, sources);
+            extractInfo(info, workspacePath, sourceJarByBinaryJar, classpathsByNamespace, sources, collector);
 
             if (sources.isEmpty()) {
                 log(MessageType.Warning, "mbt.json contained no input sources: " + mbt);
@@ -109,6 +111,20 @@ public final class IndexService {
             long t0 = System.nanoTime();
             List<Throwable> failures = scanner.scanAll(sources.values(), index);
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+            ScanStats stats = collector.snapshot();
+
+            int jarCount = 0;
+            long jarBytes = 0L;
+            for (InputSource src : sources.values()) {
+                if (src instanceof JarInput jarInput) {
+                    jarCount++;
+                    try {
+                        jarBytes += Files.size(jarInput.jar());
+                    } catch (IOException ignored) {
+                        // leave jarBytes unchanged for unreadable jars
+                    }
+                }
+            }
 
             log(MessageType.Info, "Indexed " + index.size() + " types ("
                     + index.entryCount() + " entries, "
@@ -116,6 +132,15 @@ public final class IndexService {
                     + index.prunedSourceSize() + " pruned sources) from " + sources.size()
                     + " sources in " + elapsedMs + " ms"
                     + (failures.isEmpty() ? "" : "; " + failures.size() + " failures"));
+            log(MessageType.Info, "Index stats: " + stats.sourceFileCount() + " source files, "
+                    + jarCount + " jars (" + HeapSizeEstimator.formatBytes(jarBytes) + "); class files "
+                    + HeapSizeEstimator.formatBytes(stats.classFileBytes()));
+            HeapSizeEstimator est = new HeapSizeEstimator();
+            long estimated = est.estimate(index);
+            log(MessageType.Info, "Index memory estimate: " + HeapSizeEstimator.formatBytes(estimated));
+            for (String row : est.topByBytes(15)) {
+                log(MessageType.Info, "  " + row);
+            }
             failures.forEach(f -> {
                 StringWriter writer = new StringWriter();
                 f.printStackTrace(new PrintWriter(writer));
@@ -128,7 +153,9 @@ public final class IndexService {
         }
     }
 
-    private void extractInfo(MbtInfo info, Path workspacePath, Map<String, String> sourceJarByBinaryJar, Map<String, ClasspathOrder> classpathsByNamespace, Map<String, InputSource> sources) {
+    private void extractInfo(MbtInfo info, Path workspacePath, Map<String, String> sourceJarByBinaryJar,
+                             Map<String, ClasspathOrder> classpathsByNamespace, Map<String, InputSource> sources,
+                             ScanCollector collector) {
         Map<String, MbtDependencyModuleInfo> dependencyModuleInfos = new HashMap<>();
        
         for (MbtDependencyModuleInfo dependencyModuleInfo : info.dependencyModules) {
@@ -146,7 +173,7 @@ public final class IndexService {
                 continue;
             }
             if (!sources.containsKey(dependencyModuleInfo.id)) {
-                sources.put(dependencyModuleInfo.id, new JarInput(binaryJarPath));
+                sources.put(dependencyModuleInfo.id, new JarInput(binaryJarPath, collector));
                 if (sourceJar != null) {
                     // Key by the normalized file URI that the scanner stamps on
                     // every indexed entry (JarInput.sourceUri() ==
@@ -164,7 +191,7 @@ public final class IndexService {
         for (String namespaceId : info.namespaces.keySet()) {
             MbtTargetInfo targetInfo = info.namespaces.get(namespaceId);
             classpathOrder(namespaceId, targetInfo, workspacePath, dependencyModuleInfos,
-                    info.namespaces, classpathsByNamespace, sources, sourceJarByBinaryJar);
+                    info.namespaces, classpathsByNamespace, sources, sourceJarByBinaryJar, collector);
         }
     }
 
@@ -175,24 +202,25 @@ public final class IndexService {
                                        Map<String, MbtTargetInfo> namespaces,
                                        Map<String, ClasspathOrder> classpathsByNamespace,
                                        Map<String, InputSource> sources,
-                                       Map<String, String> sourceJarByBinaryJar) {
+                                       Map<String, String> sourceJarByBinaryJar,
+                                       ScanCollector collector) {
         List<ClasspathEntry> classpathEntries = new ArrayList<>();
-        addSourceRoots(targetInfo.sources, workspacePath, classpathEntries, sources);
+        addSourceRoots(targetInfo.sources, workspacePath, classpathEntries, sources, collector);
 
         if (targetInfo.dependsOn != null && !targetInfo.dependsOn.isEmpty()) {
             Set<String> visited = new HashSet<>();
             visited.add(namespaceId);
             for (String depId : targetInfo.dependsOn) {
                 addDependsOnEntries(depId, workspacePath, dependencyModules, namespaces,
-                        classpathEntries, sources, visited);
+                        classpathEntries, sources, visited, collector);
             }
         }
 
         Path jdk = Path.of(System.getProperty("java.home"));
         if (targetInfo.javaHome != null && !targetInfo.javaHome.isBlank()) {
-            jdk = Path.of(targetInfo.javaHome).toAbsolutePath().normalize();
+            jdk = pathFromUri(targetInfo.javaHome);
         }
-        JrtInput jrtInput = new JrtInput(jdk);
+        JrtInput jrtInput = new JrtInput(jdk, collector);
 
         if (!sources.containsKey(jrtInput.sourceUri().toString())) {
             sources.put(jrtInput.sourceUri().toString(), jrtInput);
@@ -213,7 +241,8 @@ public final class IndexService {
                                             Map<String, MbtTargetInfo> namespaces,
                                             List<ClasspathEntry> classpathEntries,
                                             Map<String, InputSource> sources,
-                                            Set<String> visited) {
+                                            Set<String> visited,
+                                            ScanCollector collector) {
         if (depNamespaceId == null || depNamespaceId.isBlank() || !visited.add(depNamespaceId)) {
             return;
         }
@@ -221,7 +250,7 @@ public final class IndexService {
         if (dep == null) {
             return;
         }
-        addSourceRoots(dep.sources, workspacePath, classpathEntries, sources);
+        addSourceRoots(dep.sources, workspacePath, classpathEntries, sources, collector);
         /* if (dep.dependsOn != null) {
             for (String transitive : dep.dependsOn) {
                 addDependsOnEntries(transitive, workspacePath, dependencyModules, namespaces,
@@ -234,7 +263,8 @@ public final class IndexService {
     private static void addSourceRoots(List<String> roots,
                                        Path workspacePath,
                                        List<ClasspathEntry> classpathEntries,
-                                       Map<String, InputSource> sources) {
+                                       Map<String, InputSource> sources,
+                                       ScanCollector collector) {
         if (roots == null) {
             return;
         }
@@ -243,7 +273,7 @@ public final class IndexService {
             if (Files.isDirectory(sourcePath)) {
                 String sourceUri = sourcePath.toUri().toString();
                 classpathEntries.add(UriClasspathEntry.of(sourceUri));
-                sources.putIfAbsent(sourceUri, new DirInput(sourcePath));
+                sources.putIfAbsent(sourceUri, new DirInput(sourcePath, collector));
             }
         }
     }
