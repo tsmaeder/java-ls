@@ -71,7 +71,7 @@ public final class Descriptors {
                 pos[0]++;
                 Type elem = parseOne(desc, pos);
                 if (elem == null) return null;
-                return new Type.Array(elem);
+                return Type.array(elem);
             }
             case 'L': {
                 int semi = desc.indexOf(';', pos[0]);

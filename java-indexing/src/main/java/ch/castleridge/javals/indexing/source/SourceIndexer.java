@@ -510,7 +510,7 @@ public final class SourceIndexer {
             };
         }
         if (t instanceof ArrayTypeTree at) {
-            return new Type.Array(toTypeRef(at.getType(), typeParams, ownerJvm));
+            return Type.array(toTypeRef(at.getType(), typeParams, ownerJvm));
         }
         if (t instanceof WildcardTree wt) {
             Tree bound = wt.getBound();
@@ -527,7 +527,7 @@ public final class SourceIndexer {
             for (Tree arg : pt.getTypeArguments()) {
                 args.add(toTypeRef(arg, typeParams, ownerJvm));
             }
-            return new Type.Parameterized(raw, EmptyArrays.toArray(args, EmptyArrays.TYPE));
+            return Type.parameterized(raw, EmptyArrays.toArray(args, EmptyArrays.TYPE));
         }
         if (t instanceof IdentifierTree id) {
             String name = id.getName().toString();
@@ -805,7 +805,7 @@ public final class SourceIndexer {
             return jvm == null ? TypeRef.unresolved("?") : TypeRef.resolved(jvm);
         }
         if (e instanceof ArrayTypeTree at) {
-            return new Type.Array(typeRefForExpression((ExpressionTree) at.getType()));
+            return Type.array(typeRefForExpression((ExpressionTree) at.getType()));
         }
         if (e instanceof PrimitiveTypeTree pt) {
             return switch (pt.getPrimitiveTypeKind()) {

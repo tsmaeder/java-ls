@@ -805,7 +805,7 @@ public final class ClassFileIndexer {
                     int dims = asmType.getDimensions();
                     Type out = elem;
                     for (int i = 0; i < dims; i++) {
-                        out = new Type.Array(out);
+                        out = Type.array(out);
                     }
                     return out;
                 }

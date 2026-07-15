@@ -302,7 +302,7 @@ public final class SignatureRefs {
 
         protected void emit(Type type) {
             if (array) {
-                type = new Type.Array(type);
+                type = Type.array(type);
                 array = false;
             }
             sink.accept(type);
@@ -351,7 +351,7 @@ public final class SignatureRefs {
             TypeRef raw = TypeRef.resolved(className);
             Type type = typeArgs.isEmpty()
                     ? raw
-                    : new Type.Parameterized(raw, EmptyArrays.toArray(typeArgs, EmptyArrays.TYPE));
+                    : Type.parameterized(raw, EmptyArrays.toArray(typeArgs, EmptyArrays.TYPE));
             emit(type);
         }
     }

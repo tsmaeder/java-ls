@@ -1,5 +1,6 @@
 package ch.castleridge.javals.indexing.model;
 
+import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -30,12 +31,14 @@ import ch.castleridge.javals.indexing.intern.Interner;
  * {@link Array}, {@link TypeRef.Resolved}, {@link TypeVariable},
  * {@link Wildcard} and {@link Parameterized} leaves.
  *
- * <p>{@link TypeRef.Resolved} and {@link TypeRef.Unresolved} are
- * constructed through {@link TypeRef#resolved(String)} /
- * {@link TypeRef#unresolved(String)} factories which cache instances by
- * name. The indexer emits millions of refs for a small set of common JVM
- * names (most of {@code java.lang}, etc.); sharing a single record per
- * distinct name turns a ~100 MiB allocation into a few kilobytes.
+ * <p>{@link TypeRef} leaves, {@link TypeVariable}s, and annotation-free
+ * structural forms ({@link Array}, {@link Wildcard}, {@link Parameterized})
+ * are obtained through factories that cache by shape. Prefer those factories
+ * ({@link TypeRef#resolved(String)}, {@link #array(Type)},
+ * {@link #parameterized(TypeRef, Type[])}, {@link Wildcard#unbounded()}, …)
+ * over the record constructors. {@link Annotated} wrappers are never
+ * interned — type-use annotations stay unique per occurrence so they do not
+ * poison the structural caches.
  */
 public sealed interface Type
         permits Type.Primitive,
@@ -104,7 +107,11 @@ public sealed interface Type
         }
     }
 
-    /** An array type; {@code element} may itself be any {@link Type}. */
+    /**
+     * An array type; {@code element} may itself be any {@link Type}.
+     *
+     * <p>Prefer {@link Type#array(Type)} so annotation-free shapes are shared.
+     */
     record Array(Type element) implements Type {
         public Array {
             if (element == null) {
@@ -129,28 +136,54 @@ public sealed interface Type
      * A wildcard type argument: unbounded {@code ?}, {@code ? extends X},
      * or {@code ? super X}. {@code bound} is {@code null} for unbounded
      * {@code ?}.
+     *
+     * <p>Prefer the factories ({@link #unbounded()}, {@link #extendsBound(Type)},
+     * {@link #superBound(Type)}) so annotation-free shapes are shared.
      */
     record Wildcard(BoundKind kind, Type bound) implements Type {
         public enum BoundKind {
             UNBOUNDED, EXTENDS, SUPER
         }
 
+        private static final Wildcard UNBOUNDED = new Wildcard(BoundKind.UNBOUNDED, null);
+
         public static Wildcard unbounded() {
-            return new Wildcard(BoundKind.UNBOUNDED, null);
+            return UNBOUNDED;
         }
 
         public static Wildcard extendsBound(Type bound) {
-            return new Wildcard(BoundKind.EXTENDS, bound);
+            if (bound instanceof Annotated) {
+                return new Wildcard(BoundKind.EXTENDS, bound);
+            }
+            return cachedWildcard(BoundKind.EXTENDS, bound, TypeCaches.EXTENDS);
         }
 
         public static Wildcard superBound(Type bound) {
-            return new Wildcard(BoundKind.SUPER, bound);
+            if (bound instanceof Annotated) {
+                return new Wildcard(BoundKind.SUPER, bound);
+            }
+            return cachedWildcard(BoundKind.SUPER, bound, TypeCaches.SUPER);
+        }
+
+        private static Wildcard cachedWildcard(
+                BoundKind kind, Type bound, ConcurrentMap<Type, Wildcard> cache) {
+            if (bound == null) {
+                return new Wildcard(kind, null);
+            }
+            Wildcard cached = cache.get(bound);
+            if (cached != null) return cached;
+            Wildcard made = new Wildcard(kind, bound);
+            Wildcard prior = cache.putIfAbsent(bound, made);
+            return prior == null ? made : prior;
         }
     }
 
     /**
      * A parameterized type such as {@code List<String>} or
      * {@code Expectation<? super T>}.
+     *
+     * <p>Prefer {@link Type#parameterized(TypeRef, Type[])} so annotation-free
+     * shapes are shared.
      */
     record Parameterized(TypeRef raw, Type[] typeArgs) implements Type {
         public Parameterized {
@@ -174,5 +207,57 @@ public sealed interface Type
         TypeVariable made = new TypeVariable(key);
         TypeVariable prior = TYPE_VARIABLE_CACHE.putIfAbsent(key, made);
         return prior == null ? made : prior;
+    }
+
+    /**
+     * Return a cached {@link Array} for {@code element} when the element is
+     * not an {@link Annotated} wrapper; annotated array types are allocated
+     * fresh so type-use annotations stay unique.
+     */
+    static Array array(Type element) {
+        if (element == null) {
+            throw new IllegalArgumentException("element must not be null");
+        }
+        if (element instanceof Annotated) {
+            return new Array(element);
+        }
+        Array cached = TypeCaches.ARRAY.get(element);
+        if (cached != null) return cached;
+        Array made = new Array(element);
+        Array prior = TypeCaches.ARRAY.putIfAbsent(element, made);
+        return prior == null ? made : prior;
+    }
+
+    /**
+     * Return a cached {@link Parameterized} for {@code raw} and
+     * {@code typeArgs} when no argument is {@link Annotated}; annotated
+     * type arguments force a fresh allocation.
+     */
+    static Parameterized parameterized(TypeRef raw, Type[] typeArgs) {
+        if (raw == null) {
+            throw new IllegalArgumentException("raw must not be null");
+        }
+        typeArgs = EmptyArrays.orEmpty(typeArgs, EmptyArrays.TYPE);
+        if (hasAnnotatedArg(typeArgs)) {
+            return new Parameterized(raw, typeArgs);
+        }
+        TypeCaches.ParameterizedKey probe = new TypeCaches.ParameterizedKey(raw, typeArgs);
+        Parameterized cached = TypeCaches.PARAMETERIZED.get(probe);
+        if (cached != null) return cached;
+        Type[] owned = typeArgs.length == 0
+                ? EmptyArrays.TYPE
+                : Arrays.copyOf(typeArgs, typeArgs.length);
+        Parameterized made = new Parameterized(raw, owned);
+        TypeCaches.ParameterizedKey key =
+                owned == typeArgs ? probe : new TypeCaches.ParameterizedKey(raw, owned);
+        Parameterized prior = TypeCaches.PARAMETERIZED.putIfAbsent(key, made);
+        return prior == null ? made : prior;
+    }
+
+    private static boolean hasAnnotatedArg(Type[] typeArgs) {
+        for (Type arg : typeArgs) {
+            if (arg instanceof Annotated) return true;
+        }
+        return false;
     }
 }
