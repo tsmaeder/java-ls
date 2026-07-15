@@ -1,5 +1,7 @@
 package ch.castleridge.javals.indexing.model;
 
+import ch.castleridge.javals.indexing.intern.Interner;
+
 /**
  * A single indexed module declaration, mirroring the JVMS Module attribute
  * (JEP 261 / JLS §7.7).
@@ -14,9 +16,12 @@ package ch.castleridge.javals.indexing.model;
  *
  * <p>{@link #flags()} is the raw {@code Module} access flag set
  * ({@code ACC_OPEN}, {@code ACC_SYNTHETIC}, {@code ACC_MANDATED}).
+ *
+ * <p>{@link #resourcePath()} is compact relative to {@link #sourceUri()} when
+ * possible; prefer {@link #resourceUri()} for the full location.
  */
 public record ModuleEntry(
-        String resourceUri,
+        String resourcePath,
         String sourceUri,
         String name,
         String version,
@@ -33,12 +38,18 @@ public record ModuleEntry(
         if (name == null || name.isEmpty()) {
             throw new IllegalArgumentException("module name must be non-empty");
         }
+        sourceUri = sourceUri == null ? null : Interner.intern(sourceUri);
+        resourcePath = ResourceUris.compact(resourcePath, sourceUri);
         requires = EmptyArrays.orEmpty(requires, EmptyArrays.REQUIRES);
         exports = EmptyArrays.orEmpty(exports, EmptyArrays.EXPORTS);
         opens = EmptyArrays.orEmpty(opens, EmptyArrays.OPENS);
         uses = EmptyArrays.orEmpty(uses, EmptyArrays.STRING);
         provides = EmptyArrays.orEmpty(provides, EmptyArrays.PROVIDES);
         packages = EmptyArrays.orEmpty(packages, EmptyArrays.STRING);
+    }
+
+    public String resourceUri() {
+        return ResourceUris.resolve(sourceUri, resourcePath);
     }
 
     public EntryKind kind() {

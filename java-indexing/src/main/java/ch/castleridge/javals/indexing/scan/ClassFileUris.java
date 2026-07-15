@@ -1,7 +1,6 @@
 package ch.castleridge.javals.indexing.scan;
 
 import java.net.URI;
-import java.nio.file.Path;
 
 /**
  * Derives JVM binary names from resource URIs produced by the walkers,
@@ -30,20 +29,8 @@ public final class ClassFileUris {
     }
 
     private static String entryPath(String resourceUri, String sourceUri) {
-        int bang = resourceUri.indexOf("!/");
-        if (bang >= 0) {
-            return resourceUri.substring(bang + 2);
-        }
-        if (sourceUri != null && resourceUri.startsWith("file:") && sourceUri.startsWith("file:")) {
-            try {
-                Path resource = Path.of(URI.create(resourceUri));
-                Path source = Path.of(URI.create(sourceUri));
-                if (resource.startsWith(source)) {
-                    return source.relativize(resource).toString().replace('\\', '/');
-                }
-            } catch (RuntimeException ignored) {
-            }
-        }
+        String relative = ch.castleridge.javals.indexing.model.ResourceUris.relativePath(resourceUri, sourceUri);
+        if (relative != null) return relative;
         String path = URI.create(resourceUri).getPath();
         if (path == null) return "";
         if (path.startsWith("/")) path = path.substring(1);

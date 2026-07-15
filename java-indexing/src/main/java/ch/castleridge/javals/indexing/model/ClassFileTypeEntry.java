@@ -1,10 +1,16 @@
 package ch.castleridge.javals.indexing.model;
 
+import ch.castleridge.javals.indexing.intern.Interner;
+
 /**
  * Indexed type declaration produced from classfile parsing.
+ *
+ * <p>{@link #resourcePath()} holds either an interned path relative to
+ * {@link #sourceUri()} or an absolute URI when compaction is not
+ * loss-free. Prefer {@link #resourceUri()} for the full resource location.
  */
 public record ClassFileTypeEntry(
-        String resourceUri,
+        String resourcePath,
         String sourceUri,
         String jvmOwnerName,
         int modifiers,
@@ -19,6 +25,8 @@ public record ClassFileTypeEntry(
         AnnotationRef[] annotations) implements TypeEntry {
 
     public ClassFileTypeEntry {
+        sourceUri = sourceUri == null ? null : Interner.intern(sourceUri);
+        resourcePath = ResourceUris.compact(resourcePath, sourceUri);
         interfaceRefs = EmptyArrays.orEmpty(interfaceRefs, EmptyArrays.TYPE);
         typeParams = EmptyArrays.orEmpty(typeParams, EmptyArrays.TYPE_PARAM);
         fields = EmptyArrays.orEmpty(fields, EmptyArrays.FIELD);
@@ -27,6 +35,11 @@ public record ClassFileTypeEntry(
         permittedSubclasses = EmptyArrays.orEmpty(permittedSubclasses, EmptyArrays.TYPE_REF);
         recordComponents = EmptyArrays.orEmpty(recordComponents, EmptyArrays.RECORD_COMPONENT);
         annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION_REF);
+    }
+
+    @Override
+    public String resourceUri() {
+        return ResourceUris.resolve(sourceUri, resourcePath);
     }
 
     /** Backward-compatible constructor without {@link #recordComponents()}. */

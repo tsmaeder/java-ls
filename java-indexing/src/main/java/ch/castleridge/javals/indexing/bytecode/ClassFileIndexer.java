@@ -203,11 +203,9 @@ public final class ClassFileIndexer {
 
         CollectingVisitor(URI uri, URI sourceUri) {
             super(ASM_API);
-            // resourceUri is unique per class (many methods/fields share it
-            // via the single String reference stored on the visitor).
-            // sourceUri is shared across every entry in the same classpath
-            // input, so we intern it once to collapse the hundreds of
-            // thousands of duplicate copies.
+            // resourceUri is compacted against sourceUri when the TypeEntry
+            // / ModuleEntry is built (see ResourceUris). Keep the full URI
+            // on the visitor only for the duration of a single class parse.
             this.uri = uri == null ? null : uri.toString();
             this.sourceUri = sourceUri == null ? null : Interner.intern(sourceUri.toString());
         }

@@ -4,6 +4,10 @@ package ch.castleridge.javals.indexing.model;
  * Common surface for indexed type declarations regardless of origin
  * (source parser or classfile parser). Origin-specific payload is carried
  * by {@link SourceTypeEntry} and {@link ClassFileTypeEntry}.
+ *
+ * <p>{@link #resourceUri()} is the full resource location, reconstructed
+ * from the compact {@code resourcePath} stored on the concrete entry and
+ * {@link #sourceUri()} when compaction is loss-free (see {@link ResourceUris}).
  */
 public sealed interface TypeEntry extends IndexEntry permits SourceTypeEntry, ClassFileTypeEntry {
     String resourceUri();
