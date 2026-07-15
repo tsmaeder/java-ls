@@ -1,7 +1,5 @@
 package ch.castleridge.javals.indexing.source;
 
-import java.net.URI;
-
 import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
@@ -13,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SourceIndexerBloomTest {
 
-    private static final URI RESOURCE_URI = URI.create("mem:///Refs.java");
-    private static final URI SOURCE_URI = URI.create("index:///source/");
+    private static final String RESOURCE_URI = "mem:///Refs.java";
+    private static final String SOURCE_URI = "index:///source/";
 
     @Test
     void registersBloomFilterWithDeclaredAndReferencedIdentifiers() {
@@ -30,7 +28,7 @@ class SourceIndexerBloomTest {
                 }
                 """, index);
 
-        IdentifierBloomFilter bloom = index.bloomFilters().get(RESOURCE_URI.toString());
+        IdentifierBloomFilter bloom = index.bloomFilters().get(RESOURCE_URI);
         assertNotNull(bloom);
         assertTrue(bloom.mightContain("Refs"));
         assertTrue(bloom.mightContain("count"));

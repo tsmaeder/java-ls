@@ -1,6 +1,5 @@
 package ch.castleridge.javals.indexing.source;
 
-import java.net.URI;
 import java.util.Arrays;
 
 import org.junit.jupiter.api.Test;
@@ -29,8 +28,8 @@ class SourceIndexerAnnotationsTest {
     void capturesLiteralStringInSingleElementShorthand() {
         Index index = new Index();
         SourceIndexer.index(
-                URI.create("test:///S.java"),
-                URI.create("test:///src/"),
+                "test:///S.java",
+                "test:///src/",
                 """
                 public class S {
                     @SuppressWarnings("unchecked")
@@ -55,8 +54,8 @@ class SourceIndexerAnnotationsTest {
     void capturesArrayLiteralAndNamedElements() {
         Index index = new Index();
         SourceIndexer.index(
-                URI.create("test:///S.java"),
-                URI.create("test:///src/"),
+                "test:///S.java",
+                "test:///src/",
                 """
                 public class S {
                     @SuppressWarnings({"a", "b"})
@@ -91,8 +90,8 @@ class SourceIndexerAnnotationsTest {
     void capturesClassLiteralAndQualifiedEnumConstant() {
         Index index = new Index();
         SourceIndexer.index(
-                URI.create("test:///S.java"),
-                URI.create("test:///src/"),
+                "test:///S.java",
+                "test:///src/",
                 """
                 import java.lang.annotation.ElementType;
                 public class S {
@@ -132,8 +131,8 @@ class SourceIndexerAnnotationsTest {
     void unsupportedExpressionFallsBackToUnsupportedSentinel() {
         Index index = new Index();
         SourceIndexer.index(
-                URI.create("test:///S.java"),
-                URI.create("test:///src/"),
+                "test:///S.java",
+                "test:///src/",
                 """
                 public class S {
                     static final int FOUR = 2 + 2;

@@ -30,59 +30,60 @@ class ClassFileIndexerMinimalTest {
 
     @Test
     void indexClassCatalogDerivesJvmNameFromUriWithoutBytes() {
-        URI resourceUri = URI.create("jar:file:///lib.jar!/com/example/Hello.class");
-        URI sourceUri = URI.create("file:///lib.jar");
+        String resourcePath = "com/example/Hello.class";
+        String sourceUri = "file:///lib.jar";
 
         Index index = new Index();
-        ClassFileIndexer.indexClassCatalog(resourceUri, sourceUri, index);
+        ClassFileIndexer.indexClassCatalog(resourcePath, sourceUri, index);
 
         assertEquals(1, index.classFileSize());
         ClassFileEntry entry = index.getAllClassFiles("com/example/Hello").get(0);
         assertEquals("com/example/Hello", entry.jvmOwnerName());
+        assertEquals("jar:file:///lib.jar!/com/example/Hello.class", entry.resourceUri());
     }
 
     @Test
     void minimalModeRecordsClassFileEntryNotTypeEntry() throws Exception {
         byte[] classBytes = compileClass("class Sample { }", "Sample");
-        URI resourceUri = URI.create("index:///Sample.class");
-        URI sourceUri = URI.create("index:///cp/");
+        String resourcePath = "index:///Sample.class";
+        String sourceUri = "index:///cp/";
 
         Index index = new Index();
-        ClassFileIndexer.index(resourceUri, sourceUri, classBytes, index, true);
+        ClassFileIndexer.index(resourcePath, sourceUri, classBytes, index, true);
 
         assertEquals(0, index.size());
         assertEquals(1, index.classFileSize());
         assertNull(index.get("Sample"));
         ClassFileEntry entry = index.getAllClassFiles("Sample").get(0);
         assertEquals("Sample", entry.jvmOwnerName());
-        assertEquals(resourceUri.toString(), entry.resourceUri());
+        assertEquals(resourcePath, entry.resourceUri());
     }
 
     @Test
     void minimalModeRecordsModuleFileEntryForModuleInfo() throws Exception {
         byte[] moduleBytes = compileModule("module sample.module { }", "module-info");
-        URI resourceUri = URI.create("index:///module-info.class");
-        URI sourceUri = URI.create("index:///cp/");
+        String resourcePath = "index:///module-info.class";
+        String sourceUri = "index:///cp/";
 
         Index index = new Index();
-        ClassFileIndexer.index(resourceUri, sourceUri, moduleBytes, index, true);
+        ClassFileIndexer.index(resourcePath, sourceUri, moduleBytes, index, true);
 
         assertEquals(0, index.size());
         assertEquals(1, index.moduleFileCount());
         ModuleFileEntry mf = index.getModuleFile("sample.module");
         assertNotNull(mf);
         assertEquals("sample.module", mf.name());
-        assertEquals(resourceUri.toString(), mf.resourceUri());
+        assertEquals(resourcePath, mf.resourceUri());
     }
 
     @Test
     void fullModeStillProducesTypeEntry() throws Exception {
         byte[] classBytes = compileClass("class Sample { }", "Sample");
-        URI resourceUri = URI.create("index:///Sample.class");
-        URI sourceUri = URI.create("index:///cp/");
+        String resourcePath = "index:///Sample.class";
+        String sourceUri = "index:///cp/";
 
         Index index = new Index();
-        ClassFileIndexer.index(resourceUri, sourceUri, classBytes, index, false);
+        ClassFileIndexer.index(resourcePath, sourceUri, classBytes, index, false);
 
         assertEquals(1, index.size());
         assertEquals(0, index.classFileSize());

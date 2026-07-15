@@ -2,7 +2,6 @@ package ch.castleridge.javals.indexing.bytecode;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -85,45 +84,46 @@ public final class ClassFileIndexer {
 
     private ClassFileIndexer() {}
 
-    public static void index(URI uri, URI sourceUri, InputStream in, Index into) throws IOException {
+    public static void index(String resourcePath, String sourceUri, InputStream in, Index into) throws IOException {
         byte[] bytes = in.readAllBytes();
-        index(uri, sourceUri, bytes, into);
+        index(resourcePath, sourceUri, bytes, into);
     }
 
-    public static void index(URI uri, URI sourceUri, InputStream in, Index into, boolean minimal) throws IOException {
+    public static void index(String resourcePath, String sourceUri, InputStream in, Index into, boolean minimal)
+            throws IOException {
         byte[] bytes = in.readAllBytes();
-        index(uri, sourceUri, bytes, into, minimal);
+        index(resourcePath, sourceUri, bytes, into, minimal);
     }
 
-    public static void index(URI uri, URI sourceUri, byte[] bytes, Index into, boolean minimal) {
+    public static void index(String resourcePath, String sourceUri, byte[] bytes, Index into, boolean minimal) {
         if (minimal) {
-            if (Index.isModuleInfoFileName(ClassFileUris.simpleFileName(uri.toString()))) {
-                indexModuleMinimal(uri, sourceUri, bytes, into);
+            if (Index.isModuleInfoFileName(ClassFileUris.simpleFileName(resourcePath))) {
+                indexModuleMinimal(resourcePath, sourceUri, bytes, into);
             } else {
-                indexClassCatalog(uri, sourceUri, into);
+                indexClassCatalog(resourcePath, sourceUri, into);
             }
             return;
         }
-        index(uri, sourceUri, bytes, into);
+        index(resourcePath, sourceUri, bytes, into);
     }
 
     /**
-     * Record a {@link ClassFileEntry} from the resource URI alone (no bytecode read).
+     * Record a {@link ClassFileEntry} from the relative path alone (no bytecode read).
      */
-    public static void indexClassCatalog(URI uri, URI sourceUri, Index into) {
-        String jvmName = ClassFileUris.jvmOwnerName(uri, sourceUri);
+    public static void indexClassCatalog(String resourcePath, String sourceUri, Index into) {
+        String jvmName = ClassFileUris.jvmOwnerName(resourcePath, sourceUri);
         if (Index.isSkippedJvmName(jvmName)) return;
-        into.addClassFile(new ClassFileEntry(uri.toString(), sourceUri.toString(), jvmName));
+        into.addClassFile(new ClassFileEntry(resourcePath, sourceUri, jvmName));
     }
 
     /**
      * Record a minimal {@link ModuleFileEntry} by parsing only the {@code Module}
      * attribute from {@code module-info.class} bytes.
      */
-    public static void indexModuleMinimal(URI uri, URI sourceUri, byte[] bytes, Index into) {
+    public static void indexModuleMinimal(String resourcePath, String sourceUri, byte[] bytes, Index into) {
         if (bytes == null || bytes.length == 0) return;
         ClassReader reader = new ClassReader(bytes);
-        MinimalModuleCollector collector = new MinimalModuleCollector(uri.toString(), sourceUri.toString());
+        MinimalModuleCollector collector = new MinimalModuleCollector(resourcePath, sourceUri);
         reader.accept(collector, ClassReader.SKIP_CODE | ClassReader.SKIP_FRAMES);
         ModuleFileEntry module = collector.toModuleFileEntry();
         if (module != null) {
@@ -131,9 +131,9 @@ public final class ClassFileIndexer {
         }
     }
 
-    public static void index(URI uri, URI sourceUri, byte[] bytes, Index into) {
+    public static void index(String resourcePath, String sourceUri, byte[] bytes, Index into) {
         ClassReader reader = new ClassReader(bytes);
-        CollectingVisitor visitor = new CollectingVisitor(uri, sourceUri);
+        CollectingVisitor visitor = new CollectingVisitor(resourcePath, sourceUri);
         reader.accept(visitor, PARSING_OPTIONS);
         ModuleEntry module = visitor.toModuleEntry();
         if (module != null) {
@@ -150,14 +150,14 @@ public final class ClassFileIndexer {
     }
 
     private static final class MinimalModuleCollector extends ClassVisitor {
-        private final String uri;
+        private final String resourcePath;
         private final String sourceUri;
         private String moduleName;
         private final List<String> packages = new ArrayList<>();
 
-        MinimalModuleCollector(String uri, String sourceUri) {
+        MinimalModuleCollector(String resourcePath, String sourceUri) {
             super(ASM_API);
-            this.uri = uri;
+            this.resourcePath = resourcePath;
             this.sourceUri = sourceUri;
         }
 
@@ -174,13 +174,13 @@ public final class ClassFileIndexer {
 
         ModuleFileEntry toModuleFileEntry() {
             if (moduleName == null) return null;
-            return new ModuleFileEntry(uri, sourceUri, moduleName,
+            return new ModuleFileEntry(resourcePath, sourceUri, moduleName,
                     EmptyArrays.toArray(packages, EmptyArrays.STRING));
         }
     }
 
     private static final class CollectingVisitor extends ClassVisitor {
-        private final String uri;
+        private final String resourcePath;
         private final String sourceUri;
 
         private String jvmName;
@@ -201,13 +201,13 @@ public final class ClassFileIndexer {
         private String mainClass;
         private final List<String> modulePackages = new ArrayList<>();
 
-        CollectingVisitor(URI uri, URI sourceUri) {
+        CollectingVisitor(String resourcePath, String sourceUri) {
             super(ASM_API);
-            // resourceUri is compacted against sourceUri when the TypeEntry
-            // / ModuleEntry is built (see ResourceUris). Keep the full URI
-            // on the visitor only for the duration of a single class parse.
-            this.uri = uri == null ? null : uri.toString();
-            this.sourceUri = sourceUri == null ? null : Interner.intern(sourceUri.toString());
+            // resourcePath may be a relative path or (for synthetic test URIs)
+            // an absolute URI; ResourceUris.compact normalises storage when
+            // the TypeEntry / ModuleEntry is built.
+            this.resourcePath = resourcePath;
+            this.sourceUri = sourceUri == null ? null : Interner.intern(sourceUri);
         }
 
         @Override
@@ -531,7 +531,7 @@ public final class ClassFileIndexer {
                 @Override
                 public void visitEnd() {
                     moduleEntry = new ModuleEntry(
-                            uri,
+                            resourcePath,
                             sourceUri,
                             modName,
                             modVersion,
@@ -607,7 +607,7 @@ public final class ClassFileIndexer {
             // Private nested types are never visible from another CU.
             if (!AccessVisibility.shouldIndexType(access)) return null;
             return new ClassFileTypeEntry(
-                    uri,
+                    resourcePath,
                     sourceUri,
                     jvmName,
                     access,

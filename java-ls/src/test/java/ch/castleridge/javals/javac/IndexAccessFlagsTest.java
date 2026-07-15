@@ -1,6 +1,5 @@
 package ch.castleridge.javals.javac;
 
-import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
 
@@ -22,8 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class IndexAccessFlagsTest {
-    private static final URI RESOURCE_URI = URI.create("mem:///Test.java");
-    private static final URI SOURCE_URI = URI.create("index:///source/");
+    private static final String RESOURCE_URI = "mem:///Test.java";
+    private static final String SOURCE_URI = "index:///source/";
 
     @Test
     void interfaceMembersApplyImplicitClassfileFlags() {

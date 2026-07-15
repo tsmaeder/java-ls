@@ -62,14 +62,14 @@ class ClassFileIndexerVisibilityTest {
             assertTrue(compiler.getTask(null, fm, d -> {}, List.of(), List.of(), List.of(src)).call());
 
             Index index = new Index();
-            URI sourceUri = URI.create("index:///cp/");
+            String sourceUri = "index:///cp/";
             for (String name : List.of(
                     "Visible.class",
                     "Visible$NestedPub.class",
                     "Visible$NestedPriv.class")) {
                 Path classFile = outDir.resolve("p").resolve(name);
                 ClassFileIndexer.index(
-                        URI.create("index:///p/" + name),
+                        "index:///p/" + name,
                         sourceUri,
                         Files.readAllBytes(classFile),
                         index);

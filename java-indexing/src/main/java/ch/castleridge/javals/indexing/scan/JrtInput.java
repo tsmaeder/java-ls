@@ -15,21 +15,17 @@ import java.util.stream.Stream;
 import ch.castleridge.javals.indexing.index.Index;
 
 /**
- * JRT image entries. Specify {@link #ALL} for every module or a concrete
- * module name such as {@code "java.base"}.
+ * JRT image entries for a JDK install.
  *
- * <p>If {@code javaHome} is {@code null}, the running JVM's {@code jrt:/}
- * filesystem is walked. Otherwise a fresh {@code jrt:/} filesystem is
- * opened with a {@code java.home} override so arbitrary JDK installs can
- * be indexed.
+ * <p>A fresh {@code jrt:/} filesystem is opened with a {@code java.home}
+ * override so arbitrary JDK installs can be indexed.
  *
- * <p>Every URI produced by this input - both the {@link #sourceUri()}
- * stamped on every emitted entry and the per-resource URIs emitted by
- * the walker - has the shape
- * {@code jrt:///<absolute-java-home>?<path-within-jrt-fs>}. Embedding
- * the JDK install path means entries from different JDKs never collide
- * on the same key, and any consumer holding a resource URI can recover
- * the originating install without consulting auxiliary metadata.
+ * <p>{@link #sourceUri()} has the shape {@code jrt:///<absolute-java-home>}.
+ * Walkers emit paths inside the jrt filesystem (e.g.
+ * {@code modules/java.base/java/lang/Object.class}); full resource URIs are
+ * rebuilt later as {@code sourceUri + "!/" + relativePath}. Embedding the
+ * JDK install path in {@code sourceUri} means entries from different JDKs
+ * never collide on the same key.
  */
 public final class JrtInput implements InputSource {
     public final Path javaHome;
@@ -46,14 +42,13 @@ public final class JrtInput implements InputSource {
 
     @Override
     public void walk(ResourceSink sink, boolean indexClassFiles) {
-        String javaHomeUriPath = sourceUri();
         try (FileSystem fs = FileSystems.newFileSystem(
                 URI.create("jrt:/"),
                 Map.of("java.home", javaHome.toString()))) {
             Path modulesRoot = fs.getPath("modules");
             try (Stream<Path> list = Files.list(modulesRoot)) {
                 for (Path mod : (Iterable<Path>) list::iterator) {
-                    walkModule(mod, sink, javaHomeUriPath, indexClassFiles);
+                    walkModule(mod, sink, indexClassFiles);
                 }
             }
         } catch (IOException e) {
@@ -66,7 +61,7 @@ public final class JrtInput implements InputSource {
         return "jrt://" + this.javaHome.toUri().getRawPath();
     }
 
-    private void walkModule(Path moduleRoot, ResourceSink sink, String javaHomeUriPath,
+    private void walkModule(Path moduleRoot, ResourceSink sink,
                             boolean indexClassFiles) throws IOException {
         if (!Files.exists(moduleRoot)) return;
         Files.walkFileTree(moduleRoot, new SimpleFileVisitor<>() {
@@ -74,7 +69,7 @@ public final class JrtInput implements InputSource {
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 String name = file.getFileName().toString();
                 if (isIndexable(name)) {
-                    String uri = jrtUri(javaHomeUriPath, file);
+                    String relativePath = jrtRelativePath(file);
                     recordStats(name, attrs.size());
                     if (shouldReadContents(indexClassFiles, name)) {
                         // Read eagerly: the sink typically defers to an async task,
@@ -84,13 +79,13 @@ public final class JrtInput implements InputSource {
                             if (collector != null && name.endsWith(".class") && attrs.size() < 0) {
                                 collector.addClassFileBytes(bytes.length);
                             }
-                            sink.accept(uri, name, () -> bytes);
+                            sink.accept(relativePath, name, () -> bytes);
                         } catch (IOException ioe) {
-                            System.err.println("Skipping unreadable jrt entry " + uri
+                            System.err.println("Skipping unreadable jrt entry " + relativePath
                                     + ": " + ioe.getClass().getSimpleName() + ": " + ioe.getMessage());
                         }
                     } else {
-                        sink.accept(uri, name, null);
+                        sink.accept(relativePath, name, null);
                     }
                 }
                 return FileVisitResult.CONTINUE;
@@ -111,17 +106,11 @@ public final class JrtInput implements InputSource {
         return indexClassFiles || !name.endsWith(".class") || Index.isModuleInfoFileName(name);
     }
 
-    /**
-     * Build the resource URI for {@code file} in the
-     * {@code jrt:///<absolute-java-home>?<path-within-jrt-fs>} form.
-     * Embedding the java home means entries from different JDK installs
-     * can never collide on the same key, and the install is recoverable
-     * from any URI later.
-     */
-    private static String jrtUri(String javaHomeUriPath, Path file) {
+    /** Path within the jrt filesystem, without a leading slash. */
+    private static String jrtRelativePath(Path file) {
         String inside = file.toUri().getRawPath();
         if (inside.startsWith("/")) inside = inside.substring(1);
-        return javaHomeUriPath + "!/" + inside;
+        return inside;
     }
 
     private static boolean isIndexable(String name) {

@@ -25,12 +25,12 @@ public record DirInput(Path root, ScanCollector collector) implements InputSourc
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                     String name = file.getFileName().toString();
                     if (isIndexable(name)) {
-                        String uri = file.toUri().toString();
+                        String relativePath = root.relativize(file).toString().replace('\\', '/');
                         recordStats(name, attrs.size());
                         if (shouldReadContents(indexClassFiles, name)) {
-                            sink.accept(uri, name, () -> Files.readAllBytes(file));
+                            sink.accept(relativePath, name, () -> Files.readAllBytes(file));
                         } else {
-                            sink.accept(uri, name, null);
+                            sink.accept(relativePath, name, null);
                         }
                     }
                     return FileVisitResult.CONTINUE;

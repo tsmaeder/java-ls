@@ -60,8 +60,8 @@ class ClassFileIndexerAnnotationValuesTest {
 
             Index index = new Index();
             ClassFileIndexer.index(
-                    URI.create("index:///V.class"),
-                    URI.create("index:///cp/"),
+                    "index:///V.class",
+                    "index:///cp/",
                     vBytes,
                     index);
 
@@ -110,8 +110,8 @@ class ClassFileIndexerAnnotationValuesTest {
 
             Index index = new Index();
             ClassFileIndexer.index(
-                    URI.create("index:///Use.class"),
-                    URI.create("index:///cp/"),
+                    "index:///Use.class",
+                    "index:///cp/",
                     userBytes,
                     index);
 
@@ -149,8 +149,8 @@ class ClassFileIndexerAnnotationValuesTest {
 
             Index index = new Index();
             ClassFileIndexer.index(
-                    URI.create("index:///WithDefault.class"),
-                    URI.create("index:///cp/"),
+                    "index:///WithDefault.class",
+                    "index:///cp/",
                     bytes,
                     index);
 
@@ -178,8 +178,8 @@ class ClassFileIndexerAnnotationValuesTest {
                     """);
             Index regIndex = new Index();
             ClassFileIndexer.index(
-                    URI.create("index:///Reg.class"),
-                    URI.create("index:///cp/"),
+                    "index:///Reg.class",
+                    "index:///cp/",
                     regularBytes,
                     regIndex);
             MethodEntry reg = methodNamed(regIndex.get("Reg"), "noDefault");

@@ -1,6 +1,5 @@
 package ch.castleridge.javals.indexing.scan;
 
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -36,7 +35,8 @@ import ch.castleridge.javals.indexing.source.SourceIndexer;
  *
  * <p>Every emitted {@link ch.castleridge.javals.indexing.model.TypeEntry}
  * is stamped with the {@link InputSource#sourceUri()} of the source it
- * came from; the index keeps all duplicates.
+ * came from; the index keeps all duplicates. Walkers supply relative paths
+ * only; full resource URIs are resolved on demand from sourceUri + path.
  */
 public final class Scanner {
 
@@ -117,10 +117,10 @@ public final class Scanner {
         Index temp = new Index();
         List<ForkJoinTask<?>> indexTasks = new ArrayList<>();
         try {
-            src.walk((uri, fileName, bytes) -> {
+            src.walk((relativePath, fileName, bytes) -> {
                 if (bytes == null) {
                     try {
-                        indexOne(uri, srcUri, fileName, null, temp, false, false);
+                        indexOne(relativePath, srcUri, fileName, null, temp, false, false);
                     } catch (Throwable t) {
                         failures.add(t);
                     }
@@ -129,7 +129,7 @@ public final class Scanner {
                 boolean pruneJava = prunedSource && src instanceof DirInput;
                 ForkJoinTask<?> task = pool.submit(() -> {
                     try {
-                        indexOne(uri, srcUri, fileName, bytes.get(), temp, indexClassFiles, pruneJava);
+                        indexOne(relativePath, srcUri, fileName, bytes.get(), temp, indexClassFiles, pruneJava);
                     } catch (Throwable t) {
                         failures.add(t);
                     }
@@ -155,21 +155,20 @@ public final class Scanner {
         into.addAll(temp);
     }
 
-    private static void indexOne(String uri, String sourceUri, String fileName, byte[] content, Index into,
+    private static void indexOne(String relativePath, String sourceUri, String fileName, byte[] content, Index into,
                                boolean indexClassFiles, boolean prunedJava) {
         if (fileName.endsWith(".class")) {
             if (!indexClassFiles) {
                 if (Index.isModuleInfoFileName(fileName)) {
-                    ClassFileIndexer.indexModuleMinimal(
-                            URI.create(uri), URI.create(sourceUri), content, into);
+                    ClassFileIndexer.indexModuleMinimal(relativePath, sourceUri, content, into);
                 } else {
-                    ClassFileIndexer.indexClassCatalog(URI.create(uri), URI.create(sourceUri), into);
+                    ClassFileIndexer.indexClassCatalog(relativePath, sourceUri, into);
                 }
                 return;
             }
-            ClassFileIndexer.index(URI.create(uri), URI.create(sourceUri), content, into);
+            ClassFileIndexer.index(relativePath, sourceUri, content, into);
         } else if (fileName.endsWith(".java")) {
-            SourceIndexer.index(URI.create(uri), URI.create(sourceUri),
+            SourceIndexer.index(relativePath, sourceUri,
                     new String(content, StandardCharsets.UTF_8), into, prunedJava);
         }
     }

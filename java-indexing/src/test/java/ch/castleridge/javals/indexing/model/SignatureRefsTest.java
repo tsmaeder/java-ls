@@ -55,8 +55,8 @@ class SignatureRefsTest {
 
         Index index = new Index();
         ClassFileIndexer.index(
-                java.net.URI.create("index:///pkg/Cf.class"),
-                java.net.URI.create("index:///cp/"),
+                "index:///pkg/Cf.class",
+                "index:///cp/",
                 cw.toByteArray(),
                 index);
 
@@ -126,8 +126,8 @@ class SignatureRefsTest {
 
         Index index = new Index();
         ClassFileIndexer.index(
-                java.net.URI.create("index:///pkg/Future.class"),
-                java.net.URI.create("index:///cp/"),
+                "index:///pkg/Future.class",
+                "index:///cp/",
                 cw.toByteArray(),
                 index);
 

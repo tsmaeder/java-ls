@@ -55,6 +55,7 @@ import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ParameterEntry;
 import ch.castleridge.javals.indexing.model.PrunedSourceEntry;
+import ch.castleridge.javals.indexing.model.ResourceUris;
 import ch.castleridge.javals.indexing.model.SourceResolutionHints;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.SourceTypeEntry;
@@ -87,23 +88,24 @@ public final class SourceIndexer {
 
     private SourceIndexer() {}
 
-    public static void index(URI uri, URI sourceUri, CharSequence content, Index into) {
-        index(uri, sourceUri, content, into, false);
+    public static void index(String resourcePath, String sourceUri, CharSequence content, Index into) {
+        index(resourcePath, sourceUri, content, into, false);
     }
 
-    public static void index(URI uri, URI sourceUri, CharSequence content, Index into, boolean pruned) {
+    public static void index(String resourcePath, String sourceUri, CharSequence content, Index into, boolean pruned) {
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
-        JavaFileObject input = new InMemorySource(uri, content);
+        String resourceUriStr = ResourceUris.resolve(sourceUri, resourcePath);
+        URI resourceUri = resourceUriStr == null ? null : URI.create(resourceUriStr);
+        JavaFileObject input = new InMemorySource(resourceUri, content);
         JavacTask task = (JavacTask) compiler.getTask(
                 null, null, d -> {}, List.of(), List.of(), List.of(input));
-        String resourceUriStr = uri == null ? null : uri.toString();
-        String sourceUriStr = sourceUri == null ? null : Interner.intern(sourceUri.toString());
+        String sourceUriStr = sourceUri == null ? null : Interner.intern(sourceUri);
         try {
             for (CompilationUnitTree cu : task.parse()) {
                 if (pruned) {
-                    indexPrunedCompilationUnit(resourceUriStr, sourceUriStr, uri, cu, task, into);
+                    indexPrunedCompilationUnit(resourcePath, sourceUriStr, resourceUri, cu, task, into);
                 } else {
-                    indexCompilationUnit(resourceUriStr, sourceUriStr, cu, into);
+                    indexCompilationUnit(resourcePath, sourceUriStr, cu, into);
                 }
                 if (resourceUriStr != null) {
                     try {
@@ -121,18 +123,18 @@ public final class SourceIndexer {
         }
     }
 
-    private static void indexPrunedCompilationUnit(String resourceUri,
+    private static void indexPrunedCompilationUnit(String resourcePath,
                                                    String sourceUri,
-                                                   URI uri,
+                                                   URI resourceUri,
                                                    CompilationUnitTree cu,
                                                    JavacTask task,
                                                    Index into) {
-        if (resourceUri == null) return;
+        if (resourcePath == null) return;
         Context context = ((JavacTaskImpl) task).getContext();
         String prunedText = SourcePruner.prune(cu, context);
         String packageName = cu.getPackageName() == null ? "" : cu.getPackageName().toString();
         String packageJvm = Interner.intern(packageName.replace('.', '/'));
-        String primarySimple = primaryTopLevelSimpleName(cu, uri);
+        String primarySimple = primaryTopLevelSimpleName(cu, resourceUri);
         if (primarySimple == null || primarySimple.isEmpty()) return;
         String primaryBinaryName = packageJvm.isEmpty()
                 ? Interner.intern(primarySimple)
@@ -143,7 +145,7 @@ public final class SourceIndexer {
                 : packageJvm + "/" + primarySimple + ".java";
         relativeName = Interner.intern(relativeName);
         into.addPrunedSource(new PrunedSourceEntry(
-                resourceUri, sourceUri, packageJvm, relativeName, primaryBinaryName,
+                resourcePath, sourceUri, packageJvm, relativeName, primaryBinaryName,
                 EmptyArrays.toArray(topLevelNames, EmptyArrays.STRING), prunedText));
     }
 

@@ -50,7 +50,7 @@ class MinimalClassFileCompileTest {
         String objectResource = jrtUri + "!/modules/java.base/java/lang/Object.class";
 
         Index index = new Index();
-        ClassFileIndexer.index(libClass.toUri(), URI.create(cpUri), libBytes, index, true);
+        ClassFileIndexer.index(libClass.toUri().toString(), cpUri, libBytes, index, true);
         index.addClassFile(new ClassFileEntry(objectResource, jrtUri, "java/lang/Object"));
 
         assertEquals(2, index.classFileSize());

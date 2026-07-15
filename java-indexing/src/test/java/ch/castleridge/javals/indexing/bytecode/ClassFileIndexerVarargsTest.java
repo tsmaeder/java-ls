@@ -44,8 +44,8 @@ class ClassFileIndexerVarargsTest {
 
             Index index = new Index();
             ClassFileIndexer.index(
-                    URI.create("index:///V.class"),
-                    URI.create("index:///cp/"),
+                    "index:///V.class",
+                    "index:///cp/",
                     Files.readAllBytes(outDir.resolve("V.class")),
                     index);
 
@@ -90,18 +90,18 @@ class ClassFileIndexerVarargsTest {
 
             Index index = new Index();
             ClassFileIndexer.index(
-                    URI.create("index:///Outer.class"),
-                    URI.create("index:///cp/"),
+                    "index:///Outer.class",
+                    "index:///cp/",
                     Files.readAllBytes(outDir.resolve("Outer.class")),
                     index);
             ClassFileIndexer.index(
-                    URI.create("index:///Outer$StaticNested.class"),
-                    URI.create("index:///cp/"),
+                    "index:///Outer$StaticNested.class",
+                    "index:///cp/",
                     Files.readAllBytes(outDir.resolve("Outer$StaticNested.class")),
                     index);
             ClassFileIndexer.index(
-                    URI.create("index:///Outer$Inner.class"),
-                    URI.create("index:///cp/"),
+                    "index:///Outer$Inner.class",
+                    "index:///cp/",
                     Files.readAllBytes(outDir.resolve("Outer$Inner.class")),
                     index);
 

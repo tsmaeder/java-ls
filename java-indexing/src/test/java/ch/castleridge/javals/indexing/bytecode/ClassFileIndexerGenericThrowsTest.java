@@ -55,8 +55,8 @@ class ClassFileIndexerGenericThrowsTest {
 
             Index index = new Index();
             ClassFileIndexer.index(
-                    URI.create("index:///Sneaky.class"),
-                    URI.create("index:///cp/"),
+                    "index:///Sneaky.class",
+                    "index:///cp/",
                     Files.readAllBytes(outDir.resolve("Sneaky.class")),
                     index);
 
@@ -105,8 +105,8 @@ class ClassFileIndexerGenericThrowsTest {
 
             Index index = new Index();
             ClassFileIndexer.index(
-                    URI.create("index:///Throws.class"),
-                    URI.create("index:///cp/"),
+                    "index:///Throws.class",
+                    "index:///cp/",
                     Files.readAllBytes(outDir.resolve("Throws.class")),
                     index);
 

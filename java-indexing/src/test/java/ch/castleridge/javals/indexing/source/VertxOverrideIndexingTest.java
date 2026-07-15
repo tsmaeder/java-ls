@@ -1,6 +1,5 @@
 package ch.castleridge.javals.indexing.source;
 
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -83,7 +82,7 @@ class VertxOverrideIndexingTest {
     void bytecodeIndexedEventBusImplNextHandlerUsesRawHandlerHolderTypeArg() throws Exception {
         Path classFile = vertxCoreClasses().resolve("io/vertx/core/eventbus/impl/EventBusImpl.class");
         Index index = new Index();
-        ClassFileIndexer.index(classFile.toUri(), URI.create("index:///classes/"), Files.readAllBytes(classFile), index);
+        ClassFileIndexer.index(classFile.toUri().toString(), "index:///classes/", Files.readAllBytes(classFile), index);
         TypeEntry eb = index.get("io/vertx/core/eventbus/impl/EventBusImpl");
         assertNotNull(eb);
         MethodEntry next = method(eb, "nextHandler");

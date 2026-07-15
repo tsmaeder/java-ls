@@ -1,6 +1,5 @@
 package ch.castleridge.javals.indexing.source;
 
-import java.net.URI;
 import java.util.Arrays;
 
 import org.junit.jupiter.api.Test;
@@ -17,8 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class SourceIndexerGenericsTest {
-    private static final URI RESOURCE_URI = URI.create("mem:///Test.java");
-    private static final URI SOURCE_URI = URI.create("index:///source/");
+    private static final String RESOURCE_URI = "mem:///Test.java";
+    private static final String SOURCE_URI = "index:///source/";
 
     @Test
     void expectingMethodPreservesWildcardAndTypeArguments() {

@@ -485,8 +485,8 @@ class IndexCompileTest {
 
             String boxUri = "index:///cp/box/";
             ClassFileIndexer.index(
-                    URI.create("index:///BoundedBox.class"),
-                    URI.create(boxUri),
+                    "index:///BoundedBox.class",
+                    boxUri,
                     boxBytes,
                     index);
 
@@ -618,8 +618,8 @@ class IndexCompileTest {
         Index index = new Index();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         ClassFileIndexer.index(
-                URI.create("index:///VarargHolder.class"),
-                URI.create(SOURCE_URI),
+                "index:///VarargHolder.class",
+                SOURCE_URI,
                 bytes,
                 index);
 
@@ -1096,14 +1096,14 @@ class IndexCompileTest {
 
             String pinUri = "index:///cp/pin/";
             ClassFileIndexer.index(
-                    URI.create("index:///Pin.class"),
-                    URI.create(pinUri),
+                    "index:///Pin.class",
+                    pinUri,
                     pinBytes,
                     index);
 
             SourceIndexer.index(
-                    URI.create("mem:///Marked.java"),
-                    URI.create(SOURCE_URI),
+                    "mem:///Marked.java",
+                    SOURCE_URI,
                     """
                     package com.example;
                     import com.example.Pin;
@@ -1206,8 +1206,8 @@ class IndexCompileTest {
 
             String annUri = "index:///cp/onlymethod/";
             ClassFileIndexer.index(
-                    URI.create("index:///OnlyMethod.class"),
-                    URI.create(annUri),
+                    "index:///OnlyMethod.class",
+                    annUri,
                     annBytes,
                     index);
 
@@ -1303,8 +1303,8 @@ class IndexCompileTest {
 
             String apiUri = "index:///cp/gone/";
             ClassFileIndexer.index(
-                    URI.create("index:///GoneApi.class"),
-                    URI.create(apiUri),
+                    "index:///GoneApi.class",
+                    apiUri,
                     apiBytes,
                     index);
 
@@ -1543,8 +1543,8 @@ class IndexCompileTest {
         String source = Files.readString(file);
         String fileName = file.getFileName().toString();
         SourceIndexer.index(
-                URI.create("mem:///" + fileName),
-                URI.create(SOURCE_URI),
+                "mem:///" + fileName,
+                SOURCE_URI,
                 source,
                 index);
     }
@@ -1582,8 +1582,8 @@ class IndexCompileTest {
 
             String constantsUri = "index:///cp/constants/";
             ClassFileIndexer.index(
-                    URI.create("index:///Constants.class"),
-                    URI.create(constantsUri),
+                    "index:///Constants.class",
+                    constantsUri,
                     constantsBytes,
                     index);
 
@@ -1650,8 +1650,8 @@ class IndexCompileTest {
                 index2.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
                 String nonConstUri = "index:///cp/nonconst/";
                 ClassFileIndexer.index(
-                        URI.create("index:///NonConst.class"),
-                        URI.create(nonConstUri),
+                        "index:///NonConst.class",
+                        nonConstUri,
                         nonConstBytes,
                         index2);
                 ClasspathOrder cp2 = classPathOf(List.of(nonConstUri, SOURCE_URI));
@@ -1729,8 +1729,8 @@ class IndexCompileTest {
 
         Index reindexed = new Index();
         ClassFileIndexer.index(
-                URI.create("index:///roundtrip/java.base/module-info.class"),
-                URI.create("index:///roundtrip/"),
+                "index:///roundtrip/java.base/module-info.class",
+                "index:///roundtrip/",
                 synthesized,
                 reindexed);
         ModuleEntry afterRoundTrip = reindexed.getModule("java.base");
@@ -1780,8 +1780,8 @@ class IndexCompileTest {
                 null));
 
         SourceIndexer.index(
-                URI.create("mem:///Buffer.java"),
-                URI.create(cpUri),
+                "mem:///Buffer.java",
+                cpUri,
                 """
                         package io.example.buffer;
                         public class Buffer {}
@@ -1843,8 +1843,8 @@ class IndexCompileTest {
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
         SourceIndexer.index(
-                URI.create("mem:///Executor.java"),
-                URI.create(cpUri),
+                "mem:///Executor.java",
+                cpUri,
                 """
                         package io.example.pool;
                         public interface Executor<S> {
@@ -1932,8 +1932,8 @@ class IndexCompileTest {
         // Buffer carries class- and method-level annotations from a package
         // (io.example.codegen) that is never indexed nor on the classpath.
         SourceIndexer.index(
-                URI.create("mem:///Buffer.java"),
-                URI.create(cpUri),
+                "mem:///Buffer.java",
+                cpUri,
                 """
                         package io.example.buffer;
                         import io.example.codegen.DataObject;
@@ -2035,10 +2035,10 @@ class IndexCompileTest {
             assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
             String userUri = "index:///cp/com.example/";
-            ClassFileIndexer.index(URI.create("index:///module-info.class"),
-                    URI.create(userUri), moduleInfoBytes, index);
-            ClassFileIndexer.index(URI.create("index:///com/example/api/Service.class"),
-                    URI.create(userUri), serviceBytes, index);
+            ClassFileIndexer.index("index:///module-info.class",
+                    userUri, moduleInfoBytes, index);
+            ClassFileIndexer.index("index:///com/example/api/Service.class",
+                    userUri, serviceBytes, index);
 
             ModuleEntry comExample = index.getModule("com.example");
             assertNotNull(comExample, "com.example should be indexed");
@@ -2163,8 +2163,8 @@ class IndexCompileTest {
             assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
             String typeUseUri = "index:///cp/typeuse/";
-            ClassFileIndexer.index(URI.create("index:///WithTypeUse.class"), URI.create(typeUseUri), withBytes, index);
-            ClassFileIndexer.index(URI.create("index:///NN.class"), URI.create(typeUseUri), nnBytes, index);
+            ClassFileIndexer.index("index:///WithTypeUse.class", typeUseUri, withBytes, index);
+            ClassFileIndexer.index("index:///NN.class", typeUseUri, nnBytes, index);
 
             // Sanity-check that the indexer wrapped the return TypeRef in
             // an Annotated decorator.
@@ -2258,8 +2258,8 @@ class IndexCompileTest {
             assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
             String paramsUri = "index:///cp/params/";
-            ClassFileIndexer.index(URI.create("index:///WithParams.class"), URI.create(paramsUri), withParamsBytes, index);
-            ClassFileIndexer.index(URI.create("index:///Tag.class"), URI.create(paramsUri), tagBytes, index);
+            ClassFileIndexer.index("index:///WithParams.class", paramsUri, withParamsBytes, index);
+            ClassFileIndexer.index("index:///Tag.class", paramsUri, tagBytes, index);
 
             // Sanity-check the indexer captured what we expect before we
             // even hand it to javac.
@@ -2349,7 +2349,7 @@ class IndexCompileTest {
             assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
             String recUri = "index:///cp/point/";
-            ClassFileIndexer.index(URI.create("index:///Point.class"), URI.create(recUri), pointBytes, index);
+            ClassFileIndexer.index("index:///Point.class", recUri, pointBytes, index);
 
             TypeEntry pointEntry = index.get("Point");
             assertNotNull(pointEntry);
@@ -2436,9 +2436,9 @@ class IndexCompileTest {
             assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
             String shapeUri = "index:///cp/shape/";
-            ClassFileIndexer.index(URI.create("index:///Shape.class"), URI.create(shapeUri), shapeBytes, index);
-            ClassFileIndexer.index(URI.create("index:///Circle.class"), URI.create(shapeUri), circleBytes, index);
-            ClassFileIndexer.index(URI.create("index:///Square.class"), URI.create(shapeUri), squareBytes, index);
+            ClassFileIndexer.index("index:///Shape.class", shapeUri, shapeBytes, index);
+            ClassFileIndexer.index("index:///Circle.class", shapeUri, circleBytes, index);
+            ClassFileIndexer.index("index:///Square.class", shapeUri, squareBytes, index);
 
             ClasspathOrder cp = classPathOf(List.of(shapeUri, jrtUri));
 
@@ -2492,8 +2492,8 @@ class IndexCompileTest {
         Index index = new Index();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         SourceIndexer.index(
-                URI.create("mem:///Greeter.java"),
-                URI.create(SOURCE_URI),
+                "mem:///Greeter.java",
+                SOURCE_URI,
                 "package com.example;\n"
                         + "public interface Greeter {\n"
                         + "    default String greet() { return \"hi\"; }\n"
@@ -2550,8 +2550,8 @@ class IndexCompileTest {
         Index index = new Index();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         SourceIndexer.index(
-                URI.create("mem:///Greeter.java"),
-                URI.create(SOURCE_URI),
+                "mem:///Greeter.java",
+                SOURCE_URI,
                 """
                         package com.example;
 
@@ -2562,8 +2562,8 @@ class IndexCompileTest {
                         """,
                 index);
         SourceIndexer.index(
-                URI.create("mem:///Politeness.java"),
-                URI.create(SOURCE_URI),
+                "mem:///Politeness.java",
+                SOURCE_URI,
                 """
                         package com.example;
 
@@ -2621,8 +2621,8 @@ class IndexCompileTest {
         Index index = new Index();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         SourceIndexer.index(
-                URI.create("mem:///Base.java"),
-                URI.create(SOURCE_URI),
+                "mem:///Base.java",
+                SOURCE_URI,
                 """
                         package com.example;
 
@@ -2632,8 +2632,8 @@ class IndexCompileTest {
                         """,
                 index);
         SourceIndexer.index(
-                URI.create("mem:///Polite.java"),
-                URI.create(SOURCE_URI),
+                "mem:///Polite.java",
+                SOURCE_URI,
                 """
                         package com.example;
 
@@ -2642,8 +2642,8 @@ class IndexCompileTest {
                         """,
                 index);
         SourceIndexer.index(
-                URI.create("mem:///Person.java"),
-                URI.create(SOURCE_URI),
+                "mem:///Person.java",
+                SOURCE_URI,
                 """
                         package com.example;
 
@@ -2694,8 +2694,8 @@ class IndexCompileTest {
         Index index = new Index();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         SourceIndexer.index(
-                URI.create("mem:///Api.java"),
-                URI.create(SOURCE_URI),
+                "mem:///Api.java",
+                SOURCE_URI,
                 "package com.example;\n"
                         + "public interface Api {\n"
                         + "    private static void hidden() {}\n"
@@ -2751,8 +2751,8 @@ class IndexCompileTest {
         Index index = new Index();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         SourceIndexer.index(
-                URI.create("mem:///Factory.java"),
-                URI.create(SOURCE_URI),
+                "mem:///Factory.java",
+                SOURCE_URI,
                 "package com.example;\n"
                         + "public class Factory {\n"
                         + "    private Factory() {}\n"
@@ -3022,8 +3022,8 @@ class IndexCompileTest {
         Index index = new Index();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         SourceIndexer.index(
-                URI.create("mem:///Base.java"),
-                URI.create(SOURCE_URI),
+                "mem:///Base.java",
+                SOURCE_URI,
                 """
                         package com.example;
 
@@ -3089,7 +3089,7 @@ class IndexCompileTest {
         Index index = new Index();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
-        SourceIndexer.index(URI.create("mem:///Base.java"), URI.create(cpUri),
+        SourceIndexer.index("mem:///Base.java", cpUri,
                 """
                         package p;
                         public class Base {
@@ -3098,7 +3098,7 @@ class IndexCompileTest {
                         }
                         """,
                 index);
-        SourceIndexer.index(URI.create("mem:///Sub.java"), URI.create(cpUri),
+        SourceIndexer.index("mem:///Sub.java", cpUri,
                 """
                         package p;
                         public class Sub extends Base {
@@ -3135,7 +3135,7 @@ class IndexCompileTest {
         Index index = new Index();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
-        SourceIndexer.index(URI.create("mem:///Outer.java"), URI.create(cpUri),
+        SourceIndexer.index("mem:///Outer.java", cpUri,
                 """
                         package p;
                         public class Outer {
@@ -3174,7 +3174,7 @@ class IndexCompileTest {
         Index index = new Index();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
-        SourceIndexer.index(URI.create("mem:///Marker.java"), URI.create(cpUri),
+        SourceIndexer.index("mem:///Marker.java", cpUri,
                 """
                         package p;
                         public @interface Marker {
@@ -3212,13 +3212,13 @@ class IndexCompileTest {
         Index index = new Index();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
-        SourceIndexer.index(URI.create("mem:///ProxyKind.java"), URI.create(cpUri),
+        SourceIndexer.index("mem:///ProxyKind.java", cpUri,
                 """
                         package p;
                         public enum ProxyKind { HTTP, SOCKS4, SOCKS5 }
                         """,
                 index);
-        SourceIndexer.index(URI.create("mem:///WithProxy.java"), URI.create(cpUri),
+        SourceIndexer.index("mem:///WithProxy.java", cpUri,
                 """
                         package p;
                         public @interface WithProxy {
@@ -3256,7 +3256,7 @@ class IndexCompileTest {
         Index index = new Index();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
-        SourceIndexer.index(URI.create("mem:///Color.java"), URI.create(cpUri),
+        SourceIndexer.index("mem:///Color.java", cpUri,
                 """
                         package p;
                         public enum Color { RED, GREEN, BLUE }
@@ -3298,7 +3298,7 @@ class IndexCompileTest {
         Index index = new Index();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
-        SourceIndexer.index(URI.create("mem:///Holder.java"), URI.create(cpUri),
+        SourceIndexer.index("mem:///Holder.java", cpUri,
                 """
                         package p;
                         public class Holder<C> {
@@ -3338,7 +3338,7 @@ class IndexCompileTest {
         Index index = new Index();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
-        SourceIndexer.index(URI.create("mem:///Utils.java"), URI.create(cpUri),
+        SourceIndexer.index("mem:///Utils.java", cpUri,
                 """
                         package p;
                         public final class Utils {

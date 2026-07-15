@@ -25,7 +25,6 @@ public record JarInput(Path jar, ScanCollector collector) implements InputSource
                 String name = e.getName();
                 String simple = simpleName(name);
                 if (isIndexable(simple)) {
-                    String uri = jarEntryUri(jar, name);
                     recordStats(simple, e.getSize());
                     if (shouldReadContents(indexClassFiles, simple)) {
                         // Read bytes eagerly: the sink typically hands the bytes supplier
@@ -36,13 +35,13 @@ public record JarInput(Path jar, ScanCollector collector) implements InputSource
                             if (collector != null && simple.endsWith(".class") && e.getSize() < 0) {
                                 collector.addClassFileBytes(bytes.length);
                             }
-                            sink.accept(uri, simple, () -> bytes);
+                            sink.accept(name, simple, () -> bytes);
                         } catch (IOException ioe) {
                             System.err.println("Skipping unreadable jar entry " + jar + "!/" + name
                                     + ": " + ioe.getClass().getSimpleName() + ": " + ioe.getMessage());
                         }
                     } else {
-                        sink.accept(uri, simple, null);
+                        sink.accept(name, simple, null);
                     }
                 }
             }
@@ -63,10 +62,10 @@ public record JarInput(Path jar, ScanCollector collector) implements InputSource
 
     @Override
     public String sourceUri() {
-        // Use the underlying file URI (not the jar: wrapper): the resource
-        // URIs emitted for entries inside the jar start with
-        // jar:<file-uri>!/..., so the file URI is the cleanest prefix-free
-        // key for a jar as a classpath entry.
+        // Use the underlying file URI (not the jar: wrapper): resource URIs
+        // for entries inside the jar are rebuilt as jar:<file-uri>!/<entry>,
+        // so the file URI is the cleanest prefix-free key for a jar as a
+        // classpath entry.
         return jar.toUri().toString();
     }
 
@@ -81,10 +80,5 @@ public record JarInput(Path jar, ScanCollector collector) implements InputSource
 
     private static boolean isIndexable(String name) {
         return (name.endsWith(".java") || name.endsWith(".class")) && !Index.isSkippedFileName(name);
-    }
-
-    private static String jarEntryUri(Path jar, String entryName) {
-        String jarUri = jar.toUri().toString();
-        return "jar:" + jarUri + "!/" + entryName;
     }
 }
