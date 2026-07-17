@@ -16,7 +16,6 @@ import javax.tools.JavaFileObject;
 import javax.tools.JavaFileObject.Kind;
 
 import org.eclipse.lsp4j.Location;
-import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
 
 import com.sun.source.tree.ArrayTypeTree;
@@ -336,19 +335,8 @@ public final class SymbolLocator {
         if (start < 0) return Optional.empty();
         if (end < 0) end = start;
         LineMap lm = cu.getLineMap();
-        return Optional.of(new Range(positionAt(lm, start), positionAt(lm, end)));
-    }
-
-    private static Position positionAt(LineMap lm, long offset) {
-        long line = lm.getLineNumber(offset);
-        long col = lm.getColumnNumber(offset);
-        return new Position(toIntClamped(line - 1), toIntClamped(col - 1));
-    }
-
-    private static int toIntClamped(long v) {
-        if (v < 0) return 0;
-        if (v > Integer.MAX_VALUE) return Integer.MAX_VALUE;
-        return (int) v;
+        return Optional.of(new Range(
+                LspPositions.positionAt(lm, start), LspPositions.positionAt(lm, end)));
     }
 
     // Erasure-level simple-name signature, javac side.

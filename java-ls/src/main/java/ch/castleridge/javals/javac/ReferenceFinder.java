@@ -9,7 +9,6 @@ import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 
 import org.eclipse.lsp4j.Location;
-import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
 
 import com.sun.source.tree.CompilationUnitTree;
@@ -148,7 +147,8 @@ public final class ReferenceFinder {
                 long start = end - name.length();
                 if (start < 0) start = 0;
                 LineMap lm = cu.getLineMap();
-                return java.util.Optional.of(new Range(positionAt(lm, start), positionAt(lm, end)));
+                return java.util.Optional.of(new Range(
+                        LspPositions.positionAt(lm, start), LspPositions.positionAt(lm, end)));
             }
             return java.util.Optional.empty();
         }
@@ -159,19 +159,8 @@ public final class ReferenceFinder {
             if (start < 0) return java.util.Optional.empty();
             if (end < 0) end = start;
             LineMap lm = cu.getLineMap();
-            return java.util.Optional.of(new Range(positionAt(lm, start), positionAt(lm, end)));
-        }
-
-        private static Position positionAt(LineMap lm, long offset) {
-            long line = lm.getLineNumber(offset);
-            long col = lm.getColumnNumber(offset);
-            return new Position(toIntClamped(line - 1), toIntClamped(col - 1));
-        }
-
-        private static int toIntClamped(long v) {
-            if (v < 0) return 0;
-            if (v > Integer.MAX_VALUE) return Integer.MAX_VALUE;
-            return (int) v;
+            return java.util.Optional.of(new Range(
+                    LspPositions.positionAt(lm, start), LspPositions.positionAt(lm, end)));
         }
     }
 }

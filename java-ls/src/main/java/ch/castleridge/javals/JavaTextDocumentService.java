@@ -32,6 +32,7 @@ import ch.castleridge.javals.indexing.index.UriCoding;
 import ch.castleridge.javals.javac.ClasspathOrder;
 import ch.castleridge.javals.javac.CompletionProposer;
 import ch.castleridge.javals.javac.DefinitionElementResolver;
+import ch.castleridge.javals.javac.LspPositions;
 import ch.castleridge.javals.javac.ReferenceFinder;
 import ch.castleridge.javals.javac.SourceCache;
 import ch.castleridge.javals.javac.SymbolKey;
@@ -379,13 +380,9 @@ public class JavaTextDocumentService implements TextDocumentService {
     }
 
     private static long positionToOffset(LineMap lineMap, Position position) {
-        if (lineMap == null)
-            return -1;
-        try {
-            return lineMap.getPosition(position.getLine() + 1, position.getCharacter() + 1);
-        } catch (IndexOutOfBoundsException | IllegalArgumentException e) {
-            return -1;
-        }
+        // LSP character is a UTF-16 offset; do not use LineMap.getPosition,
+        // which interprets the column with tab expansion.
+        return LspPositions.offsetAt(lineMap, position);
     }
 
     @Override
@@ -689,11 +686,7 @@ public class JavaTextDocumentService implements TextDocumentService {
     }
 
     private static Position positionAt(LineMap lineMap, long offset) {
-        long line = lineMap.getLineNumber(offset);
-        long col = lineMap.getColumnNumber(offset);
-        int lspLine = line > 0 ? (int) (line - 1) : 0;
-        int lspCol = col > 0 ? (int) (col - 1) : 0;
-        return new Position(lspLine, lspCol);
+        return LspPositions.positionAt(lineMap, offset);
     }
 
     private static DiagnosticSeverity severityOf(javax.tools.Diagnostic.Kind kind) {
