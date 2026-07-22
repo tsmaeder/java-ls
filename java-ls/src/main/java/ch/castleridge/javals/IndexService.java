@@ -408,7 +408,13 @@ public final class IndexService {
         try {
             return Path.of(URI.create(s)).toAbsolutePath().normalize();
         } catch (IllegalArgumentException | java.nio.file.FileSystemNotFoundException e) {
-            return null;
+            // Not a parseable file URI (e.g. a raw OS path like
+            // "C:\Program Files\...\jdk"); fall back to treating it as a path.
+            try {
+                return Path.of(s).toAbsolutePath().normalize();
+            } catch (java.nio.file.InvalidPathException ex) {
+                return null;
+            }
         }
     }
     private record State(Index index, Map<String, ClasspathOrder> classpathsByNamespace,
