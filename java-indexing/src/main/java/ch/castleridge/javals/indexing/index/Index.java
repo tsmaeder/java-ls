@@ -8,13 +8,14 @@ import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.ModuleFileEntry;
 import ch.castleridge.javals.indexing.model.PrunedSourceEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
+import ch.castleridge.javals.indexing.model.TypeEntryCodec;
 
 /**
  * Thread-safe in-memory store of indexed declarations.
  *
  * <p>Types are the only top-level keys: fields and methods travel with their
- * owning {@link TypeEntry} (see the record's fields/methods lists). The index
- * is context-free and therefore cheap to build concurrently across scanners.
+ * owning {@link TypeEntry}. The index is context-free and therefore cheap to
+ * build concurrently across scanners.
  *
  * <p>The same JVM binary name is allowed to occur multiple times - a single
  * type is frequently present in several classpath entries (JDK + shaded
@@ -28,11 +29,12 @@ import ch.castleridge.javals.indexing.model.TypeEntry;
  * filtered at {@link #add(TypeEntry)} time so callers don't have to special
  * case them.
  *
- * <p>Bucket storage is optimised for the overwhelmingly common single-entry
- * case: the map value is {@code Object}, carrying either a bare
- * {@link TypeEntry} (1 entry) or a {@code TypeEntry[]} (2+). This avoids
- * ~430k {@link java.util.concurrent.CopyOnWriteArrayList} shells for the
- * trino workload.
+ * <p>{@link TypeEntry}s are stored as compact {@code byte[]} blobs produced
+ * by {@link TypeEntryCodec}, not as live object graphs. Bucket storage is
+ * optimised for the overwhelmingly common single-entry case: the map value
+ * is {@code Object}, carrying either a bare {@code byte[]} (1 entry) or a
+ * {@code byte[][]} (2+). Decoded records are reconstructed on demand through
+ * a fixed-size {@link DecodedTypeCache}.
  *
  * <p>Thread-safety is provided by a single monitor ({@code synchronized}
  * on {@link #lock}) guarding plain {@link HashMap}s rather than
@@ -40,15 +42,18 @@ import ch.castleridge.javals.indexing.model.TypeEntry;
  * a per-source temporary index and merges it wholesale via
  * {@link #addAll(Index)}, so each merge takes the monitor exactly once and
  * applies the whole batch under it, avoiding the per-key CAS/bin-lock
- * overhead of {@code ConcurrentHashMap}. Critical sections are short (map
- * puts/gets only; the expensive parsing happens before entries reach the
- * index), so a single mutex is cheaper than a read/write lock's bookkeeping.
+ * overhead of {@code ConcurrentHashMap}. Encoding happens before the lock
+ * (or was already done in the source index); critical sections only move
+ * blob references.
  */
 public final class Index {
 
     private final Object lock = new Object();
+    private final DecodedTypeCache decodedCache = new DecodedTypeCache();
 
+    /** JVM name → {@code byte[]} or {@code byte[][]} of encoded TypeEntries. */
     private final Map<String, Object> byJvmName = new HashMap<>();
+    /** Package → {@code byte[]} or {@code byte[][]} of encoded TypeEntries. */
     private final Map<String, Object> byPackage = new HashMap<>();
     private final Map<String, Object> classFileByJvmName = new HashMap<>();
     private final Map<String, Object> classFileByPackage = new HashMap<>();
@@ -118,35 +123,31 @@ public final class Index {
 
     public void add(TypeEntry entry) {
         if (entry == null) return;
-        boolean changed;
-        synchronized (lock) {
-            changed = addLocked(entry);
-        }
-        if (changed) notifyChanged();
-    }
-
-    /** Caller must hold the monitor. */
-    private boolean addLocked(TypeEntry entry) {
-        if (entry == null) return false;
         String jvm = entry.jvmOwnerName();
-        if (isSkippedJvmName(jvm)) return false;
-
-        byJvmName.put(jvm, appendBucket(byJvmName.get(jvm), entry));
+        if (isSkippedJvmName(jvm)) return;
+        // Encode outside the monitor: parsing already finished; keep the
+        // critical section to blob-pointer moves only.
+        byte[] blob = TypeEntryCodec.encode(entry);
         String pkg = entry.packageJvm();
-        byPackage.put(pkg, appendBucket(byPackage.get(pkg), entry));
-        return true;
+        synchronized (lock) {
+            byJvmName.put(jvm, appendBlobBucket(byJvmName.get(jvm), blob));
+            byPackage.put(pkg, appendBlobBucket(byPackage.get(pkg), blob));
+        }
+        notifyChanged();
     }
 
     /**
      * Merge every entry from {@code other} into this index and fire a
      * single change notification. The entire batch is applied under one
-     * monitor acquisition. Bloom filters are merged silently.
+     * monitor acquisition. TypeEntry blobs are moved by reference (no
+     * decode/re-encode). Bloom filters are merged silently.
      */
     public void addAll(Index other) {
         if (other == null || other.isEmpty()) return;
         // Snapshot the source outside our lock (each call takes the
         // source's own monitor); then apply the whole batch at once.
-        Collection<TypeEntry> types = other.all();
+        Map<String, Object> typeBlobsByJvm = other.snapshotTypeBlobsByJvmName();
+        Map<String, Object> typeBlobsByPackage = other.snapshotTypeBlobsByPackage();
         Collection<ModuleEntry> modules = other.allModules();
         Collection<ClassFileEntry> classFiles = other.allClassFiles();
         Collection<ModuleFileEntry> moduleFiles = other.allModuleFiles();
@@ -154,7 +155,8 @@ public final class Index {
         Map<String, IdentifierBloomFilter> blooms = other.bloomFilters();
 
         synchronized (lock) {
-            for (TypeEntry e : types) addLocked(e);
+            mergeTypeBlobMap(byJvmName, typeBlobsByJvm);
+            mergeTypeBlobMap(byPackage, typeBlobsByPackage);
             for (ModuleEntry m : modules) addModuleLocked(m);
             for (ClassFileEntry cf : classFiles) addClassFileLocked(cf);
             for (ModuleFileEntry mf : moduleFiles) addModuleFileLocked(mf);
@@ -162,6 +164,36 @@ public final class Index {
             blooms.forEach(this::registerBloomLocked);
         }
         notifyChanged();
+    }
+
+    /** Shallow copy of encoded TypeEntry buckets keyed by JVM name. */
+    private Map<String, Object> snapshotTypeBlobsByJvmName() {
+        synchronized (lock) {
+            return new HashMap<>(byJvmName);
+        }
+    }
+
+    /** Shallow copy of encoded TypeEntry buckets keyed by package. */
+    private Map<String, Object> snapshotTypeBlobsByPackage() {
+        synchronized (lock) {
+            return new HashMap<>(byPackage);
+        }
+    }
+
+    /** Caller must hold the monitor. Appends each incoming blob under its key. */
+    private static void mergeTypeBlobMap(Map<String, Object> target, Map<String, Object> incoming) {
+        for (Map.Entry<String, Object> e : incoming.entrySet()) {
+            Object bucket = e.getValue();
+            if (bucket instanceof byte[] only) {
+                target.put(e.getKey(), appendBlobBucket(target.get(e.getKey()), only));
+            } else if (bucket != null) {
+                Object prior = target.get(e.getKey());
+                for (byte[] blob : (byte[][]) bucket) {
+                    prior = appendBlobBucket(prior, blob);
+                }
+                target.put(e.getKey(), prior);
+            }
+        }
     }
 
     public boolean isEmpty() {
@@ -175,15 +207,15 @@ public final class Index {
         }
     }
 
-    private static Object appendBucket(Object prior, TypeEntry entry) {
-        if (prior == null) return entry;
-        if (prior instanceof TypeEntry only) {
-            return new TypeEntry[]{only, entry};
+    private static Object appendBlobBucket(Object prior, byte[] blob) {
+        if (prior == null) return blob;
+        if (prior instanceof byte[] only) {
+            return new byte[][]{only, blob};
         }
-        TypeEntry[] arr = (TypeEntry[]) prior;
-        TypeEntry[] grown = new TypeEntry[arr.length + 1];
+        byte[][] arr = (byte[][]) prior;
+        byte[][] grown = new byte[arr.length + 1][];
         System.arraycopy(arr, 0, grown, 0, arr.length);
-        grown[arr.length] = entry;
+        grown[arr.length] = blob;
         return grown;
     }
 
@@ -209,9 +241,9 @@ public final class Index {
         synchronized (lock) {
             Object bucket = byJvmName.get(jvmName);
             if (bucket == null) return null;
-            if (bucket instanceof TypeEntry only) return only;
-            TypeEntry[] arr = (TypeEntry[]) bucket;
-            return arr.length == 0 ? null : arr[0];
+            if (bucket instanceof byte[] only) return decodedCache.get(only);
+            byte[][] arr = (byte[][]) bucket;
+            return arr.length == 0 ? null : decodedCache.get(arr[0]);
         }
     }
 
@@ -219,8 +251,8 @@ public final class Index {
         synchronized (lock) {
             Object bucket = byJvmName.get(jvmName);
             if (bucket == null) return false;
-            if (bucket instanceof TypeEntry) return true;
-            TypeEntry[] arr = (TypeEntry[]) bucket;
+            if (bucket instanceof byte[]) return true;
+            byte[][] arr = (byte[][]) bucket;
             return arr.length > 0;
         }
     }
@@ -256,23 +288,26 @@ public final class Index {
      * this (e.g. unimported-type completion) only handle importable
      * top-level types.
      *
-     * <p>This is a linear scan over {@link #byJvmName}'s buckets rather
+     * <p>This is a linear scan over {@link #byJvmName}'s keys rather
      * than a dedicated sorted-by-simple-name structure: for realistic
      * index sizes the scan costs low-single-digit milliseconds, which is
      * dwarfed by the cost of the surrounding request (e.g. a javac
-     * compile for completion) and not worth adding extra bookkeeping to
-     * the parallelized indexing write path ({@link #addLocked}).
+     * compile for completion). Matching keys are decoded on demand so
+     * the rest of the index stays as blobs.
      */
     public List<TypeEntry> searchTypesBySimpleNamePrefix(String prefix, int limit) {
         if (prefix == null) return List.of();
         synchronized (lock) {
             List<TypeEntry> out = new ArrayList<>();
-            for (Object bucket : byJvmName.values()) {
-                if (bucket instanceof TypeEntry only) {
-                    addIfMatchesPrefix(only, only.jvmOwnerName(), prefix, out);
+            for (Map.Entry<String, Object> mapEntry : byJvmName.entrySet()) {
+                String jvmOwnerName = mapEntry.getKey();
+                if (!simpleNameMatchesPrefix(jvmOwnerName, prefix)) continue;
+                Object bucket = mapEntry.getValue();
+                if (bucket instanceof byte[] only) {
+                    out.add(decodedCache.get(only));
                 } else if (bucket != null) {
-                    for (TypeEntry e : (TypeEntry[]) bucket) {
-                        addIfMatchesPrefix(e, e.jvmOwnerName(), prefix, out);
+                    for (byte[] blob : (byte[][]) bucket) {
+                        out.add(decodedCache.get(blob));
                         if (limit > 0 && out.size() >= limit) return out;
                     }
                 }
@@ -313,12 +348,16 @@ public final class Index {
      * {@code prefix}. Caller must hold the monitor.
      */
     private static <T> void addIfMatchesPrefix(T entry, String jvmOwnerName, String prefix, List<T> out) {
-        if (jvmOwnerName == null || jvmOwnerName.indexOf('$') >= 0) return;
-        int slash = jvmOwnerName.lastIndexOf('/');
-        String simpleName = slash < 0 ? jvmOwnerName : jvmOwnerName.substring(slash + 1);
-        if (simpleName.startsWith(prefix)) {
+        if (simpleNameMatchesPrefix(jvmOwnerName, prefix)) {
             out.add(entry);
         }
+    }
+
+    private static boolean simpleNameMatchesPrefix(String jvmOwnerName, String prefix) {
+        if (jvmOwnerName == null || jvmOwnerName.indexOf('$') >= 0) return false;
+        int slash = jvmOwnerName.lastIndexOf('/');
+        String simpleName = slash < 0 ? jvmOwnerName : jvmOwnerName.substring(slash + 1);
+        return simpleName.startsWith(prefix);
     }
 
     /** Every {@link TypeEntry} currently stored, including duplicates. */
@@ -344,8 +383,8 @@ public final class Index {
         synchronized (lock) {
             int n = 0;
             for (Object bucket : byJvmName.values()) {
-                if (bucket instanceof TypeEntry) n += 1;
-                else if (bucket != null) n += ((TypeEntry[]) bucket).length;
+                if (bucket instanceof byte[]) n += 1;
+                else if (bucket != null) n += ((byte[][]) bucket).length;
             }
             for (Object bucket : classFileByJvmName.values()) {
                 if (bucket instanceof ClassFileEntry) n += 1;
@@ -533,21 +572,27 @@ public final class Index {
         return arr.length == 0 ? List.of() : List.of(arr);
     }
 
-    private static List<TypeEntry> toList(Object bucket) {
+    private List<TypeEntry> toList(Object bucket) {
         if (bucket == null) return List.of();
-        if (bucket instanceof TypeEntry only) return List.of(only);
-        TypeEntry[] arr = (TypeEntry[]) bucket;
-        return arr.length == 0 ? List.of() : List.of(arr);
+        if (bucket instanceof byte[] only) return List.of(decodedCache.get(only));
+        byte[][] arr = (byte[][]) bucket;
+        if (arr.length == 0) return List.of();
+        TypeEntry[] decoded = new TypeEntry[arr.length];
+        for (int i = 0; i < arr.length; i++) {
+            decoded[i] = decodedCache.get(arr[i]);
+        }
+        return List.of(decoded);
     }
 
-    private static void addBucketTo(Object bucket, List<TypeEntry> out) {
+    private void addBucketTo(Object bucket, List<TypeEntry> out) {
         if (bucket == null) return;
-        if (bucket instanceof TypeEntry only) {
-            out.add(only);
+        if (bucket instanceof byte[] only) {
+            out.add(decodedCache.get(only));
             return;
         }
-        TypeEntry[] arr = (TypeEntry[]) bucket;
-        for (TypeEntry e : arr) out.add(e);
+        for (byte[] blob : (byte[][]) bucket) {
+            out.add(decodedCache.get(blob));
+        }
     }
 
     /**
