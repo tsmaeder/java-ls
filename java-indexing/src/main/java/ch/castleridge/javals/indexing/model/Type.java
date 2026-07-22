@@ -31,14 +31,13 @@ import ch.castleridge.javals.indexing.intern.Interner;
  * {@link Array}, {@link TypeRef.Resolved}, {@link TypeVariable},
  * {@link Wildcard} and {@link Parameterized} leaves.
  *
- * <p>{@link TypeRef} leaves, {@link TypeVariable}s, and annotation-free
- * structural forms ({@link Array}, {@link Wildcard}, {@link Parameterized})
- * are obtained through factories that cache by shape. Prefer those factories
+ * <p>{@link TypeRef} leaves and {@link TypeVariable}s are obtained through
+ * factories that cache by name. Prefer those factories
  * ({@link TypeRef#resolved(String)}, {@link #array(Type)},
  * {@link #parameterized(TypeRef, Type[])}, {@link Wildcard#unbounded()}, …)
- * over the record constructors. {@link Annotated} wrappers are never
- * interned — type-use annotations stay unique per occurrence so they do not
- * poison the structural caches.
+ * over the record constructors. Structural forms ({@link Array},
+ * {@link Wildcard}, {@link Parameterized}) and {@link Annotated} wrappers
+ * are allocated fresh per call.
  */
 public sealed interface Type
         permits Type.Primitive,
@@ -110,7 +109,7 @@ public sealed interface Type
     /**
      * An array type; {@code element} may itself be any {@link Type}.
      *
-     * <p>Prefer {@link Type#array(Type)} so annotation-free shapes are shared.
+     * <p>Prefer {@link Type#array(Type)} over the record constructor.
      */
     record Array(Type element) implements Type {
         public Array {
@@ -138,7 +137,7 @@ public sealed interface Type
      * {@code ?}.
      *
      * <p>Prefer the factories ({@link #unbounded()}, {@link #extendsBound(Type)},
-     * {@link #superBound(Type)}) so annotation-free shapes are shared.
+     * {@link #superBound(Type)}) over the record constructor.
      */
     record Wildcard(BoundKind kind, Type bound) implements Type {
         public enum BoundKind {
@@ -152,29 +151,11 @@ public sealed interface Type
         }
 
         public static Wildcard extendsBound(Type bound) {
-            if (bound instanceof Annotated) {
-                return new Wildcard(BoundKind.EXTENDS, bound);
-            }
-            return cachedWildcard(BoundKind.EXTENDS, bound, TypeCaches.EXTENDS);
+            return new Wildcard(BoundKind.EXTENDS, bound);
         }
 
         public static Wildcard superBound(Type bound) {
-            if (bound instanceof Annotated) {
-                return new Wildcard(BoundKind.SUPER, bound);
-            }
-            return cachedWildcard(BoundKind.SUPER, bound, TypeCaches.SUPER);
-        }
-
-        private static Wildcard cachedWildcard(
-                BoundKind kind, Type bound, ConcurrentMap<Type, Wildcard> cache) {
-            if (bound == null) {
-                return new Wildcard(kind, null);
-            }
-            Wildcard cached = cache.get(bound);
-            if (cached != null) return cached;
-            Wildcard made = new Wildcard(kind, bound);
-            Wildcard prior = cache.putIfAbsent(bound, made);
-            return prior == null ? made : prior;
+            return new Wildcard(BoundKind.SUPER, bound);
         }
     }
 
@@ -182,8 +163,8 @@ public sealed interface Type
      * A parameterized type such as {@code List<String>} or
      * {@code Expectation<? super T>}.
      *
-     * <p>Prefer {@link Type#parameterized(TypeRef, Type[])} so annotation-free
-     * shapes are shared.
+     * <p>Prefer {@link Type#parameterized(TypeRef, Type[])} over the record
+     * constructor.
      */
     record Parameterized(TypeRef raw, Type[] typeArgs) implements Type {
         public Parameterized {
@@ -209,55 +190,26 @@ public sealed interface Type
         return prior == null ? made : prior;
     }
 
-    /**
-     * Return a cached {@link Array} for {@code element} when the element is
-     * not an {@link Annotated} wrapper; annotated array types are allocated
-     * fresh so type-use annotations stay unique.
-     */
+    /** Return a fresh {@link Array} for {@code element}. */
     static Array array(Type element) {
         if (element == null) {
             throw new IllegalArgumentException("element must not be null");
         }
-        if (element instanceof Annotated) {
-            return new Array(element);
-        }
-        Array cached = TypeCaches.ARRAY.get(element);
-        if (cached != null) return cached;
-        Array made = new Array(element);
-        Array prior = TypeCaches.ARRAY.putIfAbsent(element, made);
-        return prior == null ? made : prior;
+        return new Array(element);
     }
 
     /**
-     * Return a cached {@link Parameterized} for {@code raw} and
-     * {@code typeArgs} when no argument is {@link Annotated}; annotated
-     * type arguments force a fresh allocation.
+     * Return a fresh {@link Parameterized} for {@code raw} and
+     * {@code typeArgs}. Non-empty argument arrays are defensively copied.
      */
     static Parameterized parameterized(TypeRef raw, Type[] typeArgs) {
         if (raw == null) {
             throw new IllegalArgumentException("raw must not be null");
         }
         typeArgs = EmptyArrays.orEmpty(typeArgs, EmptyArrays.TYPE);
-        if (hasAnnotatedArg(typeArgs)) {
-            return new Parameterized(raw, typeArgs);
-        }
-        TypeCaches.ParameterizedKey probe = new TypeCaches.ParameterizedKey(raw, typeArgs);
-        Parameterized cached = TypeCaches.PARAMETERIZED.get(probe);
-        if (cached != null) return cached;
         Type[] owned = typeArgs.length == 0
                 ? EmptyArrays.TYPE
                 : Arrays.copyOf(typeArgs, typeArgs.length);
-        Parameterized made = new Parameterized(raw, owned);
-        TypeCaches.ParameterizedKey key =
-                owned == typeArgs ? probe : new TypeCaches.ParameterizedKey(raw, owned);
-        Parameterized prior = TypeCaches.PARAMETERIZED.putIfAbsent(key, made);
-        return prior == null ? made : prior;
-    }
-
-    private static boolean hasAnnotatedArg(Type[] typeArgs) {
-        for (Type arg : typeArgs) {
-            if (arg instanceof Annotated) return true;
-        }
-        return false;
+        return new Parameterized(raw, owned);
     }
 }

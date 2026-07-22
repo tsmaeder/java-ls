@@ -11,9 +11,8 @@ import java.util.Set;
  *
  * <p>Strings are stored as ids into the process-wide {@link StringTable}.
  * Structural {@link Type} shapes are rebuilt through the existing factories
- * ({@link TypeRef#resolved}, {@link Type#array}, …) so the flyweight caches
- * stay shared. Decode always returns the concrete record types consumers
- * pattern-match on.
+ * ({@link TypeRef#resolved}, {@link Type#array}, …). Decode always returns
+ * the concrete record types consumers pattern-match on.
  */
 public final class TypeEntryCodec {
 
