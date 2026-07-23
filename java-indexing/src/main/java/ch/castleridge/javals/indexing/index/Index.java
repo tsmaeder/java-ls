@@ -30,11 +30,9 @@ import ch.castleridge.javals.indexing.model.TypeEntryCodec;
  * case them.
  *
  * <p>{@link TypeEntry}s are stored as compact {@code byte[]} blobs produced
- * by {@link TypeEntryCodec}, not as live object graphs. Bucket storage is
- * optimised for the overwhelmingly common single-entry case: the map value
- * is {@code Object}, carrying either a bare {@code byte[]} (1 entry) or a
- * {@code byte[][]} (2+). Decoded records are reconstructed on demand through
- * a fixed-size {@link DecodedTypeCache}.
+ * by {@link TypeEntryCodec}, not as live object graphs. Each key maps to a
+ * {@link List} of encoded blobs. Decoded records are reconstructed on demand
+ * through a fixed-size {@link DecodedTypeCache}.
  *
  * <p>Thread-safety is provided by a single monitor ({@code synchronized}
  * on {@link #lock}) guarding plain {@link HashMap}s rather than
@@ -51,20 +49,20 @@ public final class Index {
     private final Object lock = new Object();
     private final DecodedTypeCache decodedCache = new DecodedTypeCache();
 
-    /** JVM name → {@code byte[]} or {@code byte[][]} of encoded TypeEntries. */
-    private final Map<String, Object> byJvmName = new HashMap<>();
-    /** Package → {@code byte[]} or {@code byte[][]} of encoded TypeEntries. */
-    private final Map<String, Object> byPackage = new HashMap<>();
-    private final Map<String, Object> classFileByJvmName = new HashMap<>();
-    private final Map<String, Object> classFileByPackage = new HashMap<>();
-    private final Map<String, Object> moduleFileByName = new HashMap<>();
-    private final Map<String, Object> prunedByResourceUri = new HashMap<>();
-    private final Map<String, Object> prunedByPackage = new HashMap<>();
-    private final Map<String, Object> prunedByJvmName = new HashMap<>();
+    /** JVM name → encoded TypeEntry blobs. */
+    private final Map<String, List<byte[]>> byJvmName = new HashMap<>();
+    /** Package → encoded TypeEntry blobs. */
+    private final Map<String, List<byte[]>> byPackage = new HashMap<>();
+    private final Map<String, List<ClassFileEntry>> classFileByJvmName = new HashMap<>();
+    private final Map<String, List<ClassFileEntry>> classFileByPackage = new HashMap<>();
+    private final Map<String, List<ModuleFileEntry>> moduleFileByName = new HashMap<>();
+    private final Map<String, List<PrunedSourceEntry>> prunedByResourceUri = new HashMap<>();
+    private final Map<String, List<PrunedSourceEntry>> prunedByPackage = new HashMap<>();
+    private final Map<String, List<PrunedSourceEntry>> prunedByJvmName = new HashMap<>();
     // Modules are addressed by module name, not by JVM binary name, and
     // duplicates across classpath sources are resolved by classpath
     // ordering at lookup time (mirroring the TypeEntry bucket strategy).
-    private final Map<String, Object> byModuleName = new HashMap<>();
+    private final Map<String, List<ModuleEntry>> byModuleName = new HashMap<>();
     private final Map<String, IdentifierBloomFilter> bloomByResourceUri = new HashMap<>();
     // Observer list is touched once per merge and rarely mutated; guard it
     // with the same monitor and iterate a snapshot taken outside it.
@@ -130,8 +128,8 @@ public final class Index {
         byte[] blob = TypeEntryCodec.encode(entry);
         String pkg = entry.packageJvm();
         synchronized (lock) {
-            byJvmName.put(jvm, appendBlobBucket(byJvmName.get(jvm), blob));
-            byPackage.put(pkg, appendBlobBucket(byPackage.get(pkg), blob));
+            appendBucket(byJvmName, jvm, blob);
+            appendBucket(byPackage, pkg, blob);
         }
         notifyChanged();
     }
@@ -146,8 +144,8 @@ public final class Index {
         if (other == null || other.isEmpty()) return;
         // Snapshot the source outside our lock (each call takes the
         // source's own monitor); then apply the whole batch at once.
-        Map<String, Object> typeBlobsByJvm = other.snapshotTypeBlobsByJvmName();
-        Map<String, Object> typeBlobsByPackage = other.snapshotTypeBlobsByPackage();
+        Map<String, List<byte[]>> typeBlobsByJvm = other.snapshotTypeBlobsByJvmName();
+        Map<String, List<byte[]>> typeBlobsByPackage = other.snapshotTypeBlobsByPackage();
         Collection<ModuleEntry> modules = other.allModules();
         Collection<ClassFileEntry> classFiles = other.allClassFiles();
         Collection<ModuleFileEntry> moduleFiles = other.allModuleFiles();
@@ -167,32 +165,23 @@ public final class Index {
     }
 
     /** Shallow copy of encoded TypeEntry buckets keyed by JVM name. */
-    private Map<String, Object> snapshotTypeBlobsByJvmName() {
+    private Map<String, List<byte[]>> snapshotTypeBlobsByJvmName() {
         synchronized (lock) {
             return new HashMap<>(byJvmName);
         }
     }
 
     /** Shallow copy of encoded TypeEntry buckets keyed by package. */
-    private Map<String, Object> snapshotTypeBlobsByPackage() {
+    private Map<String, List<byte[]>> snapshotTypeBlobsByPackage() {
         synchronized (lock) {
             return new HashMap<>(byPackage);
         }
     }
 
     /** Caller must hold the monitor. Appends each incoming blob under its key. */
-    private static void mergeTypeBlobMap(Map<String, Object> target, Map<String, Object> incoming) {
-        for (Map.Entry<String, Object> e : incoming.entrySet()) {
-            Object bucket = e.getValue();
-            if (bucket instanceof byte[] only) {
-                target.put(e.getKey(), appendBlobBucket(target.get(e.getKey()), only));
-            } else if (bucket != null) {
-                Object prior = target.get(e.getKey());
-                for (byte[] blob : (byte[][]) bucket) {
-                    prior = appendBlobBucket(prior, blob);
-                }
-                target.put(e.getKey(), prior);
-            }
+    private static void mergeTypeBlobMap(Map<String, List<byte[]>> target, Map<String, List<byte[]>> incoming) {
+        for (Map.Entry<String, List<byte[]>> e : incoming.entrySet()) {
+            target.computeIfAbsent(e.getKey(), k -> new ArrayList<>()).addAll(e.getValue());
         }
     }
 
@@ -207,16 +196,9 @@ public final class Index {
         }
     }
 
-    private static Object appendBlobBucket(Object prior, byte[] blob) {
-        if (prior == null) return blob;
-        if (prior instanceof byte[] only) {
-            return new byte[][]{only, blob};
-        }
-        byte[][] arr = (byte[][]) prior;
-        byte[][] grown = new byte[arr.length + 1][];
-        System.arraycopy(arr, 0, grown, 0, arr.length);
-        grown[arr.length] = blob;
-        return grown;
+    /** Caller must hold the monitor. Appends {@code value} to the bucket for {@code key}. */
+    private static <T> void appendBucket(Map<String, List<T>> map, String key, T value) {
+        map.computeIfAbsent(key, k -> new ArrayList<>()).add(value);
     }
 
     /**
@@ -239,21 +221,16 @@ public final class Index {
      */
     public TypeEntry get(String jvmName) {
         synchronized (lock) {
-            Object bucket = byJvmName.get(jvmName);
-            if (bucket == null) return null;
-            if (bucket instanceof byte[] only) return decodedCache.get(only);
-            byte[][] arr = (byte[][]) bucket;
-            return arr.length == 0 ? null : decodedCache.get(arr[0]);
+            List<byte[]> bucket = byJvmName.get(jvmName);
+            if (bucket == null || bucket.isEmpty()) return null;
+            return decodedCache.get(bucket.get(0));
         }
     }
 
     public boolean contains(String jvmName) {
         synchronized (lock) {
-            Object bucket = byJvmName.get(jvmName);
-            if (bucket == null) return false;
-            if (bucket instanceof byte[]) return true;
-            byte[][] arr = (byte[][]) bucket;
-            return arr.length > 0;
+            List<byte[]> bucket = byJvmName.get(jvmName);
+            return bucket != null && !bucket.isEmpty();
         }
     }
 
@@ -267,7 +244,7 @@ public final class Index {
             if (recurse) {
                 List<TypeEntry> entries = new ArrayList<>();
                 String prefix = packageJvm+'/';
-                for (Map.Entry<String, Object> entry : byPackage.entrySet()) {
+                for (Map.Entry<String, List<byte[]>> entry : byPackage.entrySet()) {
                     String packageName = entry.getKey();
                     if (packageName.startsWith(prefix)) {
                         addBucketTo(entry.getValue(), entries);
@@ -299,19 +276,13 @@ public final class Index {
         if (prefix == null) return List.of();
         synchronized (lock) {
             List<TypeEntry> out = new ArrayList<>();
-            for (Map.Entry<String, Object> mapEntry : byJvmName.entrySet()) {
+            for (Map.Entry<String, List<byte[]>> mapEntry : byJvmName.entrySet()) {
                 String jvmOwnerName = mapEntry.getKey();
                 if (!simpleNameMatchesPrefix(jvmOwnerName, prefix)) continue;
-                Object bucket = mapEntry.getValue();
-                if (bucket instanceof byte[] only) {
-                    out.add(decodedCache.get(only));
-                } else if (bucket != null) {
-                    for (byte[] blob : (byte[][]) bucket) {
-                        out.add(decodedCache.get(blob));
-                        if (limit > 0 && out.size() >= limit) return out;
-                    }
+                for (byte[] blob : mapEntry.getValue()) {
+                    out.add(decodedCache.get(blob));
+                    if (limit > 0 && out.size() >= limit) return out;
                 }
-                if (limit > 0 && out.size() >= limit) return out;
             }
             return out;
         }
@@ -327,16 +298,11 @@ public final class Index {
         if (prefix == null) return List.of();
         synchronized (lock) {
             List<ClassFileEntry> out = new ArrayList<>();
-            for (Object bucket : classFileByJvmName.values()) {
-                if (bucket instanceof ClassFileEntry only) {
-                    addIfMatchesPrefix(only, only.jvmOwnerName(), prefix, out);
-                } else if (bucket != null) {
-                    for (ClassFileEntry e : (ClassFileEntry[]) bucket) {
-                        addIfMatchesPrefix(e, e.jvmOwnerName(), prefix, out);
-                        if (limit > 0 && out.size() >= limit) return out;
-                    }
+            for (List<ClassFileEntry> bucket : classFileByJvmName.values()) {
+                for (ClassFileEntry e : bucket) {
+                    addIfMatchesPrefix(e, e.jvmOwnerName(), prefix, out);
+                    if (limit > 0 && out.size() >= limit) return out;
                 }
-                if (limit > 0 && out.size() >= limit) return out;
             }
             return out;
         }
@@ -364,7 +330,7 @@ public final class Index {
     public Collection<TypeEntry> all() {
         synchronized (lock) {
             List<TypeEntry> out = new ArrayList<>();
-            for (Object bucket : byJvmName.values()) {
+            for (List<byte[]> bucket : byJvmName.values()) {
                 addBucketTo(bucket, out);
             }
             return Collections.unmodifiableCollection(out);
@@ -382,18 +348,9 @@ public final class Index {
     public int entryCount() {
         synchronized (lock) {
             int n = 0;
-            for (Object bucket : byJvmName.values()) {
-                if (bucket instanceof byte[]) n += 1;
-                else if (bucket != null) n += ((byte[][]) bucket).length;
-            }
-            for (Object bucket : classFileByJvmName.values()) {
-                if (bucket instanceof ClassFileEntry) n += 1;
-                else if (bucket != null) n += ((ClassFileEntry[]) bucket).length;
-            }
-            for (Object bucket : prunedByResourceUri.values()) {
-                if (bucket instanceof PrunedSourceEntry) n += 1;
-                else if (bucket != null) n += ((PrunedSourceEntry[]) bucket).length;
-            }
+            for (List<byte[]> bucket : byJvmName.values()) n += bucket.size();
+            for (List<ClassFileEntry> bucket : classFileByJvmName.values()) n += bucket.size();
+            for (List<PrunedSourceEntry> bucket : prunedByResourceUri.values()) n += bucket.size();
             return n;
         }
     }
@@ -412,25 +369,22 @@ public final class Index {
         if (entry == null) return false;
         String jvm = entry.jvmOwnerName();
         if (isSkippedJvmName(jvm)) return false;
-        classFileByJvmName.put(jvm, appendClassFileBucket(classFileByJvmName.get(jvm), entry));
+        appendBucket(classFileByJvmName, jvm, entry);
         String pkg = entry.packageJvm();
-        classFileByPackage.put(pkg, appendClassFileBucket(classFileByPackage.get(pkg), entry));
+        appendBucket(classFileByPackage, pkg, entry);
         return true;
     }
 
     public List<ClassFileEntry> getAllClassFiles(String jvmName) {
         synchronized (lock) {
-            return toClassFileList(classFileByJvmName.get(jvmName));
+            return toImmutableList(classFileByJvmName.get(jvmName));
         }
     }
 
     public boolean containsClassFile(String jvmName) {
         synchronized (lock) {
-            Object bucket = classFileByJvmName.get(jvmName);
-            if (bucket == null) return false;
-            if (bucket instanceof ClassFileEntry) return true;
-            ClassFileEntry[] arr = (ClassFileEntry[]) bucket;
-            return arr.length > 0;
+            List<ClassFileEntry> bucket = classFileByJvmName.get(jvmName);
+            return bucket != null && !bucket.isEmpty();
         }
     }
 
@@ -443,15 +397,15 @@ public final class Index {
             if (recurse) {
                 List<ClassFileEntry> entries = new ArrayList<>();
                 String prefix = packageJvm + '/';
-                for (Map.Entry<String, Object> entry : classFileByPackage.entrySet()) {
+                for (Map.Entry<String, List<ClassFileEntry>> entry : classFileByPackage.entrySet()) {
                     String packageName = entry.getKey();
                     if (packageName.startsWith(prefix)) {
-                        addClassFileBucketTo(entry.getValue(), entries);
+                        addAllTo(entry.getValue(), entries);
                     }
                 }
                 return entries;
             }
-            return toClassFileList(classFileByPackage.get(packageJvm == null ? "" : packageJvm));
+            return toImmutableList(classFileByPackage.get(packageJvm == null ? "" : packageJvm));
         }
     }
 
@@ -459,8 +413,8 @@ public final class Index {
     public Collection<ClassFileEntry> allClassFiles() {
         synchronized (lock) {
             List<ClassFileEntry> out = new ArrayList<>();
-            for (Object bucket : classFileByJvmName.values()) {
-                addClassFileBucketTo(bucket, out);
+            for (List<ClassFileEntry> bucket : classFileByJvmName.values()) {
+                addAllTo(bucket, out);
             }
             return Collections.unmodifiableCollection(out);
         }
@@ -485,23 +439,21 @@ public final class Index {
     private boolean addModuleFileLocked(ModuleFileEntry module) {
         if (module == null) return false;
         String name = module.name();
-        moduleFileByName.put(name, appendModuleFileBucket(moduleFileByName.get(name), module));
+        appendBucket(moduleFileByName, name, module);
         return true;
     }
 
     public List<ModuleFileEntry> getAllModuleFiles(String moduleName) {
         synchronized (lock) {
-            return toModuleFileList(moduleFileByName.get(moduleName));
+            return toImmutableList(moduleFileByName.get(moduleName));
         }
     }
 
     public ModuleFileEntry getModuleFile(String moduleName) {
         synchronized (lock) {
-            Object bucket = moduleFileByName.get(moduleName);
-            if (bucket == null) return null;
-            if (bucket instanceof ModuleFileEntry only) return only;
-            ModuleFileEntry[] arr = (ModuleFileEntry[]) bucket;
-            return arr.length == 0 ? null : arr[0];
+            List<ModuleFileEntry> bucket = moduleFileByName.get(moduleName);
+            if (bucket == null || bucket.isEmpty()) return null;
+            return bucket.get(0);
         }
     }
 
@@ -509,11 +461,8 @@ public final class Index {
     public Collection<ModuleFileEntry> allModuleFiles() {
         synchronized (lock) {
             List<ModuleFileEntry> out = new ArrayList<>();
-            for (Object bucket : moduleFileByName.values()) {
-                if (bucket instanceof ModuleFileEntry only) out.add(only);
-                else if (bucket != null) {
-                    for (ModuleFileEntry m : (ModuleFileEntry[]) bucket) out.add(m);
-                }
+            for (List<ModuleFileEntry> bucket : moduleFileByName.values()) {
+                addAllTo(bucket, out);
             }
             return Collections.unmodifiableCollection(out);
         }
@@ -525,72 +474,27 @@ public final class Index {
         }
     }
 
-    private static Object appendClassFileBucket(Object prior, ClassFileEntry entry) {
-        if (prior == null) return entry;
-        if (prior instanceof ClassFileEntry only) {
-            return new ClassFileEntry[]{only, entry};
-        }
-        ClassFileEntry[] arr = (ClassFileEntry[]) prior;
-        ClassFileEntry[] grown = new ClassFileEntry[arr.length + 1];
-        System.arraycopy(arr, 0, grown, 0, arr.length);
-        grown[arr.length] = entry;
-        return grown;
+    private static <T> List<T> toImmutableList(List<T> bucket) {
+        if (bucket == null || bucket.isEmpty()) return List.of();
+        return List.copyOf(bucket);
     }
 
-    private static Object appendModuleFileBucket(Object prior, ModuleFileEntry entry) {
-        if (prior == null) return entry;
-        if (prior instanceof ModuleFileEntry only) {
-            return new ModuleFileEntry[]{only, entry};
-        }
-        ModuleFileEntry[] arr = (ModuleFileEntry[]) prior;
-        ModuleFileEntry[] grown = new ModuleFileEntry[arr.length + 1];
-        System.arraycopy(arr, 0, grown, 0, arr.length);
-        grown[arr.length] = entry;
-        return grown;
+    private static <T> void addAllTo(List<T> bucket, List<T> out) {
+        if (bucket != null) out.addAll(bucket);
     }
 
-    private static List<ClassFileEntry> toClassFileList(Object bucket) {
-        if (bucket == null) return List.of();
-        if (bucket instanceof ClassFileEntry only) return List.of(only);
-        ClassFileEntry[] arr = (ClassFileEntry[]) bucket;
-        return arr.length == 0 ? List.of() : List.of(arr);
-    }
-
-    private static void addClassFileBucketTo(Object bucket, List<ClassFileEntry> out) {
-        if (bucket == null) return;
-        if (bucket instanceof ClassFileEntry only) {
-            out.add(only);
-            return;
-        }
-        for (ClassFileEntry e : (ClassFileEntry[]) bucket) out.add(e);
-    }
-
-    private static List<ModuleFileEntry> toModuleFileList(Object bucket) {
-        if (bucket == null) return List.of();
-        if (bucket instanceof ModuleFileEntry only) return List.of(only);
-        ModuleFileEntry[] arr = (ModuleFileEntry[]) bucket;
-        return arr.length == 0 ? List.of() : List.of(arr);
-    }
-
-    private List<TypeEntry> toList(Object bucket) {
-        if (bucket == null) return List.of();
-        if (bucket instanceof byte[] only) return List.of(decodedCache.get(only));
-        byte[][] arr = (byte[][]) bucket;
-        if (arr.length == 0) return List.of();
-        TypeEntry[] decoded = new TypeEntry[arr.length];
-        for (int i = 0; i < arr.length; i++) {
-            decoded[i] = decodedCache.get(arr[i]);
+    private List<TypeEntry> toList(List<byte[]> bucket) {
+        if (bucket == null || bucket.isEmpty()) return List.of();
+        TypeEntry[] decoded = new TypeEntry[bucket.size()];
+        for (int i = 0; i < bucket.size(); i++) {
+            decoded[i] = decodedCache.get(bucket.get(i));
         }
         return List.of(decoded);
     }
 
-    private void addBucketTo(Object bucket, List<TypeEntry> out) {
+    private void addBucketTo(List<byte[]> bucket, List<TypeEntry> out) {
         if (bucket == null) return;
-        if (bucket instanceof byte[] only) {
-            out.add(decodedCache.get(only));
-            return;
-        }
-        for (byte[] blob : (byte[][]) bucket) {
+        for (byte[] blob : bucket) {
             out.add(decodedCache.get(blob));
         }
     }
@@ -614,20 +518,8 @@ public final class Index {
     private boolean addModuleLocked(ModuleEntry module) {
         if (module == null) return false;
         String name = module.name();
-        byModuleName.put(name, appendModuleBucket(byModuleName.get(name), module));
+        appendBucket(byModuleName, name, module);
         return true;
-    }
-
-    private static Object appendModuleBucket(Object prior, ModuleEntry entry) {
-        if (prior == null) return entry;
-        if (prior instanceof ModuleEntry only) {
-            return new ModuleEntry[]{only, entry};
-        }
-        ModuleEntry[] arr = (ModuleEntry[]) prior;
-        ModuleEntry[] grown = new ModuleEntry[arr.length + 1];
-        System.arraycopy(arr, 0, grown, 0, arr.length);
-        grown[arr.length] = entry;
-        return grown;
     }
 
     /**
@@ -637,18 +529,16 @@ public final class Index {
      */
     public List<ModuleEntry> getAllModules(String moduleName) {
         synchronized (lock) {
-            return toModuleList(byModuleName.get(moduleName));
+            return toImmutableList(byModuleName.get(moduleName));
         }
     }
 
     /** Convenience: pick an arbitrary {@link ModuleEntry} for the name, or null. */
     public ModuleEntry getModule(String moduleName) {
         synchronized (lock) {
-            Object bucket = byModuleName.get(moduleName);
-            if (bucket == null) return null;
-            if (bucket instanceof ModuleEntry only) return only;
-            ModuleEntry[] arr = (ModuleEntry[]) bucket;
-            return arr.length == 0 ? null : arr[0];
+            List<ModuleEntry> bucket = byModuleName.get(moduleName);
+            if (bucket == null || bucket.isEmpty()) return null;
+            return bucket.get(0);
         }
     }
 
@@ -656,11 +546,8 @@ public final class Index {
     public Collection<ModuleEntry> allModules() {
         synchronized (lock) {
             List<ModuleEntry> out = new ArrayList<>();
-            for (Object bucket : byModuleName.values()) {
-                if (bucket instanceof ModuleEntry only) out.add(only);
-                else if (bucket != null) {
-                    for (ModuleEntry m : (ModuleEntry[]) bucket) out.add(m);
-                }
+            for (List<ModuleEntry> bucket : byModuleName.values()) {
+                addAllTo(bucket, out);
             }
             return Collections.unmodifiableCollection(out);
         }
@@ -687,34 +574,32 @@ public final class Index {
         if (entry == null) return false;
         String resourceUri = entry.resourceUri();
         if (resourceUri == null) return false;
-        prunedByResourceUri.put(resourceUri, appendPrunedBucket(prunedByResourceUri.get(resourceUri), entry));
+        appendBucket(prunedByResourceUri, resourceUri, entry);
         String pkg = entry.packageJvm() == null ? "" : entry.packageJvm();
-        prunedByPackage.put(pkg, appendPrunedBucket(prunedByPackage.get(pkg), entry));
+        appendBucket(prunedByPackage, pkg, entry);
         for (String jvm : entry.topLevelBinaryNames()) {
-            prunedByJvmName.put(jvm, appendPrunedBucket(prunedByJvmName.get(jvm), entry));
+            appendBucket(prunedByJvmName, jvm, entry);
         }
         return true;
     }
 
     public List<PrunedSourceEntry> getAllPrunedSourcesByJvmName(String jvmName) {
         synchronized (lock) {
-            return toPrunedList(prunedByJvmName.get(jvmName));
+            return toImmutableList(prunedByJvmName.get(jvmName));
         }
     }
 
     public PrunedSourceEntry getPrunedSource(String resourceUri) {
         synchronized (lock) {
-            Object bucket = prunedByResourceUri.get(resourceUri);
-            if (bucket == null) return null;
-            if (bucket instanceof PrunedSourceEntry only) return only;
-            PrunedSourceEntry[] arr = (PrunedSourceEntry[]) bucket;
-            return arr.length == 0 ? null : arr[0];
+            List<PrunedSourceEntry> bucket = prunedByResourceUri.get(resourceUri);
+            if (bucket == null || bucket.isEmpty()) return null;
+            return bucket.get(0);
         }
     }
 
     public List<PrunedSourceEntry> getAllPrunedSources(String resourceUri) {
         synchronized (lock) {
-            return toPrunedList(prunedByResourceUri.get(resourceUri));
+            return toImmutableList(prunedByResourceUri.get(resourceUri));
         }
     }
 
@@ -727,15 +612,15 @@ public final class Index {
             if (recurse) {
                 List<PrunedSourceEntry> entries = new ArrayList<>();
                 String prefix = packageJvm + '/';
-                for (Map.Entry<String, Object> entry : prunedByPackage.entrySet()) {
+                for (Map.Entry<String, List<PrunedSourceEntry>> entry : prunedByPackage.entrySet()) {
                     String packageName = entry.getKey();
                     if (packageName.startsWith(prefix)) {
-                        addPrunedBucketTo(entry.getValue(), entries);
+                        addAllTo(entry.getValue(), entries);
                     }
                 }
                 return entries;
             }
-            return toPrunedList(prunedByPackage.get(packageJvm == null ? "" : packageJvm));
+            return toImmutableList(prunedByPackage.get(packageJvm == null ? "" : packageJvm));
         }
     }
 
@@ -743,8 +628,8 @@ public final class Index {
     public Collection<PrunedSourceEntry> allPrunedSources() {
         synchronized (lock) {
             List<PrunedSourceEntry> out = new ArrayList<>();
-            for (Object bucket : prunedByResourceUri.values()) {
-                addPrunedBucketTo(bucket, out);
+            for (List<PrunedSourceEntry> bucket : prunedByResourceUri.values()) {
+                addAllTo(bucket, out);
             }
             return Collections.unmodifiableCollection(out);
         }
@@ -760,41 +645,6 @@ public final class Index {
         synchronized (lock) {
             return !prunedByResourceUri.isEmpty();
         }
-    }
-
-    private static Object appendPrunedBucket(Object prior, PrunedSourceEntry entry) {
-        if (prior == null) return entry;
-        if (prior instanceof PrunedSourceEntry only) {
-            return new PrunedSourceEntry[]{only, entry};
-        }
-        PrunedSourceEntry[] arr = (PrunedSourceEntry[]) prior;
-        PrunedSourceEntry[] grown = new PrunedSourceEntry[arr.length + 1];
-        System.arraycopy(arr, 0, grown, 0, arr.length);
-        grown[arr.length] = entry;
-        return grown;
-    }
-
-    private static List<PrunedSourceEntry> toPrunedList(Object bucket) {
-        if (bucket == null) return List.of();
-        if (bucket instanceof PrunedSourceEntry only) return List.of(only);
-        PrunedSourceEntry[] arr = (PrunedSourceEntry[]) bucket;
-        return arr.length == 0 ? List.of() : List.of(arr);
-    }
-
-    private static void addPrunedBucketTo(Object bucket, List<PrunedSourceEntry> out) {
-        if (bucket == null) return;
-        if (bucket instanceof PrunedSourceEntry only) {
-            out.add(only);
-            return;
-        }
-        for (PrunedSourceEntry e : (PrunedSourceEntry[]) bucket) out.add(e);
-    }
-
-    private static List<ModuleEntry> toModuleList(Object bucket) {
-        if (bucket == null) return List.of();
-        if (bucket instanceof ModuleEntry only) return List.of(only);
-        ModuleEntry[] arr = (ModuleEntry[]) bucket;
-        return arr.length == 0 ? List.of() : List.of(arr);
     }
 
     /**
