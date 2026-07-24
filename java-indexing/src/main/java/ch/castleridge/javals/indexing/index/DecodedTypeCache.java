@@ -37,12 +37,25 @@ final class DecodedTypeCache {
         };
     }
 
-    synchronized TypeEntry get(byte[] blob) {
+    TypeEntry get(byte[] blob) {
         if (blob == null) return null;
-        TypeEntry cached = cache.get(blob);
-        if (cached != null) return cached;
+        // Fast path: a hit only needs the (cheap) map lookup under the lock.
+        // The access-ordered LRU mutates on read, so the get itself must be
+        // guarded, but we keep the critical section to the map operation.
+        synchronized (this) {
+            TypeEntry cached = cache.get(blob);
+            if (cached != null) return cached;
+        }
+        // Decode outside the lock so concurrent decodes of different blobs
+        // run in parallel instead of serializing on this monitor. A racing
+        // duplicate decode of the same blob is harmless: we keep whichever
+        // decoded graph wins the insert and drop the other for GC.
         TypeEntry decoded = TypeEntryCodec.decode(blob);
-        cache.put(blob, decoded);
-        return decoded;
+        synchronized (this) {
+            TypeEntry existing = cache.get(blob);
+            if (existing != null) return existing;
+            cache.put(blob, decoded);
+            return decoded;
+        }
     }
 }

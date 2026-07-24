@@ -1,6 +1,8 @@
 package ch.castleridge.javals.indexing.index;
 
 import java.util.*;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Supplier;
 
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.model.ClassFileEntry;
@@ -34,20 +36,38 @@ import ch.castleridge.javals.indexing.model.TypeEntryCodec;
  * {@link List} of encoded blobs. Decoded records are reconstructed on demand
  * through a fixed-size {@link DecodedTypeCache}.
  *
- * <p>Thread-safety is provided by a single monitor ({@code synchronized}
- * on {@link #lock}) guarding plain {@link HashMap}s rather than
- * {@code ConcurrentHashMap}. Indexing happens in batches: a scanner builds
- * a per-source temporary index and merges it wholesale via
- * {@link #addAll(Index)}, so each merge takes the monitor exactly once and
- * applies the whole batch under it, avoiding the per-key CAS/bin-lock
- * overhead of {@code ConcurrentHashMap}. Encoding happens before the lock
- * (or was already done in the source index); critical sections only move
- * blob references.
+ * <p>Thread-safety is provided by a single {@link ReentrantReadWriteLock}
+ * guarding plain {@link HashMap}s rather than {@code ConcurrentHashMap}.
+ * Lookups take the shared read lock, so the many concurrent readers on a
+ * hot request path (e.g. a parallel find-references sweep, where each
+ * candidate compile hammers {@link #getAll}/{@link #listPackage}) proceed
+ * in parallel instead of serializing on one monitor. Indexing happens in
+ * batches under the exclusive write lock: a scanner builds a per-source
+ * temporary index and merges it wholesale via {@link #addAll(Index)}, so
+ * each merge takes the lock exactly once and applies the whole batch under
+ * it, avoiding the per-key CAS/bin-lock overhead of
+ * {@code ConcurrentHashMap}. Encoding happens before the lock (or was
+ * already done in the source index); critical sections only move blob
+ * references.
  */
 public final class Index {
 
-    private final Object lock = new Object();
+    private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
     private final DecodedTypeCache decodedCache = new DecodedTypeCache();
+
+    /**
+     * Run {@code body} under the shared read lock. Read-only lookups use
+     * this so they can run concurrently with one another; only a mutation
+     * (write lock) excludes them.
+     */
+    private <T> T read(Supplier<T> body) {
+        rwLock.readLock().lock();
+        try {
+            return body.get();
+        } finally {
+            rwLock.readLock().unlock();
+        }
+    }
 
     /** JVM name → encoded TypeEntry blobs. */
     private final Map<String, List<byte[]>> byJvmName = new HashMap<>();
@@ -65,21 +85,27 @@ public final class Index {
     private final Map<String, List<ModuleEntry>> byModuleName = new HashMap<>();
     private final Map<String, IdentifierBloomFilter> bloomByResourceUri = new HashMap<>();
     // Observer list is touched once per merge and rarely mutated; guard it
-    // with the same monitor and iterate a snapshot taken outside it.
+    // with the same lock and iterate a snapshot taken outside it.
     private final List<Runnable> changedListeners = new ArrayList<>();
 
     public void addChangedListener(Runnable listener) {
         if (listener == null) return;
-        synchronized (lock) {
+        rwLock.writeLock().lock();
+        try {
             changedListeners.add(listener);
+        } finally {
+            rwLock.writeLock().unlock();
         }
     }
 
     private void notifyChanged() {
         Runnable[] snapshot;
-        synchronized (lock) {
+        rwLock.readLock().lock();
+        try {
             if (changedListeners.isEmpty()) return;
             snapshot = changedListeners.toArray(new Runnable[0]);
+        } finally {
+            rwLock.readLock().unlock();
         }
         for (Runnable listener : snapshot) {
             try {
@@ -97,12 +123,15 @@ public final class Index {
      */
     public void registerBloom(String resourceUri, IdentifierBloomFilter filter) {
         if (resourceUri == null || filter == null) return;
-        synchronized (lock) {
+        rwLock.writeLock().lock();
+        try {
             registerBloomLocked(resourceUri, filter);
+        } finally {
+            rwLock.writeLock().unlock();
         }
     }
 
-    /** Caller must hold the monitor. */
+    /** Caller must hold the write lock. */
     private void registerBloomLocked(String resourceUri, IdentifierBloomFilter filter) {
         if (resourceUri == null || filter == null) return;
         bloomByResourceUri.put(resourceUri, filter);
@@ -114,22 +143,23 @@ public final class Index {
      * without holding the index lock.
      */
     public Map<String, IdentifierBloomFilter> bloomFilters() {
-        synchronized (lock) {
-            return Map.copyOf(bloomByResourceUri);
-        }
+        return read(() -> Map.copyOf(bloomByResourceUri));
     }
 
     public void add(TypeEntry entry) {
         if (entry == null) return;
         String jvm = entry.jvmOwnerName();
         if (isSkippedJvmName(jvm)) return;
-        // Encode outside the monitor: parsing already finished; keep the
+        // Encode outside the lock: parsing already finished; keep the
         // critical section to blob-pointer moves only.
         byte[] blob = TypeEntryCodec.encode(entry);
         String pkg = entry.packageJvm();
-        synchronized (lock) {
+        rwLock.writeLock().lock();
+        try {
             appendBucket(byJvmName, jvm, blob);
             appendBucket(byPackage, pkg, blob);
+        } finally {
+            rwLock.writeLock().unlock();
         }
         notifyChanged();
     }
@@ -137,13 +167,13 @@ public final class Index {
     /**
      * Merge every entry from {@code other} into this index and fire a
      * single change notification. The entire batch is applied under one
-     * monitor acquisition. TypeEntry blobs are moved by reference (no
+     * write-lock acquisition. TypeEntry blobs are moved by reference (no
      * decode/re-encode). Bloom filters are merged silently.
      */
     public void addAll(Index other) {
         if (other == null || other.isEmpty()) return;
         // Snapshot the source outside our lock (each call takes the
-        // source's own monitor); then apply the whole batch at once.
+        // source's own lock); then apply the whole batch at once.
         Map<String, List<byte[]>> typeBlobsByJvm = other.snapshotTypeBlobsByJvmName();
         Map<String, List<byte[]>> typeBlobsByPackage = other.snapshotTypeBlobsByPackage();
         Collection<ModuleEntry> modules = other.allModules();
@@ -152,7 +182,8 @@ public final class Index {
         Collection<PrunedSourceEntry> prunedSources = other.allPrunedSources();
         Map<String, IdentifierBloomFilter> blooms = other.bloomFilters();
 
-        synchronized (lock) {
+        rwLock.writeLock().lock();
+        try {
             mergeTypeBlobMap(byJvmName, typeBlobsByJvm);
             mergeTypeBlobMap(byPackage, typeBlobsByPackage);
             for (ModuleEntry m : modules) addModuleLocked(m);
@@ -160,25 +191,23 @@ public final class Index {
             for (ModuleFileEntry mf : moduleFiles) addModuleFileLocked(mf);
             for (PrunedSourceEntry ps : prunedSources) addPrunedSourceLocked(ps);
             blooms.forEach(this::registerBloomLocked);
+        } finally {
+            rwLock.writeLock().unlock();
         }
         notifyChanged();
     }
 
     /** Shallow copy of encoded TypeEntry buckets keyed by JVM name. */
     private Map<String, List<byte[]>> snapshotTypeBlobsByJvmName() {
-        synchronized (lock) {
-            return new HashMap<>(byJvmName);
-        }
+        return read(() -> new HashMap<>(byJvmName));
     }
 
     /** Shallow copy of encoded TypeEntry buckets keyed by package. */
     private Map<String, List<byte[]>> snapshotTypeBlobsByPackage() {
-        synchronized (lock) {
-            return new HashMap<>(byPackage);
-        }
+        return read(() -> new HashMap<>(byPackage));
     }
 
-    /** Caller must hold the monitor. Appends each incoming blob under its key. */
+    /** Caller must hold the write lock. Appends each incoming blob under its key. */
     private static void mergeTypeBlobMap(Map<String, List<byte[]>> target, Map<String, List<byte[]>> incoming) {
         for (Map.Entry<String, List<byte[]>> e : incoming.entrySet()) {
             target.computeIfAbsent(e.getKey(), k -> new ArrayList<>()).addAll(e.getValue());
@@ -186,17 +215,15 @@ public final class Index {
     }
 
     public boolean isEmpty() {
-        synchronized (lock) {
-            return byJvmName.isEmpty()
-                    && byModuleName.isEmpty()
-                    && classFileByJvmName.isEmpty()
-                    && moduleFileByName.isEmpty()
-                    && prunedByResourceUri.isEmpty()
-                    && bloomByResourceUri.isEmpty();
-        }
+        return read(() -> byJvmName.isEmpty()
+                && byModuleName.isEmpty()
+                && classFileByJvmName.isEmpty()
+                && moduleFileByName.isEmpty()
+                && prunedByResourceUri.isEmpty()
+                && bloomByResourceUri.isEmpty());
     }
 
-    /** Caller must hold the monitor. Appends {@code value} to the bucket for {@code key}. */
+    /** Caller must hold the write lock. Appends {@code value} to the bucket for {@code key}. */
     private static <T> void appendBucket(Map<String, List<T>> map, String key, T value) {
         map.computeIfAbsent(key, k -> new ArrayList<>()).add(value);
     }
@@ -208,9 +235,7 @@ public final class Index {
      * ordering via {@link TypeEntry#sourceUri()}.
      */
     public List<TypeEntry> getAll(String jvmName) {
-        synchronized (lock) {
-            return toList(byJvmName.get(jvmName));
-        }
+        return read(() -> toList(byJvmName.get(jvmName)));
     }
 
     /**
@@ -220,18 +245,18 @@ public final class Index {
      * explicit classpath ordering for deterministic behaviour.
      */
     public TypeEntry get(String jvmName) {
-        synchronized (lock) {
+        return read(() -> {
             List<byte[]> bucket = byJvmName.get(jvmName);
             if (bucket == null || bucket.isEmpty()) return null;
             return decodedCache.get(bucket.get(0));
-        }
+        });
     }
 
     public boolean contains(String jvmName) {
-        synchronized (lock) {
+        return read(() -> {
             List<byte[]> bucket = byJvmName.get(jvmName);
             return bucket != null && !bucket.isEmpty();
-        }
+        });
     }
 
     /**
@@ -240,7 +265,7 @@ public final class Index {
      * multiple sources) - consumers apply their own deduplication.
      */
     public List<TypeEntry> listPackage(String packageJvm, boolean recurse) {
-        synchronized (lock) {
+        return read(() -> {
             if (recurse) {
                 List<TypeEntry> entries = new ArrayList<>();
                 String prefix = packageJvm+'/';
@@ -254,7 +279,7 @@ public final class Index {
             } else {
                 return toList(byPackage.get(packageJvm == null ? "" : packageJvm));
             }
-        }
+        });
     }
 
     /**
@@ -274,7 +299,7 @@ public final class Index {
      */
     public List<TypeEntry> searchTypesBySimpleNamePrefix(String prefix, int limit) {
         if (prefix == null) return List.of();
-        synchronized (lock) {
+        return read(() -> {
             List<TypeEntry> out = new ArrayList<>();
             for (Map.Entry<String, List<byte[]>> mapEntry : byJvmName.entrySet()) {
                 String jvmOwnerName = mapEntry.getKey();
@@ -285,7 +310,7 @@ public final class Index {
                 }
             }
             return out;
-        }
+        });
     }
 
     /**
@@ -296,7 +321,7 @@ public final class Index {
      */
     public List<ClassFileEntry> searchClassFilesBySimpleNamePrefix(String prefix, int limit) {
         if (prefix == null) return List.of();
-        synchronized (lock) {
+        return read(() -> {
             List<ClassFileEntry> out = new ArrayList<>();
             for (List<ClassFileEntry> bucket : classFileByJvmName.values()) {
                 for (ClassFileEntry e : bucket) {
@@ -305,13 +330,13 @@ public final class Index {
                 }
             }
             return out;
-        }
+        });
     }
 
     /**
      * Append {@code entry} to {@code out} if {@code jvmOwnerName} is a
      * top-level type (no {@code $}) whose simple name starts with
-     * {@code prefix}. Caller must hold the monitor.
+     * {@code prefix}. Caller must hold the read lock.
      */
     private static <T> void addIfMatchesPrefix(T entry, String jvmOwnerName, String prefix, List<T> out) {
         if (simpleNameMatchesPrefix(jvmOwnerName, prefix)) {
@@ -328,43 +353,44 @@ public final class Index {
 
     /** Every {@link TypeEntry} currently stored, including duplicates. */
     public Collection<TypeEntry> all() {
-        synchronized (lock) {
+        return read(() -> {
             List<TypeEntry> out = new ArrayList<>();
             for (List<byte[]> bucket : byJvmName.values()) {
                 addBucketTo(bucket, out);
             }
             return Collections.unmodifiableCollection(out);
-        }
+        });
     }
 
     /** Number of distinct JVM binary names indexed (ignoring duplicates). */
     public int size() {
-        synchronized (lock) {
-            return byJvmName.size();
-        }
+        return read(byJvmName::size);
     }
 
     /** Number of indexed entries in total, counting duplicates. */
     public int entryCount() {
-        synchronized (lock) {
+        return read(() -> {
             int n = 0;
             for (List<byte[]> bucket : byJvmName.values()) n += bucket.size();
             for (List<ClassFileEntry> bucket : classFileByJvmName.values()) n += bucket.size();
             for (List<PrunedSourceEntry> bucket : prunedByResourceUri.values()) n += bucket.size();
             return n;
-        }
+        });
     }
 
     public void addClassFile(ClassFileEntry entry) {
         if (entry == null) return;
         boolean changed;
-        synchronized (lock) {
+        rwLock.writeLock().lock();
+        try {
             changed = addClassFileLocked(entry);
+        } finally {
+            rwLock.writeLock().unlock();
         }
         if (changed) notifyChanged();
     }
 
-    /** Caller must hold the monitor. */
+    /** Caller must hold the write lock. */
     private boolean addClassFileLocked(ClassFileEntry entry) {
         if (entry == null) return false;
         String jvm = entry.jvmOwnerName();
@@ -376,16 +402,14 @@ public final class Index {
     }
 
     public List<ClassFileEntry> getAllClassFiles(String jvmName) {
-        synchronized (lock) {
-            return toImmutableList(classFileByJvmName.get(jvmName));
-        }
+        return read(() -> toImmutableList(classFileByJvmName.get(jvmName)));
     }
 
     public boolean containsClassFile(String jvmName) {
-        synchronized (lock) {
+        return read(() -> {
             List<ClassFileEntry> bucket = classFileByJvmName.get(jvmName);
             return bucket != null && !bucket.isEmpty();
-        }
+        });
     }
 
     /**
@@ -393,7 +417,7 @@ public final class Index {
      * {@code packageJvm}. May contain duplicates from multiple sources.
      */
     public List<ClassFileEntry> listPackageClassFiles(String packageJvm, boolean recurse) {
-        synchronized (lock) {
+        return read(() -> {
             if (recurse) {
                 List<ClassFileEntry> entries = new ArrayList<>();
                 String prefix = packageJvm + '/';
@@ -406,36 +430,37 @@ public final class Index {
                 return entries;
             }
             return toImmutableList(classFileByPackage.get(packageJvm == null ? "" : packageJvm));
-        }
+        });
     }
 
     /** Every {@link ClassFileEntry} currently stored, including duplicates. */
     public Collection<ClassFileEntry> allClassFiles() {
-        synchronized (lock) {
+        return read(() -> {
             List<ClassFileEntry> out = new ArrayList<>();
             for (List<ClassFileEntry> bucket : classFileByJvmName.values()) {
                 addAllTo(bucket, out);
             }
             return Collections.unmodifiableCollection(out);
-        }
+        });
     }
 
     /** Number of distinct JVM binary names in the class-file registry. */
     public int classFileSize() {
-        synchronized (lock) {
-            return classFileByJvmName.size();
-        }
+        return read(classFileByJvmName::size);
     }
 
     public void addModuleFile(ModuleFileEntry module) {
         if (module == null) return;
-        synchronized (lock) {
+        rwLock.writeLock().lock();
+        try {
             addModuleFileLocked(module);
+        } finally {
+            rwLock.writeLock().unlock();
         }
         notifyChanged();
     }
 
-    /** Caller must hold the monitor. */
+    /** Caller must hold the write lock. */
     private boolean addModuleFileLocked(ModuleFileEntry module) {
         if (module == null) return false;
         String name = module.name();
@@ -444,34 +469,30 @@ public final class Index {
     }
 
     public List<ModuleFileEntry> getAllModuleFiles(String moduleName) {
-        synchronized (lock) {
-            return toImmutableList(moduleFileByName.get(moduleName));
-        }
+        return read(() -> toImmutableList(moduleFileByName.get(moduleName)));
     }
 
     public ModuleFileEntry getModuleFile(String moduleName) {
-        synchronized (lock) {
+        return read(() -> {
             List<ModuleFileEntry> bucket = moduleFileByName.get(moduleName);
             if (bucket == null || bucket.isEmpty()) return null;
             return bucket.get(0);
-        }
+        });
     }
 
     /** Every {@link ModuleFileEntry} currently stored, including duplicates. */
     public Collection<ModuleFileEntry> allModuleFiles() {
-        synchronized (lock) {
+        return read(() -> {
             List<ModuleFileEntry> out = new ArrayList<>();
             for (List<ModuleFileEntry> bucket : moduleFileByName.values()) {
                 addAllTo(bucket, out);
             }
             return Collections.unmodifiableCollection(out);
-        }
+        });
     }
 
     public int moduleFileCount() {
-        synchronized (lock) {
-            return moduleFileByName.size();
-        }
+        return read(moduleFileByName::size);
     }
 
     private static <T> List<T> toImmutableList(List<T> bucket) {
@@ -508,13 +529,16 @@ public final class Index {
      */
     public void addModule(ModuleEntry module) {
         if (module == null) return;
-        synchronized (lock) {
+        rwLock.writeLock().lock();
+        try {
             addModuleLocked(module);
+        } finally {
+            rwLock.writeLock().unlock();
         }
         notifyChanged();
     }
 
-    /** Caller must hold the monitor. */
+    /** Caller must hold the write lock. */
     private boolean addModuleLocked(ModuleEntry module) {
         if (module == null) return false;
         String name = module.name();
@@ -528,48 +552,47 @@ public final class Index {
      * picking via {@link ModuleEntry#sourceUri()}.
      */
     public List<ModuleEntry> getAllModules(String moduleName) {
-        synchronized (lock) {
-            return toImmutableList(byModuleName.get(moduleName));
-        }
+        return read(() -> toImmutableList(byModuleName.get(moduleName)));
     }
 
     /** Convenience: pick an arbitrary {@link ModuleEntry} for the name, or null. */
     public ModuleEntry getModule(String moduleName) {
-        synchronized (lock) {
+        return read(() -> {
             List<ModuleEntry> bucket = byModuleName.get(moduleName);
             if (bucket == null || bucket.isEmpty()) return null;
             return bucket.get(0);
-        }
+        });
     }
 
     /** Every {@link ModuleEntry} currently stored, including duplicates. */
     public Collection<ModuleEntry> allModules() {
-        synchronized (lock) {
+        return read(() -> {
             List<ModuleEntry> out = new ArrayList<>();
             for (List<ModuleEntry> bucket : byModuleName.values()) {
                 addAllTo(bucket, out);
             }
             return Collections.unmodifiableCollection(out);
-        }
+        });
     }
 
     /** Distinct number of module names indexed (ignoring duplicates). */
     public int moduleCount() {
-        synchronized (lock) {
-            return byModuleName.size();
-        }
+        return read(byModuleName::size);
     }
 
     public void addPrunedSource(PrunedSourceEntry entry) {
         if (entry == null) return;
         boolean changed;
-        synchronized (lock) {
+        rwLock.writeLock().lock();
+        try {
             changed = addPrunedSourceLocked(entry);
+        } finally {
+            rwLock.writeLock().unlock();
         }
         if (changed) notifyChanged();
     }
 
-    /** Caller must hold the monitor. */
+    /** Caller must hold the write lock. */
     private boolean addPrunedSourceLocked(PrunedSourceEntry entry) {
         if (entry == null) return false;
         String resourceUri = entry.resourceUri();
@@ -584,23 +607,19 @@ public final class Index {
     }
 
     public List<PrunedSourceEntry> getAllPrunedSourcesByJvmName(String jvmName) {
-        synchronized (lock) {
-            return toImmutableList(prunedByJvmName.get(jvmName));
-        }
+        return read(() -> toImmutableList(prunedByJvmName.get(jvmName)));
     }
 
     public PrunedSourceEntry getPrunedSource(String resourceUri) {
-        synchronized (lock) {
+        return read(() -> {
             List<PrunedSourceEntry> bucket = prunedByResourceUri.get(resourceUri);
             if (bucket == null || bucket.isEmpty()) return null;
             return bucket.get(0);
-        }
+        });
     }
 
     public List<PrunedSourceEntry> getAllPrunedSources(String resourceUri) {
-        synchronized (lock) {
-            return toImmutableList(prunedByResourceUri.get(resourceUri));
-        }
+        return read(() -> toImmutableList(prunedByResourceUri.get(resourceUri)));
     }
 
     /**
@@ -608,7 +627,7 @@ public final class Index {
      * {@code packageJvm}. May contain duplicates from multiple sources.
      */
     public List<PrunedSourceEntry> listPackagePrunedSources(String packageJvm, boolean recurse) {
-        synchronized (lock) {
+        return read(() -> {
             if (recurse) {
                 List<PrunedSourceEntry> entries = new ArrayList<>();
                 String prefix = packageJvm + '/';
@@ -621,30 +640,26 @@ public final class Index {
                 return entries;
             }
             return toImmutableList(prunedByPackage.get(packageJvm == null ? "" : packageJvm));
-        }
+        });
     }
 
     /** Every {@link PrunedSourceEntry} currently stored, including duplicates. */
     public Collection<PrunedSourceEntry> allPrunedSources() {
-        synchronized (lock) {
+        return read(() -> {
             List<PrunedSourceEntry> out = new ArrayList<>();
             for (List<PrunedSourceEntry> bucket : prunedByResourceUri.values()) {
                 addAllTo(bucket, out);
             }
             return Collections.unmodifiableCollection(out);
-        }
+        });
     }
 
     public int prunedSourceSize() {
-        synchronized (lock) {
-            return prunedByResourceUri.size();
-        }
+        return read(prunedByResourceUri::size);
     }
 
     public boolean hasPrunedSources() {
-        synchronized (lock) {
-            return !prunedByResourceUri.isEmpty();
-        }
+        return read(() -> !prunedByResourceUri.isEmpty());
     }
 
     /**
