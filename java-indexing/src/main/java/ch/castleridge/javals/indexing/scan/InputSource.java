@@ -17,13 +17,7 @@ package ch.castleridge.javals.indexing.scan;
  */
 public sealed interface InputSource permits DirInput, JarInput, JrtInput {
 
-    /**
-     * @param indexClassFiles when {@code true}, ordinary {@code .class}
-     *        files are read and fully indexed; when {@code false}, they are
-     *        catalogued from their relative path only. {@code module-info.class}
-     *        and {@code .java} files are still read.
-     */
-    void walk(ResourceSink sink, boolean indexClassFiles);
+    void walk(ResourceSink sink);
 
     /**
      * URI identifying this source as a whole (the jar file, the directory

@@ -3,9 +3,8 @@ package ch.castleridge.javals.indexing.model;
 import ch.castleridge.javals.indexing.intern.Interner;
 
 /**
- * Locator metadata shared by full {@link TypeEntry} and minimal
- * {@link ClassFileEntry} records: enough to map a compiled class back to
- * its originating resource and sources-jar companion.
+ * Locator metadata for an indexed {@link TypeEntry}: enough to map a compiled
+ * class back to its originating resource and sources-jar companion.
  *
  * <p>{@link #resourcePath()} is compact relative to {@link #sourceUri()} when
  * possible; prefer {@link #resourceUri()} for the full location.
@@ -35,13 +34,5 @@ public record IndexedClassRef(
             case SourceTypeEntry s -> s.resourcePath();
         };
         return new IndexedClassRef(path, entry.sourceUri(), entry.jvmOwnerName());
-    }
-
-    public static IndexedClassRef from(ClassFileEntry entry) {
-        return new IndexedClassRef(entry.resourcePath(), entry.sourceUri(), entry.jvmOwnerName());
-    }
-
-    public static IndexedClassRef from(PrunedSourceEntry entry, String jvmOwnerName) {
-        return new IndexedClassRef(entry.resourcePath(), entry.sourceUri(), jvmOwnerName);
     }
 }

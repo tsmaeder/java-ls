@@ -1,17 +1,16 @@
 package ch.castleridge.javals;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.OptionalInt;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.eclipse.lsp4j.InitializeParams;
 import org.junit.jupiter.api.Test;
 
 import com.google.gson.JsonObject;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.OptionalInt;
 
 class InitializationOptionsTest {
 
@@ -34,15 +33,6 @@ class InitializationOptionsTest {
     }
 
     @Test
-    void indexClassFileContentsDefaultsTrueAndParsesBoolean() {
-        assertTrue(indexClassFileContentsFrom(Map.of()));
-        assertTrue(indexClassFileContentsFrom(Map.of("indexClassFileContents", true)));
-        assertFalse(indexClassFileContentsFrom(Map.of("indexClassFileContents", false)));
-        assertFalse(indexClassFileContentsFrom(Map.of("indexClassFileContents", "false")));
-        assertTrue(indexClassFileContentsFrom(Map.of("indexClassFileContents", "true")));
-    }
-
-    @Test
     void initializeAppliesReferencesCandidateCap() throws Exception {
         JavaLanguageServer server = new JavaLanguageServer();
         InitializeParams params = new InitializeParams();
@@ -60,11 +50,5 @@ class InitializationOptionsTest {
         InitializeParams params = new InitializeParams();
         params.setInitializationOptions(options);
         return InitializationOptions.referencesCandidateCap(params);
-    }
-
-    private static boolean indexClassFileContentsFrom(Map<String, Object> options) {
-        InitializeParams params = new InitializeParams();
-        params.setInitializationOptions(options);
-        return InitializationOptions.indexClassFileContents(params);
     }
 }

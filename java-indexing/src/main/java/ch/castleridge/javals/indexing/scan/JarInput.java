@@ -16,7 +16,7 @@ public record JarInput(Path jar, ScanCollector collector) implements InputSource
     }
 
     @Override
-    public void walk(ResourceSink sink, boolean indexClassFiles) {
+    public void walk(ResourceSink sink) {
         try (JarFile jf = new JarFile(jar.toFile())) {
             Enumeration<JarEntry> entries = jf.entries();
             while (entries.hasMoreElements()) {
@@ -26,22 +26,18 @@ public record JarInput(Path jar, ScanCollector collector) implements InputSource
                 String simple = simpleName(name);
                 if (isIndexable(simple)) {
                     recordStats(simple, e.getSize());
-                    if (shouldReadContents(indexClassFiles, simple)) {
-                        // Read bytes eagerly: the sink typically hands the bytes supplier
-                        // to an async task, and by the time the task runs the
-                        // try-with-resources below would have closed the JarFile.
-                        try {
-                            byte[] bytes = jf.getInputStream(e).readAllBytes();
-                            if (collector != null && simple.endsWith(".class") && e.getSize() < 0) {
-                                collector.addClassFileBytes(bytes.length);
-                            }
-                            sink.accept(name, simple, () -> bytes);
-                        } catch (IOException ioe) {
-                            System.err.println("Skipping unreadable jar entry " + jar + "!/" + name
-                                    + ": " + ioe.getClass().getSimpleName() + ": " + ioe.getMessage());
+                    // Read bytes eagerly: the sink typically hands the bytes supplier
+                    // to an async task, and by the time the task runs the
+                    // try-with-resources below would have closed the JarFile.
+                    try {
+                        byte[] bytes = jf.getInputStream(e).readAllBytes();
+                        if (collector != null && simple.endsWith(".class") && e.getSize() < 0) {
+                            collector.addClassFileBytes(bytes.length);
                         }
-                    } else {
-                        sink.accept(name, simple, null);
+                        sink.accept(name, simple, () -> bytes);
+                    } catch (IOException ioe) {
+                        System.err.println("Skipping unreadable jar entry " + jar + "!/" + name
+                                + ": " + ioe.getClass().getSimpleName() + ": " + ioe.getMessage());
                     }
                 }
             }
@@ -67,10 +63,6 @@ public record JarInput(Path jar, ScanCollector collector) implements InputSource
         // so the file URI is the cleanest prefix-free key for a jar as a
         // classpath entry.
         return jar.toUri().toString();
-    }
-
-    private static boolean shouldReadContents(boolean indexClassFiles, String name) {
-        return indexClassFiles || !name.endsWith(".class") || Index.isModuleInfoFileName(name);
     }
 
     private static String simpleName(String entryName) {

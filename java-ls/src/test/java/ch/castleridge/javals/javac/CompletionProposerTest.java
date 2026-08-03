@@ -13,7 +13,6 @@ import org.junit.jupiter.api.Test;
 import com.sun.source.tree.CompilationUnitTree;
 
 import ch.castleridge.javals.indexing.index.Index;
-import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.FieldEntry;
@@ -189,7 +188,7 @@ class CompletionProposerTest {
     }
 
     @Test
-    void unimportedTypeCompletionOffersImportForBothTypeAndClassFileCandidates() throws Exception {
+    void unimportedTypeCompletionOffersImportForSourceAndBytecodeTypeCandidates() throws Exception {
         Index index = baseIndex();
         String source = """
                 package com.example;
@@ -213,10 +212,10 @@ class CompletionProposerTest {
         assertEquals("com.example.tools.ZetaHelper", fromTypeEntry.getDetail());
         assertImportEdit(fromTypeEntry, "import com.example.tools.ZetaHelper;\n");
 
-        CompletionItem fromClassFileEntry = findByLabel(items, "ZetaTool");
-        assertTrue(fromClassFileEntry != null, () -> "expected ZetaTool, got: " + labels(items));
-        assertEquals("com.example.tools.ZetaTool", fromClassFileEntry.getDetail());
-        assertImportEdit(fromClassFileEntry, "import com.example.tools.ZetaTool;\n");
+        CompletionItem fromBytecodeType = findByLabel(items, "ZetaTool");
+        assertTrue(fromBytecodeType != null, () -> "expected ZetaTool, got: " + labels(items));
+        assertEquals("com.example.tools.ZetaTool", fromBytecodeType.getDetail());
+        assertImportEdit(fromBytecodeType, "import com.example.tools.ZetaTool;\n");
     }
 
     @Test
@@ -287,8 +286,7 @@ class CompletionProposerTest {
         index.add(widgetType());
         index.add(constantsType());
         index.add(classFileType(SOURCE_URI, "com/example/tools/ZetaHelper"));
-        index.addClassFile(new ClassFileEntry(
-                "index:///com/example/tools/ZetaTool.class", SOURCE_URI, "com/example/tools/ZetaTool"));
+        index.add(classFileType(SOURCE_URI, "com/example/tools/ZetaTool"));
         return index;
     }
 

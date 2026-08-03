@@ -5,10 +5,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Supplier;
 
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
-import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
-import ch.castleridge.javals.indexing.model.ModuleFileEntry;
-import ch.castleridge.javals.indexing.model.PrunedSourceEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeEntryCodec;
 
@@ -73,12 +70,6 @@ public final class Index {
     private final Map<String, List<byte[]>> byJvmName = new HashMap<>();
     /** Package → encoded TypeEntry blobs. */
     private final Map<String, List<byte[]>> byPackage = new HashMap<>();
-    private final Map<String, List<ClassFileEntry>> classFileByJvmName = new HashMap<>();
-    private final Map<String, List<ClassFileEntry>> classFileByPackage = new HashMap<>();
-    private final Map<String, List<ModuleFileEntry>> moduleFileByName = new HashMap<>();
-    private final Map<String, List<PrunedSourceEntry>> prunedByResourceUri = new HashMap<>();
-    private final Map<String, List<PrunedSourceEntry>> prunedByPackage = new HashMap<>();
-    private final Map<String, List<PrunedSourceEntry>> prunedByJvmName = new HashMap<>();
     // Modules are addressed by module name, not by JVM binary name, and
     // duplicates across classpath sources are resolved by classpath
     // ordering at lookup time (mirroring the TypeEntry bucket strategy).
@@ -177,9 +168,6 @@ public final class Index {
         Map<String, List<byte[]>> typeBlobsByJvm = other.snapshotTypeBlobsByJvmName();
         Map<String, List<byte[]>> typeBlobsByPackage = other.snapshotTypeBlobsByPackage();
         Collection<ModuleEntry> modules = other.allModules();
-        Collection<ClassFileEntry> classFiles = other.allClassFiles();
-        Collection<ModuleFileEntry> moduleFiles = other.allModuleFiles();
-        Collection<PrunedSourceEntry> prunedSources = other.allPrunedSources();
         Map<String, IdentifierBloomFilter> blooms = other.bloomFilters();
 
         rwLock.writeLock().lock();
@@ -187,9 +175,6 @@ public final class Index {
             mergeTypeBlobMap(byJvmName, typeBlobsByJvm);
             mergeTypeBlobMap(byPackage, typeBlobsByPackage);
             for (ModuleEntry m : modules) addModuleLocked(m);
-            for (ClassFileEntry cf : classFiles) addClassFileLocked(cf);
-            for (ModuleFileEntry mf : moduleFiles) addModuleFileLocked(mf);
-            for (PrunedSourceEntry ps : prunedSources) addPrunedSourceLocked(ps);
             blooms.forEach(this::registerBloomLocked);
         } finally {
             rwLock.writeLock().unlock();
@@ -217,9 +202,6 @@ public final class Index {
     public boolean isEmpty() {
         return read(() -> byJvmName.isEmpty()
                 && byModuleName.isEmpty()
-                && classFileByJvmName.isEmpty()
-                && moduleFileByName.isEmpty()
-                && prunedByResourceUri.isEmpty()
                 && bloomByResourceUri.isEmpty());
     }
 
@@ -314,36 +296,9 @@ public final class Index {
     }
 
     /**
-     * Same as {@link #searchTypesBySimpleNamePrefix(String, int)} but over
-     * the minimal {@link ClassFileEntry} catalog (the one populated when
-     * {@code indexClassFiles=false}, the default fast-scan mode - see
-     * {@code ClassFileIndexer.indexClassCatalog}).
+     * True when {@code jvmOwnerName} is a top-level type (no {@code $})
+     * whose simple name starts with {@code prefix}.
      */
-    public List<ClassFileEntry> searchClassFilesBySimpleNamePrefix(String prefix, int limit) {
-        if (prefix == null) return List.of();
-        return read(() -> {
-            List<ClassFileEntry> out = new ArrayList<>();
-            for (List<ClassFileEntry> bucket : classFileByJvmName.values()) {
-                for (ClassFileEntry e : bucket) {
-                    addIfMatchesPrefix(e, e.jvmOwnerName(), prefix, out);
-                    if (limit > 0 && out.size() >= limit) return out;
-                }
-            }
-            return out;
-        });
-    }
-
-    /**
-     * Append {@code entry} to {@code out} if {@code jvmOwnerName} is a
-     * top-level type (no {@code $}) whose simple name starts with
-     * {@code prefix}. Caller must hold the read lock.
-     */
-    private static <T> void addIfMatchesPrefix(T entry, String jvmOwnerName, String prefix, List<T> out) {
-        if (simpleNameMatchesPrefix(jvmOwnerName, prefix)) {
-            out.add(entry);
-        }
-    }
-
     private static boolean simpleNameMatchesPrefix(String jvmOwnerName, String prefix) {
         if (jvmOwnerName == null || jvmOwnerName.indexOf('$') >= 0) return false;
         int slash = jvmOwnerName.lastIndexOf('/');
@@ -372,127 +327,8 @@ public final class Index {
         return read(() -> {
             int n = 0;
             for (List<byte[]> bucket : byJvmName.values()) n += bucket.size();
-            for (List<ClassFileEntry> bucket : classFileByJvmName.values()) n += bucket.size();
-            for (List<PrunedSourceEntry> bucket : prunedByResourceUri.values()) n += bucket.size();
             return n;
         });
-    }
-
-    public void addClassFile(ClassFileEntry entry) {
-        if (entry == null) return;
-        boolean changed;
-        rwLock.writeLock().lock();
-        try {
-            changed = addClassFileLocked(entry);
-        } finally {
-            rwLock.writeLock().unlock();
-        }
-        if (changed) notifyChanged();
-    }
-
-    /** Caller must hold the write lock. */
-    private boolean addClassFileLocked(ClassFileEntry entry) {
-        if (entry == null) return false;
-        String jvm = entry.jvmOwnerName();
-        if (isSkippedJvmName(jvm)) return false;
-        appendBucket(classFileByJvmName, jvm, entry);
-        String pkg = entry.packageJvm();
-        appendBucket(classFileByPackage, pkg, entry);
-        return true;
-    }
-
-    public List<ClassFileEntry> getAllClassFiles(String jvmName) {
-        return read(() -> toImmutableList(classFileByJvmName.get(jvmName)));
-    }
-
-    public boolean containsClassFile(String jvmName) {
-        return read(() -> {
-            List<ClassFileEntry> bucket = classFileByJvmName.get(jvmName);
-            return bucket != null && !bucket.isEmpty();
-        });
-    }
-
-    /**
-     * Return every {@link ClassFileEntry} whose declaring package is
-     * {@code packageJvm}. May contain duplicates from multiple sources.
-     */
-    public List<ClassFileEntry> listPackageClassFiles(String packageJvm, boolean recurse) {
-        return read(() -> {
-            if (recurse) {
-                List<ClassFileEntry> entries = new ArrayList<>();
-                String prefix = packageJvm + '/';
-                for (Map.Entry<String, List<ClassFileEntry>> entry : classFileByPackage.entrySet()) {
-                    String packageName = entry.getKey();
-                    if (packageName.startsWith(prefix)) {
-                        addAllTo(entry.getValue(), entries);
-                    }
-                }
-                return entries;
-            }
-            return toImmutableList(classFileByPackage.get(packageJvm == null ? "" : packageJvm));
-        });
-    }
-
-    /** Every {@link ClassFileEntry} currently stored, including duplicates. */
-    public Collection<ClassFileEntry> allClassFiles() {
-        return read(() -> {
-            List<ClassFileEntry> out = new ArrayList<>();
-            for (List<ClassFileEntry> bucket : classFileByJvmName.values()) {
-                addAllTo(bucket, out);
-            }
-            return Collections.unmodifiableCollection(out);
-        });
-    }
-
-    /** Number of distinct JVM binary names in the class-file registry. */
-    public int classFileSize() {
-        return read(classFileByJvmName::size);
-    }
-
-    public void addModuleFile(ModuleFileEntry module) {
-        if (module == null) return;
-        rwLock.writeLock().lock();
-        try {
-            addModuleFileLocked(module);
-        } finally {
-            rwLock.writeLock().unlock();
-        }
-        notifyChanged();
-    }
-
-    /** Caller must hold the write lock. */
-    private boolean addModuleFileLocked(ModuleFileEntry module) {
-        if (module == null) return false;
-        String name = module.name();
-        appendBucket(moduleFileByName, name, module);
-        return true;
-    }
-
-    public List<ModuleFileEntry> getAllModuleFiles(String moduleName) {
-        return read(() -> toImmutableList(moduleFileByName.get(moduleName)));
-    }
-
-    public ModuleFileEntry getModuleFile(String moduleName) {
-        return read(() -> {
-            List<ModuleFileEntry> bucket = moduleFileByName.get(moduleName);
-            if (bucket == null || bucket.isEmpty()) return null;
-            return bucket.get(0);
-        });
-    }
-
-    /** Every {@link ModuleFileEntry} currently stored, including duplicates. */
-    public Collection<ModuleFileEntry> allModuleFiles() {
-        return read(() -> {
-            List<ModuleFileEntry> out = new ArrayList<>();
-            for (List<ModuleFileEntry> bucket : moduleFileByName.values()) {
-                addAllTo(bucket, out);
-            }
-            return Collections.unmodifiableCollection(out);
-        });
-    }
-
-    public int moduleFileCount() {
-        return read(moduleFileByName::size);
     }
 
     private static <T> List<T> toImmutableList(List<T> bucket) {
@@ -578,88 +414,6 @@ public final class Index {
     /** Distinct number of module names indexed (ignoring duplicates). */
     public int moduleCount() {
         return read(byModuleName::size);
-    }
-
-    public void addPrunedSource(PrunedSourceEntry entry) {
-        if (entry == null) return;
-        boolean changed;
-        rwLock.writeLock().lock();
-        try {
-            changed = addPrunedSourceLocked(entry);
-        } finally {
-            rwLock.writeLock().unlock();
-        }
-        if (changed) notifyChanged();
-    }
-
-    /** Caller must hold the write lock. */
-    private boolean addPrunedSourceLocked(PrunedSourceEntry entry) {
-        if (entry == null) return false;
-        String resourceUri = entry.resourceUri();
-        if (resourceUri == null) return false;
-        appendBucket(prunedByResourceUri, resourceUri, entry);
-        String pkg = entry.packageJvm() == null ? "" : entry.packageJvm();
-        appendBucket(prunedByPackage, pkg, entry);
-        for (String jvm : entry.topLevelBinaryNames()) {
-            appendBucket(prunedByJvmName, jvm, entry);
-        }
-        return true;
-    }
-
-    public List<PrunedSourceEntry> getAllPrunedSourcesByJvmName(String jvmName) {
-        return read(() -> toImmutableList(prunedByJvmName.get(jvmName)));
-    }
-
-    public PrunedSourceEntry getPrunedSource(String resourceUri) {
-        return read(() -> {
-            List<PrunedSourceEntry> bucket = prunedByResourceUri.get(resourceUri);
-            if (bucket == null || bucket.isEmpty()) return null;
-            return bucket.get(0);
-        });
-    }
-
-    public List<PrunedSourceEntry> getAllPrunedSources(String resourceUri) {
-        return read(() -> toImmutableList(prunedByResourceUri.get(resourceUri)));
-    }
-
-    /**
-     * Return every {@link PrunedSourceEntry} whose package is
-     * {@code packageJvm}. May contain duplicates from multiple sources.
-     */
-    public List<PrunedSourceEntry> listPackagePrunedSources(String packageJvm, boolean recurse) {
-        return read(() -> {
-            if (recurse) {
-                List<PrunedSourceEntry> entries = new ArrayList<>();
-                String prefix = packageJvm + '/';
-                for (Map.Entry<String, List<PrunedSourceEntry>> entry : prunedByPackage.entrySet()) {
-                    String packageName = entry.getKey();
-                    if (packageName.startsWith(prefix)) {
-                        addAllTo(entry.getValue(), entries);
-                    }
-                }
-                return entries;
-            }
-            return toImmutableList(prunedByPackage.get(packageJvm == null ? "" : packageJvm));
-        });
-    }
-
-    /** Every {@link PrunedSourceEntry} currently stored, including duplicates. */
-    public Collection<PrunedSourceEntry> allPrunedSources() {
-        return read(() -> {
-            List<PrunedSourceEntry> out = new ArrayList<>();
-            for (List<PrunedSourceEntry> bucket : prunedByResourceUri.values()) {
-                addAllTo(bucket, out);
-            }
-            return Collections.unmodifiableCollection(out);
-        });
-    }
-
-    public int prunedSourceSize() {
-        return read(prunedByResourceUri::size);
-    }
-
-    public boolean hasPrunedSources() {
-        return read(() -> !prunedByResourceUri.isEmpty());
     }
 
     /**

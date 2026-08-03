@@ -39,10 +39,8 @@ import com.sun.source.tree.UnaryTree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.tree.WildcardTree;
 import com.sun.source.util.JavacTask;
-import com.sun.tools.javac.api.JavacTaskImpl;
 import com.sun.tools.javac.code.Flags;
 import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.util.Context;
 
 import ch.castleridge.javals.indexing.index.InMemorySource;
 import ch.castleridge.javals.indexing.index.Index;
@@ -54,7 +52,6 @@ import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ParameterEntry;
-import ch.castleridge.javals.indexing.model.PrunedSourceEntry;
 import ch.castleridge.javals.indexing.model.ResourceUris;
 import ch.castleridge.javals.indexing.model.SourceResolutionHints;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
@@ -89,10 +86,6 @@ public final class SourceIndexer {
     private SourceIndexer() {}
 
     public static void index(String resourcePath, String sourceUri, CharSequence content, Index into) {
-        index(resourcePath, sourceUri, content, into, false);
-    }
-
-    public static void index(String resourcePath, String sourceUri, CharSequence content, Index into, boolean pruned) {
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         String resourceUriStr = ResourceUris.resolve(sourceUri, resourcePath);
         URI resourceUri = resourceUriStr == null ? null : URI.create(resourceUriStr);
@@ -102,11 +95,7 @@ public final class SourceIndexer {
         String sourceUriStr = sourceUri == null ? null : Interner.intern(sourceUri);
         try {
             for (CompilationUnitTree cu : task.parse()) {
-                if (pruned) {
-                    indexPrunedCompilationUnit(resourcePath, sourceUriStr, resourceUri, cu, task, into);
-                } else {
-                    indexCompilationUnit(resourcePath, sourceUriStr, cu, into);
-                }
+                indexCompilationUnit(resourcePath, sourceUriStr, cu, into);
                 if (resourceUriStr != null) {
                     try {
                         into.registerBloom(resourceUriStr, IdentifierCollector.collectAndBuild(cu));
@@ -121,86 +110,6 @@ public final class SourceIndexer {
             // Parsing never actually does I/O beyond our in-memory source; treat
             // as empty input and move on.
         }
-    }
-
-    private static void indexPrunedCompilationUnit(String resourcePath,
-                                                   String sourceUri,
-                                                   URI resourceUri,
-                                                   CompilationUnitTree cu,
-                                                   JavacTask task,
-                                                   Index into) {
-        if (resourcePath == null) return;
-        Context context = ((JavacTaskImpl) task).getContext();
-        String prunedText = SourcePruner.prune(cu, context);
-        String packageName = cu.getPackageName() == null ? "" : cu.getPackageName().toString();
-        String packageJvm = Interner.intern(packageName.replace('.', '/'));
-        String primarySimple = primaryTopLevelSimpleName(cu, resourceUri);
-        if (primarySimple == null || primarySimple.isEmpty()) return;
-        String primaryBinaryName = packageJvm.isEmpty()
-                ? Interner.intern(primarySimple)
-                : Interner.intern(packageJvm + "/" + primarySimple);
-        List<String> topLevelNames = topLevelBinaryNames(cu, packageJvm);
-        String relativeName = packageJvm.isEmpty()
-                ? primarySimple + ".java"
-                : packageJvm + "/" + primarySimple + ".java";
-        relativeName = Interner.intern(relativeName);
-        into.addPrunedSource(new PrunedSourceEntry(
-                resourcePath, sourceUri, packageJvm, relativeName, primaryBinaryName,
-                EmptyArrays.toArray(topLevelNames, EmptyArrays.STRING), prunedText));
-    }
-
-    private static List<String> topLevelBinaryNames(CompilationUnitTree cu, String packageJvm) {
-        List<String> names = new ArrayList<>();
-        for (Tree t : cu.getTypeDecls()) {
-            if (!(t instanceof ClassTree ct)) continue;
-            String simple = ct.getSimpleName().toString();
-            if (simple.isEmpty()
-                    || simple.equals("module-info")
-                    || simple.equals("package-info")) {
-                continue;
-            }
-            String jvm = packageJvm.isEmpty() ? simple : packageJvm + "/" + simple;
-            names.add(Interner.intern(jvm));
-        }
-        return List.copyOf(names);
-    }
-
-    /**
-     * Pick the JVM simple name of the primary top-level type: a {@code public}
-     * type whose name matches the file stem, else the first declared type.
-     */
-    private static String primaryTopLevelSimpleName(CompilationUnitTree cu, URI uri) {
-        String fileStem = fileStemFromUri(uri);
-        String first = null;
-        for (Tree t : cu.getTypeDecls()) {
-            if (!(t instanceof ClassTree ct)) continue;
-            String simple = ct.getSimpleName().toString();
-            if (simple.isEmpty()
-                    || simple.equals("module-info")
-                    || simple.equals("package-info")) {
-                continue;
-            }
-            if (first == null) first = simple;
-            if (fileStem != null && fileStem.equals(simple) && isPublic(ct)) {
-                return simple;
-            }
-        }
-        return first;
-    }
-
-    private static String fileStemFromUri(URI uri) {
-        if (uri == null) return null;
-        String path = uri.getPath();
-        if (path == null || path.isEmpty()) return null;
-        int slash = path.lastIndexOf('/');
-        String file = slash < 0 ? path : path.substring(slash + 1);
-        if (!file.endsWith(".java")) return null;
-        return file.substring(0, file.length() - ".java".length());
-    }
-
-    private static boolean isPublic(ClassTree ct) {
-        if (ct.getModifiers() == null) return false;
-        return ct.getModifiers().getFlags().contains(javax.lang.model.element.Modifier.PUBLIC);
     }
 
     private static void indexCompilationUnit(String uri, String sourceUri, CompilationUnitTree cu, Index into) {

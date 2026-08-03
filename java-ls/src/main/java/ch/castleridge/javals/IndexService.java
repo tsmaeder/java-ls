@@ -74,9 +74,7 @@ public final class IndexService {
         }
         Path workspacePath = resolveWorkspacePath(params, roots, mbt);
         log(MessageType.Info, "Loading mbt.json: " + mbt);
-        boolean indexClassFiles = InitializationOptions.indexClassFileContents(params);
-        boolean prunedSource = InitializationOptions.prunedSourceIndexing(params);
-        return CompletableFuture.runAsync(() -> loadFrom(mbt, workspacePath, indexClassFiles, prunedSource));
+        return CompletableFuture.runAsync(() -> loadFrom(mbt, workspacePath));
     }
    
    public ClasspathOrder classPathFor(String uri) {
@@ -89,7 +87,7 @@ public final class IndexService {
 
    } 
  
-    private void loadFrom(Path mbt, Path workspacePath, boolean indexClassFiles, boolean prunedSource) {
+    private void loadFrom(Path mbt, Path workspacePath) {
         try {
             MbtInfo info = MbtJson.read(mbt);
             Map<String, String> sourceJarByBinaryJar = new HashMap<>();
@@ -107,7 +105,7 @@ public final class IndexService {
             index.addChangedListener(this::notifyIndexChanged);
             state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar));
             notifyIndexChanged();
-            Scanner scanner = new Scanner(indexClassFiles, prunedSource);
+            Scanner scanner = new Scanner();
             long t0 = System.nanoTime();
             List<Throwable> failures = scanner.scanAll(sources.values(), index);
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
@@ -127,9 +125,7 @@ public final class IndexService {
             }
 
             log(MessageType.Info, "Indexed " + index.size() + " types ("
-                    + index.entryCount() + " entries, "
-                    + index.classFileSize() + " class files, "
-                    + index.prunedSourceSize() + " pruned sources) from " + sources.size()
+                    + index.entryCount() + " entries) from " + sources.size()
                     + " sources in " + elapsedMs + " ms"
                     + (failures.isEmpty() ? "" : "; " + failures.size() + " failures"));
             log(MessageType.Info, "Index stats: " + stats.sourceFileCount() + " source files, "

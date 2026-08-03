@@ -7,7 +7,6 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.index.Index;
-import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -16,7 +15,6 @@ import ch.castleridge.javals.indexing.model.TypeRef;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JrtScanTest {
@@ -154,23 +152,6 @@ class JrtScanTest {
         assertNotNull(encoder, "java.util.Base64.Encoder should be indexed as its own entry");
         assertTrue(Arrays.stream(encoder.methods()).anyMatch(m -> m.name().equals("encodeToString")),
                 "Base64.Encoder should carry encodeToString(byte[])");
-    }
-
-    @Test
-    void minimalCatalogScanRecordsClassFilesWithoutTypeEntries() {
-        Index index = new Index();
-        Scanner scanner = new Scanner(false);
-        List<Throwable> failures = scanner.scanAll(
-                List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
-        assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);
-
-        assertEquals(0, index.size(), "minimal scan should not produce TypeEntry records");
-        assertTrue(index.classFileSize() > 1000, "java.base alone should catalog many classes");
-
-        ClassFileEntry object = index.getAllClassFiles("java/lang/Object").stream().findFirst().orElse(null);
-        assertNotNull(object, "java/lang/Object should be cataloged from jrt path");
-        assertEquals("java/lang/Object", object.jvmOwnerName());
-        assertNull(index.get("java/lang/Object"), "no full TypeEntry for cataloged class");
     }
 
     @Test

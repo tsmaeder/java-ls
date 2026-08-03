@@ -42,38 +42,18 @@ public final class Scanner {
 
     private final ForkJoinPool pool;
     private final boolean ownsPool;
-    private final boolean indexClassFiles;
-    private final boolean prunedSource;
 
     public Scanner() {
-        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, true, false);
-    }
-
-    public Scanner(boolean indexClassFiles) {
-        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, indexClassFiles, false);
+        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true);
     }
 
     public Scanner(ForkJoinPool pool) {
-        this(pool, false, true, false);
+        this(pool, false);
     }
 
-    public Scanner(ForkJoinPool pool, boolean indexClassFiles) {
-        this(pool, false, indexClassFiles, false);
-    }
-
-    public Scanner(boolean indexClassFiles, boolean prunedSource) {
-        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, indexClassFiles, prunedSource);
-    }
-
-    public Scanner(ForkJoinPool pool, boolean indexClassFiles, boolean prunedSource) {
-        this(pool, false, indexClassFiles, prunedSource);
-    }
-
-    private Scanner(ForkJoinPool pool, boolean owns, boolean indexClassFiles, boolean prunedSource) {
+    private Scanner(ForkJoinPool pool, boolean owns) {
         this.pool = pool;
         this.ownsPool = owns;
-        this.indexClassFiles = indexClassFiles;
-        this.prunedSource = prunedSource;
     }
 
     public List<Throwable> scanAll(Collection<InputSource> sources, Index into) {
@@ -118,24 +98,15 @@ public final class Scanner {
         List<ForkJoinTask<?>> indexTasks = new ArrayList<>();
         try {
             src.walk((relativePath, fileName, bytes) -> {
-                if (bytes == null) {
-                    try {
-                        indexOne(relativePath, srcUri, fileName, null, temp, false, false);
-                    } catch (Throwable t) {
-                        failures.add(t);
-                    }
-                    return;
-                }
-                boolean pruneJava = prunedSource && src instanceof DirInput;
                 ForkJoinTask<?> task = pool.submit(() -> {
                     try {
-                        indexOne(relativePath, srcUri, fileName, bytes.get(), temp, indexClassFiles, pruneJava);
+                        indexOne(relativePath, srcUri, fileName, bytes.get(), temp);
                     } catch (Throwable t) {
                         failures.add(t);
                     }
                 });
                 indexTasks.add(task);
-            }, indexClassFiles);
+            });
         } catch (Throwable t) {
             System.err.println("Skipping unreadable source " + srcUri + ": "
                     + t.getClass().getSimpleName() + ": " + t.getMessage());
@@ -155,21 +126,12 @@ public final class Scanner {
         into.addAll(temp);
     }
 
-    private static void indexOne(String relativePath, String sourceUri, String fileName, byte[] content, Index into,
-                               boolean indexClassFiles, boolean prunedJava) {
+    private static void indexOne(String relativePath, String sourceUri, String fileName, byte[] content, Index into) {
         if (fileName.endsWith(".class")) {
-            if (!indexClassFiles) {
-                if (Index.isModuleInfoFileName(fileName)) {
-                    ClassFileIndexer.indexModuleMinimal(relativePath, sourceUri, content, into);
-                } else {
-                    ClassFileIndexer.indexClassCatalog(relativePath, sourceUri, into);
-                }
-                return;
-            }
             ClassFileIndexer.index(relativePath, sourceUri, content, into);
         } else if (fileName.endsWith(".java")) {
             SourceIndexer.index(relativePath, sourceUri,
-                    new String(content, StandardCharsets.UTF_8), into, prunedJava);
+                    new String(content, StandardCharsets.UTF_8), into);
         }
     }
 }

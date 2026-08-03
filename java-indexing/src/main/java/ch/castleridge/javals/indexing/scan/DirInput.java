@@ -17,7 +17,7 @@ public record DirInput(Path root, ScanCollector collector) implements InputSourc
     }
 
     @Override
-    public void walk(ResourceSink sink, boolean indexClassFiles) {
+    public void walk(ResourceSink sink) {
         if (!Files.exists(root)) return;
         try {
             Files.walkFileTree(root, new SimpleFileVisitor<>() {
@@ -27,11 +27,7 @@ public record DirInput(Path root, ScanCollector collector) implements InputSourc
                     if (isIndexable(name)) {
                         String relativePath = root.relativize(file).toString().replace('\\', '/');
                         recordStats(name, attrs.size());
-                        if (shouldReadContents(indexClassFiles, name)) {
-                            sink.accept(relativePath, name, () -> Files.readAllBytes(file));
-                        } else {
-                            sink.accept(relativePath, name, null);
-                        }
+                        sink.accept(relativePath, name, () -> Files.readAllBytes(file));
                     }
                     return FileVisitResult.CONTINUE;
                 }
@@ -53,10 +49,6 @@ public record DirInput(Path root, ScanCollector collector) implements InputSourc
     @Override
     public String sourceUri() {
         return root.toUri().toString();
-    }
-
-    private static boolean shouldReadContents(boolean indexClassFiles, String name) {
-        return indexClassFiles || !name.endsWith(".class") || Index.isModuleInfoFileName(name);
     }
 
     private static boolean isIndexable(String name) {

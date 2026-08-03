@@ -36,7 +36,6 @@ import com.sun.source.util.TreePath;
 import com.sun.source.util.Trees;
 
 import ch.castleridge.javals.indexing.index.Index;
-import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.SourceTypeEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -436,12 +435,6 @@ public final class CompletionProposer {
         for (TypeEntry entry : index.searchTypesBySimpleNamePrefix(prefix, UNIMPORTED_TYPE_LIMIT)) {
             if (!classpath.contains(entry.sourceUri())) continue;
             addUnimportedTypeItem(cu, trees, entry.jvmOwnerName(), entryKind(entry),
-                    currentPackage, importedFqcns, seenScopeNames, jvmNamesAdded, items);
-            if (items.size() >= UNIMPORTED_TYPE_LIMIT) return items;
-        }
-        for (ClassFileEntry entry : index.searchClassFilesBySimpleNamePrefix(prefix, UNIMPORTED_TYPE_LIMIT)) {
-            if (!classpath.contains(entry.sourceUri())) continue;
-            addUnimportedTypeItem(cu, trees, entry.jvmOwnerName(), CompletionItemKind.Class,
                     currentPackage, importedFqcns, seenScopeNames, jvmNamesAdded, items);
             if (items.size() >= UNIMPORTED_TYPE_LIMIT) return items;
         }

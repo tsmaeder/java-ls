@@ -26,7 +26,7 @@ import ch.castleridge.javals.indexing.index.Index;
 class TypeEntryCodecTest {
 
     @Test
-    void roundTripsMinimalClassFileEntry() {
+    void roundTripsSparseClassFileTypeEntry() {
         ClassFileTypeEntry original = new ClassFileTypeEntry(
                 "com/example/Hello.class",
                 "file:///lib.jar",

@@ -9,7 +9,6 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
-import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.SourceTypeEntry;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
@@ -49,18 +48,6 @@ class IndexGlobalNameSearchTest {
 
         List<TypeEntry> matches = index.searchTypesBySimpleNamePrefix("Foo", 3);
         assertEquals(3, matches.size());
-    }
-
-    @Test
-    void searchClassFilesBySimpleNamePrefixMatchesAndExcludesNested() {
-        Index index = new Index();
-        index.addClassFile(new ClassFileEntry("jar:///a!/com/example/ArrayList.class", "jar:///a", "com/example/ArrayList"));
-        index.addClassFile(new ClassFileEntry("jar:///a!/com/example/ArrayList$Itr.class", "jar:///a", "com/example/ArrayList$Itr"));
-        index.addClassFile(new ClassFileEntry("jar:///a!/com/example/LinkedList.class", "jar:///a", "com/example/LinkedList"));
-
-        List<ClassFileEntry> matches = index.searchClassFilesBySimpleNamePrefix("Array", 0);
-        assertEquals(1, matches.size());
-        assertEquals("com/example/ArrayList", matches.get(0).jvmOwnerName());
     }
 
     @Test

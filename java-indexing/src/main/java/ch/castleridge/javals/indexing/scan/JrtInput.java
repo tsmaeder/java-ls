@@ -41,14 +41,14 @@ public final class JrtInput implements InputSource {
     }
 
     @Override
-    public void walk(ResourceSink sink, boolean indexClassFiles) {
+    public void walk(ResourceSink sink) {
         try (FileSystem fs = FileSystems.newFileSystem(
                 URI.create("jrt:/"),
                 Map.of("java.home", javaHome.toString()))) {
             Path modulesRoot = fs.getPath("modules");
             try (Stream<Path> list = Files.list(modulesRoot)) {
                 for (Path mod : (Iterable<Path>) list::iterator) {
-                    walkModule(mod, sink, indexClassFiles);
+                    walkModule(mod, sink);
                 }
             }
         } catch (IOException e) {
@@ -61,8 +61,7 @@ public final class JrtInput implements InputSource {
         return "jrt://" + this.javaHome.toUri().getRawPath();
     }
 
-    private void walkModule(Path moduleRoot, ResourceSink sink,
-                            boolean indexClassFiles) throws IOException {
+    private void walkModule(Path moduleRoot, ResourceSink sink) throws IOException {
         if (!Files.exists(moduleRoot)) return;
         Files.walkFileTree(moduleRoot, new SimpleFileVisitor<>() {
             @Override
@@ -71,21 +70,17 @@ public final class JrtInput implements InputSource {
                 if (isIndexable(name)) {
                     String relativePath = jrtRelativePath(file);
                     recordStats(name, attrs.size());
-                    if (shouldReadContents(indexClassFiles, name)) {
-                        // Read eagerly: the sink typically defers to an async task,
-                        // and the jrt filesystem may close before that task runs.
-                        try {
-                            byte[] bytes = Files.readAllBytes(file);
-                            if (collector != null && name.endsWith(".class") && attrs.size() < 0) {
-                                collector.addClassFileBytes(bytes.length);
-                            }
-                            sink.accept(relativePath, name, () -> bytes);
-                        } catch (IOException ioe) {
-                            System.err.println("Skipping unreadable jrt entry " + relativePath
-                                    + ": " + ioe.getClass().getSimpleName() + ": " + ioe.getMessage());
+                    // Read eagerly: the sink typically defers to an async task,
+                    // and the jrt filesystem may close before that task runs.
+                    try {
+                        byte[] bytes = Files.readAllBytes(file);
+                        if (collector != null && name.endsWith(".class") && attrs.size() < 0) {
+                            collector.addClassFileBytes(bytes.length);
                         }
-                    } else {
-                        sink.accept(relativePath, name, null);
+                        sink.accept(relativePath, name, () -> bytes);
+                    } catch (IOException ioe) {
+                        System.err.println("Skipping unreadable jrt entry " + relativePath
+                                + ": " + ioe.getClass().getSimpleName() + ": " + ioe.getMessage());
                     }
                 }
                 return FileVisitResult.CONTINUE;
@@ -100,10 +95,6 @@ public final class JrtInput implements InputSource {
         } else if (name.endsWith(".class")) {
             collector.addClassFileBytes(size);
         }
-    }
-
-    private static boolean shouldReadContents(boolean indexClassFiles, String name) {
-        return indexClassFiles || !name.endsWith(".class") || Index.isModuleInfoFileName(name);
     }
 
     /** Path within the jrt filesystem, without a leading slash. */

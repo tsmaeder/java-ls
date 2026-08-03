@@ -3,8 +3,6 @@ package ch.castleridge.javals.javac;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 
 import ch.castleridge.javals.indexing.index.Index;
-import ch.castleridge.javals.indexing.index.RealClassFileObject;
-import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -27,11 +25,6 @@ final class IndexClassfileAttachment {
         TypeEntry refEntry = classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri);
         if (refEntry != null) {
             symbol.classfile = new IndexClassFileObject(refEntry);
-            return;
-        }
-        ClassFileEntry classFile = classpath.pick(index.getAllClassFiles(jvmName), ClassFileEntry::sourceUri);
-        if (classFile != null) {
-            symbol.classfile = RealClassFileObject.from(classFile);
             return;
         }
         symbol.classfile = new IndexClassFileObject(missingTypeEntry(jvmName));

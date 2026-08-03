@@ -58,7 +58,7 @@ public final class WorkspaceCompiler {
         // root of the type hierarchy and every name resolution fails. Bail
         // out before standing up the task rather than producing a flood of
         // misleading "cannot find symbol" diagnostics.
-        if (!index.contains(OBJECT_JVM_NAME) && !index.containsClassFile(OBJECT_JVM_NAME)) {
+        if (!index.contains(OBJECT_JVM_NAME)) {
             JavaFileObject input = new InMemorySource(uri, text);
             return new Result(null, null, null, input, List.of());
         }
@@ -75,15 +75,11 @@ public final class WorkspaceCompiler {
 
         JavaFileObject input = new InMemorySource(uri, text);
 
-        List<String> options = index.hasPrunedSources()
-                ? List.of("-sourcepath", ".")
-                : List.of();
-
         JavacTask task = (JavacTask) tool.getTask(
                 null,
                 fm,
                 collector,
-                options,
+                List.of(),
                 List.of(),
                 List.of(input),
                 ctx);

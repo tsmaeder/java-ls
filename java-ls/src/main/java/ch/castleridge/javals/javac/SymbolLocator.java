@@ -40,8 +40,6 @@ import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ArrayType;
 
-import ch.castleridge.javals.indexing.index.PrunedSourceFileObject;
-import ch.castleridge.javals.indexing.index.RealClassFileObject;
 import ch.castleridge.javals.indexing.model.IndexedClassRef;
 
 /**
@@ -56,8 +54,7 @@ import ch.castleridge.javals.indexing.model.IndexedClassRef;
  *       locals, parameters, type parameters, and any same-file
  *       declarations.</li>
  *   <li>Otherwise walk up to the enclosing {@link ClassSymbol}; if its
- *       {@code classfile} is index-backed ({@link IndexClassFileObject} or
- *       {@link ch.castleridge.javals.indexing.index.RealClassFileObject}),
+ *       {@code classfile} is index-backed ({@link IndexClassFileObject}),
  *       recover {@link IndexedClassRef} and parse the companion source via
  *       {@link SourceCache}. Then locate the matching declaration inside that
  *       CU by JVM name (for types), name + parameter-arity (for methods), or
@@ -127,9 +124,7 @@ public final class SymbolLocator {
     }
 
     private static boolean isIndexBacked(JavaFileObject classfile) {
-        return classfile instanceof PrunedSourceFileObject
-                || classfile instanceof IndexClassFileObject
-                || classfile instanceof RealClassFileObject;
+        return classfile instanceof IndexClassFileObject;
     }
 
     private Optional<Location> locateThroughIndex(Element element,
@@ -160,10 +155,6 @@ public final class SymbolLocator {
     }
 
     private static IndexedClassRef classRefFor(JavaFileObject classfile, ClassSymbol enclosing) {
-        if (classfile instanceof PrunedSourceFileObject psfo) {
-            String jvmName = enclosing.flatname.toString().replace('.', '/');
-            return IndexedClassRef.from(psfo.entry(), jvmName);
-        }
         IndexedClassRef ref = IndexFileManager.asClassRef(classfile);
         if (ref != null) return ref;
         if (classfile != null && classfile.getKind() == Kind.SOURCE && enclosing != null) {

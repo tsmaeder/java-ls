@@ -18,13 +18,8 @@ import javax.tools.StandardLocation;
 import com.sun.tools.javac.api.ClientCodeWrapper;
 
 import ch.castleridge.javals.indexing.index.Index;
-import ch.castleridge.javals.indexing.index.PrunedSourceFileObject;
-import ch.castleridge.javals.indexing.index.RealClassFileObject;
-import ch.castleridge.javals.indexing.model.ClassFileEntry;
 import ch.castleridge.javals.indexing.model.IndexedClassRef;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
-import ch.castleridge.javals.indexing.model.ModuleFileEntry;
-import ch.castleridge.javals.indexing.model.PrunedSourceEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**
@@ -85,17 +80,11 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
         }
 
         String pkgJvm = packageName.replace('.', '/');
-        boolean indexedLocation = location == StandardLocation.SOURCE_PATH
-                || location == StandardLocation.CLASS_PATH;
-        List<JavaFileObject> result = new ArrayList<>();
-        if (kinds.contains(Kind.SOURCE) && index.hasPrunedSources() && indexedLocation) {
-            result.addAll(listPrunedSources(pkgJvm, recurse));
-        }
         if (kinds.contains(Kind.CLASS)) {
-            result.addAll(listIndexedTypes(pkgJvm, recurse));
-        }
-        if (!result.isEmpty()) {
-            return result;
+            List<JavaFileObject> indexed = listIndexedTypes(pkgJvm, recurse);
+            if (!indexed.isEmpty()) {
+                return indexed;
+            }
         }
         return super.list(location, packageName, kinds, recurse);
     }
@@ -104,12 +93,6 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
     public String inferBinaryName(Location location, JavaFileObject file) {
         if (file instanceof IndexClassFileObject icfo) {
             return icfo.binaryName();
-        }
-        if (file instanceof RealClassFileObject rcfo) {
-            return rcfo.binaryName();
-        }
-        if (file instanceof PrunedSourceFileObject psfo) {
-            return psfo.binaryName();
         }
         if (file instanceof IndexModuleFileObject) {
             return "module-info";
@@ -120,11 +103,6 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
 
     @Override
     public JavaFileObject getJavaFileForInput(Location location, String className, Kind kind) throws IOException {
-        if (kind == Kind.SOURCE && className != null && index.hasPrunedSources()
-                && (location == StandardLocation.SOURCE_PATH || location == StandardLocation.CLASS_PATH)) {
-            JavaFileObject pruned = indexedPrunedSource(className.replace('.', '/'));
-            if (pruned != null) return pruned;
-        }
         if (kind == Kind.CLASS && className != null) {
             if (location instanceof IndexedModuleLocation iml) {
                 if ("module-info".equals(className)) {
@@ -167,10 +145,6 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
             if (me.sourceUri() != null && !classpath.contains(me.sourceUri())) continue;
             result.add(Set.of(new IndexedModuleLocation(me.name())));
         }
-        for (ModuleFileEntry mf : index.allModuleFiles()) {
-            if (mf.sourceUri() != null && !classpath.contains(mf.sourceUri())) continue;
-            result.add(Set.of(new IndexedModuleLocation(mf.name())));
-        }
         return result;
     }
 
@@ -185,17 +159,13 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
     @Override
     public boolean hasLocation(Location location) {
         if (location instanceof IndexedModuleLocation) return true;
-        if (index.hasPrunedSources()
-                && (location == StandardLocation.SOURCE_PATH || location == StandardLocation.CLASS_PATH)) {
-            return true;
-        }
         return super.hasLocation(location);
     }
 
     @Override
     public Location getLocationForModule(Location location, String moduleName) throws IOException {
         if (location == StandardLocation.MODULE_PATH && moduleName != null) {
-            if (index.getModule(moduleName) != null || index.getModuleFile(moduleName) != null) {
+            if (index.getModule(moduleName) != null) {
                 return new IndexedModuleLocation(moduleName);
             }
         }
@@ -207,70 +177,17 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
         return file instanceof IndexClassFileObject icfo ? icfo.entry() : null;
     }
 
-    /**
-     * Locator metadata for an indexed class, whether backed by a full
-     * {@link TypeEntry} or a minimal {@link ClassFileEntry}.
-     */
+    /** Locator metadata for an indexed class backed by a {@link TypeEntry}. */
     public static IndexedClassRef asClassRef(JavaFileObject file) {
         if (file instanceof IndexClassFileObject icfo) {
             return IndexedClassRef.from(icfo.entry());
-        }
-        if (file instanceof RealClassFileObject rcfo) {
-            return new IndexedClassRef(
-                    rcfo.toUri().toString(), rcfo.sourceUri(), rcfo.jvmOwnerName());
-        }
-        if (file instanceof PrunedSourceFileObject psfo) {
-            return IndexedClassRef.from(psfo.entry(), psfo.jvmOwnerName());
         }
         return null;
     }
 
     private JavaFileObject indexedClassFile(String jvmName) {
-        TypeEntry typeWinner = classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri);
-        ClassFileEntry classWinner = classpath.pick(index.getAllClassFiles(jvmName), ClassFileEntry::sourceUri);
-        if (typeWinner == null && classWinner == null) return null;
-        if (typeWinner != null && classWinner == null) {
-            return new IndexClassFileObject(typeWinner);
-        }
-        if (typeWinner == null) {
-            return RealClassFileObject.from(classWinner);
-        }
-        int typeRank = classpath.rank(typeWinner.sourceUri());
-        int classRank = classpath.rank(classWinner.sourceUri());
-        if (typeRank >= 0 && (classRank < 0 || typeRank <= classRank)) {
-            return new IndexClassFileObject(typeWinner);
-        }
-        if (classRank >= 0) {
-            return RealClassFileObject.from(classWinner);
-        }
-        return new IndexClassFileObject(typeWinner);
-    }
-
-    private JavaFileObject indexedPrunedSource(String jvmName) {
-        PrunedSourceEntry winner = classpath.pick(index.getAllPrunedSourcesByJvmName(jvmName), PrunedSourceEntry::sourceUri);
-        return winner == null ? null : PrunedSourceFileObject.from(winner);
-    }
-
-    private List<JavaFileObject> listPrunedSources(String pkgJvm, boolean recurse) {
-        Map<String, JavaFileObject> winners = new HashMap<>();
-        Map<String, Integer> winnerRank = new HashMap<>();
-        for (PrunedSourceEntry e : index.listPackagePrunedSources(pkgJvm, recurse)) {
-            considerPrunedWinner(e, winners, winnerRank);
-        }
-        return List.copyOf(winners.values());
-    }
-
-    private void considerPrunedWinner(PrunedSourceEntry entry,
-                                    Map<String, JavaFileObject> winners,
-                                    Map<String, Integer> winnerRank) {
-        int rank = classpath.rank(entry.sourceUri());
-        if (rank < 0) return;
-        String key = entry.resourceUri();
-        Integer best = winnerRank.get(key);
-        if (best == null || rank < best) {
-            winners.put(key, PrunedSourceFileObject.from(entry));
-            winnerRank.put(key, rank);
-        }
+        TypeEntry winner = classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri);
+        return winner == null ? null : new IndexClassFileObject(winner);
     }
 
     private List<JavaFileObject> listIndexedTypes(String pkgJvm, boolean recurse) {
@@ -278,9 +195,6 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
         Map<String, Integer> winnerRank = new HashMap<>();
         for (TypeEntry e : index.listPackage(pkgJvm, recurse)) {
             considerWinner(e.jvmOwnerName(), e.sourceUri(), new IndexClassFileObject(e), winners, winnerRank);
-        }
-        for (ClassFileEntry e : index.listPackageClassFiles(pkgJvm, recurse)) {
-            considerWinner(e.jvmOwnerName(), e.sourceUri(), RealClassFileObject.from(e), winners, winnerRank);
         }
         return List.copyOf(winners.values());
     }
@@ -301,11 +215,7 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
 
     private boolean moduleOwnsPackage(String moduleName, String packageJvm) {
         ModuleEntry module = moduleEntry(moduleName);
-        if (module != null && moduleOwnsPackage(module, packageJvm)) {
-            return true;
-        }
-        ModuleFileEntry moduleFile = moduleFileEntry(moduleName);
-        return moduleFile != null && containsPackage(moduleFile.packages(), packageJvm);
+        return module != null && moduleOwnsPackage(module, packageJvm);
     }
 
     private ModuleEntry moduleEntry(String moduleName) {
@@ -313,30 +223,12 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
         return mf == null ? null : mf.entry();
     }
 
-    private ModuleFileEntry moduleFileEntry(String moduleName) {
-        if (moduleName == null) return null;
-        List<ModuleFileEntry> candidates = index.getAllModuleFiles(moduleName);
-        if (candidates.isEmpty()) return null;
-        List<ModuleFileEntry> filtered = new ArrayList<>();
-        for (ModuleFileEntry mf : candidates) {
-            if (mf.sourceUri() == null || classpath.contains(mf.sourceUri())) {
-                filtered.add(mf);
-            }
-        }
-        if (filtered.isEmpty()) return null;
-        ModuleFileEntry winner = classpath.pick(filtered, ModuleFileEntry::sourceUri);
-        return winner == null ? filtered.get(0) : winner;
-    }
-
     /**
      * Materialise the indexed module {@code moduleName} as a file object
-     * backed by real or synthesised {@code module-info.class} bytes.
+     * backed by synthesised {@code module-info.class} bytes.
      */
     public JavaFileObject moduleFileObject(String moduleName) {
-        IndexModuleFileObject synthesized = moduleFile(moduleName);
-        if (synthesized != null) return synthesized;
-        ModuleFileEntry minimal = moduleFileEntry(moduleName);
-        return minimal == null ? null : RealClassFileObject.moduleInfo(minimal);
+        return moduleFile(moduleName);
     }
 
     private static boolean moduleOwnsPackage(ModuleEntry module, String packageJvm) {
