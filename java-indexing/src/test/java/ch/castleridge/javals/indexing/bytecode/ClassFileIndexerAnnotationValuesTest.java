@@ -66,7 +66,7 @@ class ClassFileIndexerAnnotationValuesTest {
                     vBytes,
                     index);
 
-            TypeEntry v = index.get("V");
+            TypeEntry v = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "V");
             assertNotNull(v);
             MethodEntry m = Arrays.stream(v.methods()).filter(me -> me.name().equals("m")).findFirst().orElseThrow();
 
@@ -116,7 +116,7 @@ class ClassFileIndexerAnnotationValuesTest {
                     userBytes,
                     index);
 
-            TypeEntry use = index.get("Use");
+            TypeEntry use = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "Use");
             assertNotNull(use);
             AnnotationRef pin = findAnnotation(use.fields()[0].annotations(), "Pin");
             assertNotNull(pin, "@Pin annotation must be indexed on field f");
@@ -155,7 +155,7 @@ class ClassFileIndexerAnnotationValuesTest {
                     bytes,
                     index);
 
-            TypeEntry t = index.get("WithDefault");
+            TypeEntry t = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "WithDefault");
             assertNotNull(t);
 
             MethodEntry name = methodNamed(t, "name");
@@ -183,7 +183,7 @@ class ClassFileIndexerAnnotationValuesTest {
                     "index:///cp/",
                     regularBytes,
                     regIndex);
-            MethodEntry reg = methodNamed(regIndex.get("Reg"), "noDefault");
+            MethodEntry reg = methodNamed(ch.castleridge.javals.indexing.IndexTestUtils.get(regIndex, "Reg"), "noDefault");
             assertNull(reg.annotationDefault(), "regular method must not have an AnnotationDefault");
         } finally {
             cleanup(outDir);

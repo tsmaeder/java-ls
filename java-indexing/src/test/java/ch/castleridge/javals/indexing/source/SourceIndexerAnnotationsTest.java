@@ -39,7 +39,7 @@ class SourceIndexerAnnotationsTest {
                 """,
                 index);
 
-        TypeEntry t = index.get("S");
+        TypeEntry t = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "S");
         assertNotNull(t);
         MethodEntry m = methodNamed(t, "m");
         AnnotationRef suppress = findAnnotation(m.annotations(), "SuppressWarnings");
@@ -66,7 +66,7 @@ class SourceIndexerAnnotationsTest {
                 """,
                 index);
 
-        TypeEntry t = index.get("S");
+        TypeEntry t = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "S");
         MethodEntry m = methodNamed(t, "m");
 
         AnnotationRef suppress = findAnnotation(m.annotations(), "SuppressWarnings");
@@ -104,7 +104,7 @@ class SourceIndexerAnnotationsTest {
                 """,
                 index);
 
-        TypeEntry pin = index.get("S$Pin");
+        TypeEntry pin = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "S$Pin");
         assertNotNull(pin);
         // Target annotation on the nested type.
         AnnotationRef target = findAnnotation(pin.annotations(), "java/lang/annotation/Target");
@@ -144,7 +144,7 @@ class SourceIndexerAnnotationsTest {
                 """,
                 index);
 
-        TypeEntry t = index.get("S");
+        TypeEntry t = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "S");
         MethodEntry m = methodNamed(t, "m");
         AnnotationRef my = findAnnotation(m.annotations(), "MyAnno");
         assertNotNull(my);

@@ -50,7 +50,7 @@ class ClassFileIndexerVarargsTest {
                     Files.readAllBytes(outDir.resolve("V.class")),
                     index);
 
-            TypeEntry v = index.get("V");
+            TypeEntry v = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "V");
             assertNotNull(v);
             MethodEntry all = Arrays.stream(v.methods()).filter(m -> m.name().equals("all")).findFirst().orElseThrow();
             assertTrue(all.varargs(), "varargs bit should be captured on MethodEntry");
@@ -106,8 +106,8 @@ class ClassFileIndexerVarargsTest {
                     Files.readAllBytes(outDir.resolve("Outer$Inner.class")),
                     index);
 
-            TypeEntry staticNested = index.get("Outer$StaticNested");
-            TypeEntry inner = index.get("Outer$Inner");
+            TypeEntry staticNested = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "Outer$StaticNested");
+            TypeEntry inner = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "Outer$Inner");
             assertNotNull(staticNested);
             assertNotNull(inner);
             assertTrue((staticNested.modifiers() & Opcodes.ACC_STATIC) != 0,

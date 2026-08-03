@@ -34,7 +34,8 @@ class IndexAbstractionTest {
         assertTrue(index.contains("com/example/Foo"));
         assertEquals(1, index.size());
         assertEquals(1, index.entryCount());
-        assertEquals("com/example/Foo", index.get("com/example/Foo").jvmOwnerName());
+        assertEquals("com/example/Foo",
+                ch.castleridge.javals.indexing.IndexTestUtils.get(index, "com/example/Foo").jvmOwnerName());
         assertEquals(1, index.searchTypesBySimpleNamePrefix("Fo", 10).size());
     }
 
@@ -65,7 +66,8 @@ class IndexAbstractionTest {
         target.addAll(foreign);
 
         assertEquals(1, notifications.get());
-        assertEquals("com/example/Bar", target.get("com/example/Bar").jvmOwnerName());
+        assertEquals("com/example/Bar",
+                ch.castleridge.javals.indexing.IndexTestUtils.get(target, "com/example/Bar").jvmOwnerName());
         assertEquals("com.example.mod", target.getModule("com.example.mod").name());
         assertSame(bloom, target.bloomFilters().get("file:///com/example/Bar.java"));
     }
@@ -81,7 +83,8 @@ class IndexAbstractionTest {
         target.addAll(source);
 
         assertEquals(1, notifications.get());
-        assertEquals("com/example/Baz", target.get("com/example/Baz").jvmOwnerName());
+        assertEquals("com/example/Baz",
+                ch.castleridge.javals.indexing.IndexTestUtils.get(target, "com/example/Baz").jvmOwnerName());
     }
 
     private static SourceTypeEntry sourceType(String jvmOwnerName) {
@@ -143,13 +146,8 @@ class IndexAbstractionTest {
         }
 
         @Override
-        public TypeEntry get(String jvmName) {
-            return getAll(jvmName).stream().findFirst().orElse(null);
-        }
-
-        @Override
         public boolean contains(String jvmName) {
-            return get(jvmName) != null;
+            return !getAll(jvmName).isEmpty();
         }
 
         @Override

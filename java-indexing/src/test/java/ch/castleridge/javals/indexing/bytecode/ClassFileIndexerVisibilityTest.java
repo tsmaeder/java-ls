@@ -76,7 +76,7 @@ class ClassFileIndexerVisibilityTest {
                         index);
             }
 
-            TypeEntry visible = index.get("p/Visible");
+            TypeEntry visible = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "p/Visible");
             assertNotNull(visible);
 
             assertTrue(Arrays.stream(visible.fields()).anyMatch(f -> f.name().equals("pub")));
@@ -95,8 +95,8 @@ class ClassFileIndexerVisibilityTest {
 
             assertTrue(Arrays.asList(visible.innerTypeJvmNames()).contains("p/Visible$NestedPub"));
             assertTrue(!Arrays.asList(visible.innerTypeJvmNames()).contains("p/Visible$NestedPriv"));
-            assertNotNull(index.get("p/Visible$NestedPub"));
-            assertNull(index.get("p/Visible$NestedPriv"));
+            assertNotNull(ch.castleridge.javals.indexing.IndexTestUtils.get(index, "p/Visible$NestedPub"));
+            assertNull(ch.castleridge.javals.indexing.IndexTestUtils.get(index, "p/Visible$NestedPriv"));
         } finally {
             Files.walk(outDir)
                     .sorted(Comparator.reverseOrder())

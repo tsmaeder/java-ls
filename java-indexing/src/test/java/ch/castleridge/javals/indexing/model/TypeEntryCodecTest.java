@@ -243,14 +243,14 @@ class TypeEntryCodecTest {
         assertEquals(1, index.entryCount());
         assertTrue(index.contains("com/Foo"));
 
-        TypeEntry got = index.get("com/Foo");
+        TypeEntry got = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "com/Foo");
         assertInstanceOf(SourceTypeEntry.class, got);
         assertDeepEquals(entry, got);
-        assertSame(got, index.get("com/Foo"));
+        assertSame(got, ch.castleridge.javals.indexing.IndexTestUtils.get(index, "com/Foo"));
 
         Index merged = new InMemoryIndex();
         merged.addAll(index);
-        assertDeepEquals(entry, merged.get("com/Foo"));
+        assertDeepEquals(entry, ch.castleridge.javals.indexing.IndexTestUtils.get(merged, "com/Foo"));
         assertEquals(1, merged.searchTypesBySimpleNamePrefix("Fo", 10).size());
         assertEquals(0, merged.searchTypesBySimpleNamePrefix("Bar", 10).size());
     }

@@ -172,7 +172,7 @@ class IndexAccessFlagsTest {
     private static TypeEntry indexSingle(String source, String jvmName) {
         Index index = new InMemoryIndex();
         SourceIndexer.index(RESOURCE_URI, SOURCE_URI, source, index);
-        TypeEntry entry = index.get(jvmName);
+        TypeEntry entry = ch.castleridge.javals.IndexTestUtils.get(index, jvmName);
         assertNotNull(entry, "Expected indexed type " + jvmName);
         return entry;
     }

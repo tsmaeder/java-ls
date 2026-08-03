@@ -61,7 +61,7 @@ class SignatureRefsTest {
                 cw.toByteArray(),
                 index);
 
-        TypeEntry cf = index.get("pkg/Cf");
+        TypeEntry cf = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "pkg/Cf");
         assertNotNull(cf);
         assertEquals(1, cf.interfaceRefs().length);
         Type.Parameterized cs = assertInstanceOf(Type.Parameterized.class, cf.interfaceRefs()[0]);
@@ -132,7 +132,7 @@ class SignatureRefsTest {
                 cw.toByteArray(),
                 index);
 
-        MethodEntry expecting = Arrays.stream(index.get("pkg/Future").methods())
+        MethodEntry expecting = Arrays.stream(ch.castleridge.javals.indexing.IndexTestUtils.get(index, "pkg/Future").methods())
                 .filter(m -> m.name().equals("expecting"))
                 .findFirst()
                 .orElseThrow();

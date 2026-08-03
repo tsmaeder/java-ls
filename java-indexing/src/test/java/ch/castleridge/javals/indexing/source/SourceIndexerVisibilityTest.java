@@ -47,7 +47,7 @@ class SourceIndexerVisibilityTest {
                         """,
                 index);
 
-        TypeEntry visible = index.get("p/Visible");
+        TypeEntry visible = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "p/Visible");
         assertNotNull(visible);
 
         assertTrue(Arrays.stream(visible.fields()).anyMatch(f -> f.name().equals("pub")));
@@ -68,9 +68,9 @@ class SourceIndexerVisibilityTest {
         assertEquals(
                 Arrays.asList("p/Visible$NestedPub", "p/Visible$NestedPkg"),
                 Arrays.asList(visible.innerTypeJvmNames()));
-        assertNotNull(index.get("p/Visible$NestedPub"));
-        assertNotNull(index.get("p/Visible$NestedPkg"));
-        assertNull(index.get("p/Visible$NestedPriv"));
+        assertNotNull(ch.castleridge.javals.indexing.IndexTestUtils.get(index, "p/Visible$NestedPub"));
+        assertNotNull(ch.castleridge.javals.indexing.IndexTestUtils.get(index, "p/Visible$NestedPkg"));
+        assertNull(ch.castleridge.javals.indexing.IndexTestUtils.get(index, "p/Visible$NestedPriv"));
         assertFalse(Arrays.asList(visible.innerTypeJvmNames()).contains("p/Visible$NestedPriv"));
     }
 }

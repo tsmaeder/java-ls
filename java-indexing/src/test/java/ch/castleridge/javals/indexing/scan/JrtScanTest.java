@@ -27,11 +27,11 @@ class JrtScanTest {
         List<Throwable> failures = scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
         assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);
 
-        TypeEntry object = index.get("java/lang/Object");
+        TypeEntry object = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "java/lang/Object");
         assertNotNull(object, "java.base should index java/lang/Object");
         assertEquals("java/lang/Object", object.jvmName());
 
-        TypeEntry list = index.get("java/util/List");
+        TypeEntry list = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "java/util/List");
         assertNotNull(list, "java.base should index java/util/List");
         assertTrue(Arrays.stream(list.methods()).anyMatch(m -> m.name().equals("size")),
                 "java/util/List should carry a size() method entry");
@@ -45,24 +45,24 @@ class JrtScanTest {
         Scanner scanner = new Scanner();
         scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
 
-        TypeEntry list = index.get("java/util/List");
+        TypeEntry list = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "java/util/List");
         assertNotNull(list);
         assertEquals(1, list.typeParams().length, "List<E> has one type parameter");
         assertEquals("E", list.typeParams()[0].name());
 
-        TypeEntry map = index.get("java/util/Map");
+        TypeEntry map = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "java/util/Map");
         assertNotNull(map);
         assertEquals(2, map.typeParams().length, "Map<K,V> has two type parameters");
         assertEquals("K", map.typeParams()[0].name());
         assertEquals("V", map.typeParams()[1].name());
 
-        TypeEntry function = index.get("java/util/function/Function");
+        TypeEntry function = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "java/util/function/Function");
         assertNotNull(function);
         assertEquals(2, function.typeParams().length, "Function<T,R> has two type parameters");
         assertEquals("T", function.typeParams()[0].name());
         assertEquals("R", function.typeParams()[1].name());
 
-        TypeEntry object = index.get("java/lang/Object");
+        TypeEntry object = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "java/lang/Object");
         assertNotNull(object);
         assertTrue(object.typeParams().length == 0, "Object is not generic");
     }
@@ -90,7 +90,7 @@ class JrtScanTest {
         List<Throwable> failures = scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
         assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);
 
-        TypeEntry cf = index.get("java/util/concurrent/CompletableFuture");
+        TypeEntry cf = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "java/util/concurrent/CompletableFuture");
         assertNotNull(cf, "java.base should index CompletableFuture");
         assertEquals(1, cf.typeParams().length);
         String typeParam = cf.typeParams()[0].name();
@@ -149,7 +149,7 @@ class JrtScanTest {
         Scanner scanner = new Scanner();
         scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
 
-        TypeEntry encoder = index.get("java/util/Base64$Encoder");
+        TypeEntry encoder = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "java/util/Base64$Encoder");
         assertNotNull(encoder, "java.util.Base64.Encoder should be indexed as its own entry");
         assertTrue(Arrays.stream(encoder.methods()).anyMatch(m -> m.name().equals("encodeToString")),
                 "Base64.Encoder should carry encodeToString(byte[])");
@@ -168,7 +168,7 @@ class JrtScanTest {
                 "java/util should contain HashMap");
 
         // Bytecode-sourced methods must carry fully resolved TypeRefs.
-        TypeEntry arrayList = index.get("java/util/ArrayList");
+        TypeEntry arrayList = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "java/util/ArrayList");
         assertNotNull(arrayList);
         MethodEntry size = Arrays.stream(arrayList.methods())
                 .filter(m -> m.name().equals("size"))

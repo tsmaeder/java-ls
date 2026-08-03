@@ -61,7 +61,7 @@ class ClassFileIndexerGenericThrowsTest {
                     Files.readAllBytes(outDir.resolve("Sneaky.class")),
                     index);
 
-            TypeEntry sneaky = index.get("Sneaky");
+            TypeEntry sneaky = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "Sneaky");
             assertNotNull(sneaky);
             MethodEntry rethrow = Arrays.stream(sneaky.methods())
                     .filter(m -> m.name().equals("rethrow"))
@@ -111,7 +111,7 @@ class ClassFileIndexerGenericThrowsTest {
                     Files.readAllBytes(outDir.resolve("Throws.class")),
                     index);
 
-            TypeEntry throwsClass = index.get("Throws");
+            TypeEntry throwsClass = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "Throws");
             assertNotNull(throwsClass);
             MethodEntry fail = Arrays.stream(throwsClass.methods())
                     .filter(m -> m.name().equals("fail"))

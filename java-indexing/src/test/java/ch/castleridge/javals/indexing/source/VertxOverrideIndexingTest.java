@@ -39,7 +39,7 @@ class VertxOverrideIndexingTest {
     void sourceIndexedVerticleBaseStartReturnsFutureWildcard() throws Exception {
         Index index = new InMemoryIndex();
         new Scanner().scanAll(java.util.List.of(new DirInput(vertxCoreSrc())), index);
-        TypeEntry vb = index.get("io/vertx/core/VerticleBase");
+        TypeEntry vb = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "io/vertx/core/VerticleBase");
         assertNotNull(vb);
         MethodEntry start = method(vb, "start");
         assertInstanceOf(Type.Parameterized.class, start.returnType());
@@ -54,7 +54,7 @@ class VertxOverrideIndexingTest {
     void sourceIndexedConnectionBaseMetricsReturnsRawNetworkMetrics() throws Exception {
         Index index = new InMemoryIndex();
         new Scanner().scanAll(java.util.List.of(new DirInput(vertxCoreSrc())), index);
-        TypeEntry cb = index.get("io/vertx/core/net/impl/ConnectionBase");
+        TypeEntry cb = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "io/vertx/core/net/impl/ConnectionBase");
         assertNotNull(cb);
         MethodEntry metrics = method(cb, "metrics");
         assertInstanceOf(TypeRef.Unresolved.class, metrics.returnType());
@@ -65,7 +65,7 @@ class VertxOverrideIndexingTest {
     void sourceIndexedEventBusImplNextHandlerUsesRawHandlerHolderTypeArg() throws Exception {
         Index index = new InMemoryIndex();
         new Scanner().scanAll(java.util.List.of(new DirInput(vertxCoreSrc())), index);
-        TypeEntry eb = index.get("io/vertx/core/eventbus/impl/EventBusImpl");
+        TypeEntry eb = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "io/vertx/core/eventbus/impl/EventBusImpl");
         assertNotNull(eb);
         MethodEntry next = method(eb, "nextHandler");
         assertEquals(2, next.paramTypes().length);
@@ -84,7 +84,7 @@ class VertxOverrideIndexingTest {
         Path classFile = vertxCoreClasses().resolve("io/vertx/core/eventbus/impl/EventBusImpl.class");
         Index index = new InMemoryIndex();
         ClassFileIndexer.index(classFile.toUri().toString(), "index:///classes/", Files.readAllBytes(classFile), index);
-        TypeEntry eb = index.get("io/vertx/core/eventbus/impl/EventBusImpl");
+        TypeEntry eb = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "io/vertx/core/eventbus/impl/EventBusImpl");
         assertNotNull(eb);
         MethodEntry next = method(eb, "nextHandler");
         Type.Parameterized seq = assertInstanceOf(Type.Parameterized.class, next.paramTypes()[0]);

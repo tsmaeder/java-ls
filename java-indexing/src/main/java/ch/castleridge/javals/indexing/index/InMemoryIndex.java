@@ -239,15 +239,6 @@ public final class InMemoryIndex implements Index {
     }
 
     @Override
-    public TypeEntry get(String jvmName) {
-        return read(() -> {
-            List<byte[]> bucket = byJvmName.get(jvmName);
-            if (bucket == null || bucket.isEmpty()) return null;
-            return decodedCache.get(bucket.get(0));
-        });
-    }
-
-    @Override
     public boolean contains(String jvmName) {
         return read(() -> {
             List<byte[]> bucket = byJvmName.get(jvmName);

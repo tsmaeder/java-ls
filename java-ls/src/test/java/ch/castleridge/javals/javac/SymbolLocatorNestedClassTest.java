@@ -45,7 +45,7 @@ class SymbolLocatorNestedClassTest {
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
-        TypeEntry encoder = index.get("java/util/Base64$Encoder");
+        TypeEntry encoder = ch.castleridge.javals.IndexTestUtils.get(index, "java/util/Base64$Encoder");
         assertNotNull(encoder, "Base64$Encoder must be indexed from jrt");
 
         String source = """

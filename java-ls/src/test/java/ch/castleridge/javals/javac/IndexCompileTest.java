@@ -624,7 +624,7 @@ class IndexCompileTest {
                 bytes,
                 index);
 
-        TypeEntry varargType = index.get("VarargHolder");
+        TypeEntry varargType = ch.castleridge.javals.IndexTestUtils.get(index, "VarargHolder");
         assertNotNull(varargType);
         MethodEntry allMethod = Arrays.stream(varargType.methods())
                 .filter(m -> m.name().equals("all"))
@@ -1113,7 +1113,7 @@ class IndexCompileTest {
                     """,
                     index);
 
-            TypeEntry markedEntry = index.get("com/example/Marked");
+            TypeEntry markedEntry = ch.castleridge.javals.IndexTestUtils.get(index, "com/example/Marked");
             assertNotNull(markedEntry);
             assertTrue(markedEntry.annotations().length > 0);
             assertInstanceOf(TypeRef.Unresolved.class, markedEntry.annotations()[0].annotationType());
@@ -2169,7 +2169,7 @@ class IndexCompileTest {
 
             // Sanity-check that the indexer wrapped the return TypeRef in
             // an Annotated decorator.
-            TypeEntry withTypeUse = index.get("WithTypeUse");
+            TypeEntry withTypeUse = ch.castleridge.javals.IndexTestUtils.get(index, "WithTypeUse");
             MethodEntry hello = Arrays.stream(withTypeUse.methods())
                     .filter(m -> m.name().equals("hello"))
                     .findFirst().orElseThrow();
@@ -2264,7 +2264,7 @@ class IndexCompileTest {
 
             // Sanity-check the indexer captured what we expect before we
             // even hand it to javac.
-            TypeEntry withParamsType = index.get("WithParams");
+            TypeEntry withParamsType = ch.castleridge.javals.IndexTestUtils.get(index, "WithParams");
             MethodEntry take = Arrays.stream(withParamsType.methods())
                     .filter(m -> m.name().equals("take"))
                     .findFirst().orElseThrow();
@@ -2352,7 +2352,7 @@ class IndexCompileTest {
             String recUri = "index:///cp/point/";
             ClassFileIndexer.index("index:///Point.class", recUri, pointBytes, index);
 
-            TypeEntry pointEntry = index.get("Point");
+            TypeEntry pointEntry = ch.castleridge.javals.IndexTestUtils.get(index, "Point");
             assertNotNull(pointEntry);
             assertEquals(2, pointEntry.recordComponents().length,
                     () -> "ClassFileIndexer should capture record components from Record attribute");
@@ -2703,7 +2703,7 @@ class IndexCompileTest {
                         + "    static void exposed() {}\n"
                         + "}\n",
                 index);
-        TypeEntry api = index.get("com/example/Api");
+        TypeEntry api = ch.castleridge.javals.IndexTestUtils.get(index, "com/example/Api");
         assertNotNull(api, "SourceIndexer should emit com/example/Api");
         assertTrue(Arrays.stream(api.methods()).noneMatch(m -> m.name().equals("hidden")),
                 "private methods must not be indexed");
@@ -2760,7 +2760,7 @@ class IndexCompileTest {
                         + "    public static Factory create() { return null; }\n"
                         + "}\n",
                 index);
-        TypeEntry factory = index.get("com/example/Factory");
+        TypeEntry factory = ch.castleridge.javals.IndexTestUtils.get(index, "com/example/Factory");
         assertNotNull(factory);
         MethodEntry ctor = Arrays.stream(factory.methods())
                 .filter(m -> m.name().equals("<init>"))
@@ -2834,8 +2834,9 @@ class IndexCompileTest {
         Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt, new DirInput(vertxCoreSrc)), index);
         assertTrue(failures.isEmpty(), () -> "scan failures: " + failures);
-        assertNotNull(index.get("java/util/Base64$Encoder"), "Base64$Encoder must be indexed from jrt");
-        TypeEntry jsonUtil = index.get("io/vertx/core/json/impl/JsonUtil");
+        assertNotNull(ch.castleridge.javals.IndexTestUtils.get(index, "java/util/Base64$Encoder"),
+                "Base64$Encoder must be indexed from jrt");
+        TypeEntry jsonUtil = ch.castleridge.javals.IndexTestUtils.get(index, "io/vertx/core/json/impl/JsonUtil");
         assertNotNull(jsonUtil, "JsonUtil must be indexed from vert.x sources");
         FieldEntry encoderField = Arrays.stream(jsonUtil.fields())
                 .filter(f -> "BASE64_ENCODER".equals(f.name()))

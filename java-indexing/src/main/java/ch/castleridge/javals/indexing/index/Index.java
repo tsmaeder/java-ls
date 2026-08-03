@@ -68,14 +68,6 @@ public interface Index {
      */
     List<TypeEntry> getAll(String jvmName);
 
-    /**
-     * Return an arbitrary {@link TypeEntry} for {@code jvmName}, or
-     * {@code null} if none exists. Which candidate is returned when
-     * duplicates exist is unspecified; prefer {@link #getAll(String)} +
-     * explicit classpath ordering for deterministic behaviour.
-     */
-    TypeEntry get(String jvmName);
-
     boolean contains(String jvmName);
 
     /**
