@@ -17,6 +17,7 @@ import javax.tools.ToolProvider;
 import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.Type;
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -53,7 +54,7 @@ class ClassFileIndexerGenericThrowsTest {
             };
             assertTrue(compiler.getTask(null, fm, d -> {}, List.of(), List.of(), List.of(src)).call());
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             ClassFileIndexer.index(
                     "index:///Sneaky.class",
                     "index:///cp/",
@@ -103,7 +104,7 @@ class ClassFileIndexerGenericThrowsTest {
             };
             assertTrue(compiler.getTask(null, fm, d -> {}, List.of(), List.of(), List.of(src)).call());
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             ClassFileIndexer.index(
                     "index:///Throws.class",
                     "index:///cp/",

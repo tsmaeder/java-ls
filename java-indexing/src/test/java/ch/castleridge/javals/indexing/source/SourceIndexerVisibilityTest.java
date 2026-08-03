@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.objectweb.asm.Opcodes;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
@@ -21,7 +22,7 @@ class SourceIndexerVisibilityTest {
 
     @Test
     void dropsPrivateMembersKeepsPackagePrivateAndPrivateCtor() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         SourceIndexer.index(
                 RESOURCE_URI,
                 SOURCE_URI,

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.bytecode.ClassFileIndexer;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.Type;
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -36,7 +37,7 @@ class VertxOverrideIndexingTest {
 
     @Test
     void sourceIndexedVerticleBaseStartReturnsFutureWildcard() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         new Scanner().scanAll(java.util.List.of(new DirInput(vertxCoreSrc())), index);
         TypeEntry vb = index.get("io/vertx/core/VerticleBase");
         assertNotNull(vb);
@@ -51,7 +52,7 @@ class VertxOverrideIndexingTest {
 
     @Test
     void sourceIndexedConnectionBaseMetricsReturnsRawNetworkMetrics() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         new Scanner().scanAll(java.util.List.of(new DirInput(vertxCoreSrc())), index);
         TypeEntry cb = index.get("io/vertx/core/net/impl/ConnectionBase");
         assertNotNull(cb);
@@ -62,7 +63,7 @@ class VertxOverrideIndexingTest {
 
     @Test
     void sourceIndexedEventBusImplNextHandlerUsesRawHandlerHolderTypeArg() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         new Scanner().scanAll(java.util.List.of(new DirInput(vertxCoreSrc())), index);
         TypeEntry eb = index.get("io/vertx/core/eventbus/impl/EventBusImpl");
         assertNotNull(eb);
@@ -81,7 +82,7 @@ class VertxOverrideIndexingTest {
     @Test
     void bytecodeIndexedEventBusImplNextHandlerUsesRawHandlerHolderTypeArg() throws Exception {
         Path classFile = vertxCoreClasses().resolve("io/vertx/core/eventbus/impl/EventBusImpl.class");
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         ClassFileIndexer.index(classFile.toUri().toString(), "index:///classes/", Files.readAllBytes(classFile), index);
         TypeEntry eb = index.get("io/vertx/core/eventbus/impl/EventBusImpl");
         assertNotNull(eb);

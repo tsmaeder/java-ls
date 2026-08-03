@@ -20,6 +20,7 @@ import com.sun.source.util.TreePath;
 import com.sun.source.util.Trees;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.scan.JrtInput;
 import ch.castleridge.javals.indexing.scan.Scanner;
 
@@ -38,7 +39,7 @@ class ReferenceFinderTabRangeTest {
     @Test
     void stringFieldTypeRangeIgnoresTabExpansion() throws Exception {
         JrtInput jrt = new JrtInput(java.nio.file.Path.of(System.getProperty("java.home")));
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -105,7 +106,7 @@ class ReferenceFinderTabRangeTest {
     @Test
     void lspPositionsRoundTripOnTabLine() throws Exception {
         JrtInput jrt = new JrtInput(java.nio.file.Path.of(System.getProperty("java.home")));
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
         String line = "\tString\tx;";

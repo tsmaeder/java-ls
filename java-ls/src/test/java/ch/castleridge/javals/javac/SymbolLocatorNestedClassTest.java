@@ -20,6 +20,7 @@ import com.sun.source.util.Trees;
 import java.util.stream.Collectors;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.scan.JrtInput;
 import ch.castleridge.javals.indexing.scan.Scanner;
@@ -40,7 +41,7 @@ class SymbolLocatorNestedClassTest {
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 

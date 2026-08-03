@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -16,7 +17,7 @@ class SourceIndexerBloomTest {
 
     @Test
     void registersBloomFilterWithDeclaredAndReferencedIdentifiers() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         SourceIndexer.index(RESOURCE_URI, SOURCE_URI, """
                 package p;
                 import java.util.List;

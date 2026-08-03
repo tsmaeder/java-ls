@@ -7,6 +7,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -21,7 +22,7 @@ class JrtScanTest {
 
     @Test
     void scanJavaBaseFindsWellKnownTypes() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         Scanner scanner = new Scanner();
         List<Throwable> failures = scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
         assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);
@@ -40,7 +41,7 @@ class JrtScanTest {
 
     @Test
     void formalTypeParametersAreExtractedFromClassSignatures() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         Scanner scanner = new Scanner();
         scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
 
@@ -68,7 +69,7 @@ class JrtScanTest {
 
     @Test
     void packageInfoAndModuleInfoAreFiltered() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         Scanner scanner = new Scanner();
         List<Throwable> failures = scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
         assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);
@@ -84,7 +85,7 @@ class JrtScanTest {
 
     @Test
     void completableFutureImplementsParameterizedCompletionStage() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         Scanner scanner = new Scanner();
         List<Throwable> failures = scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
         assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);
@@ -108,7 +109,7 @@ class JrtScanTest {
 
     @Test
     void scanCapturesJavaBaseModuleEntry() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         Scanner scanner = new Scanner();
         List<Throwable> failures = scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
         assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);
@@ -129,7 +130,7 @@ class JrtScanTest {
 
     @Test
     void scanCapturesNonRootModuleRequires() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         Scanner scanner = new Scanner();
         List<Throwable> failures = scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
         assertTrue(failures.isEmpty(), () -> "unexpected failures: " + failures);
@@ -144,7 +145,7 @@ class JrtScanTest {
 
     @Test
     void base64EncoderIsIndexedAsSeparateNestedClass() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         Scanner scanner = new Scanner();
         scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
 
@@ -156,7 +157,7 @@ class JrtScanTest {
 
     @Test
     void listPackageReturnsPackageMembers() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         Scanner scanner = new Scanner();
         scanner.scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
 

@@ -5,6 +5,7 @@ import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -115,7 +116,7 @@ class SourceIndexerGenericsTest {
     }
 
     private static TypeEntry indexSingle(String source, String jvmName) {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         SourceIndexer.index(RESOURCE_URI, SOURCE_URI, source, index);
         TypeEntry entry = index.get(jvmName);
         assertNotNull(entry, "Expected indexed type " + jvmName);

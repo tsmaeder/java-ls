@@ -15,6 +15,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 
 /**
  * Round-trip tests for {@link TypeEntryCodec}.
@@ -219,7 +220,7 @@ class TypeEntryCodecTest {
 
     @Test
     void indexStoresBlobsAndDecodesOnRead() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         SourceTypeEntry entry = new SourceTypeEntry(
                 "com/Foo.java",
                 "file:///src/",
@@ -247,7 +248,7 @@ class TypeEntryCodecTest {
         assertDeepEquals(entry, got);
         assertSame(got, index.get("com/Foo"));
 
-        Index merged = new Index();
+        Index merged = new InMemoryIndex();
         merged.addAll(index);
         assertDeepEquals(entry, merged.get("com/Foo"));
         assertEquals(1, merged.searchTypesBySimpleNamePrefix("Fo", 10).size());

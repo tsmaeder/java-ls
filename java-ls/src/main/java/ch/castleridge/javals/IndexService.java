@@ -24,6 +24,7 @@ import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.WorkspaceFolder;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 
 /**
  * Bootstraps the workspace {@link Index} by locating an {@code mbt.json}
@@ -101,7 +102,7 @@ public final class IndexService {
                 log(MessageType.Warning, "mbt.json contained no input sources: " + mbt);
                 return;
             }
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             index.addChangedListener(this::notifyIndexChanged);
             state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar));
             notifyIndexChanged();

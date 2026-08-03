@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.mbt.MbtInfo;
 import ch.castleridge.javals.indexing.mbt.MbtJson;
 import ch.castleridge.javals.indexing.scan.DirInput;
@@ -43,7 +44,7 @@ public final class IndexDecompilerMain {
         resetPeakHeap();
         long baselineBytes = sampleUsedHeapBytes();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         Scanner scanner = new Scanner();
         long t0 = System.nanoTime();
         List<Throwable> failures = scanner.scanAll(sources, index);

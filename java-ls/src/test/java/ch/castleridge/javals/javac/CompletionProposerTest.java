@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import com.sun.source.tree.CompilationUnitTree;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.FieldEntry;
@@ -162,7 +163,7 @@ class CompletionProposerTest {
         org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.Files.exists(jdk), "JDK not present");
 
         ch.castleridge.javals.indexing.scan.JrtInput jrt = new ch.castleridge.javals.indexing.scan.JrtInput(jdk);
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new ch.castleridge.javals.indexing.scan.Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -280,7 +281,7 @@ class CompletionProposerTest {
     // ---- fixtures ----
 
     private static Index baseIndex() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(objectType());
         index.add(stringType());
         index.add(widgetType());

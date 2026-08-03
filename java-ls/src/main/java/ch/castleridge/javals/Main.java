@@ -19,6 +19,7 @@ import com.sun.tools.javac.api.JavacTool;
 import com.sun.tools.javac.util.Context;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.javac.IndexClassReader;
 import ch.castleridge.javals.javac.IndexFileManager;
 
@@ -42,7 +43,7 @@ public class Main {
         JavacTool tool = JavacTool.create();
         Context context = new Context();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         IndexClassReader.preRegister(context, index);
 
         StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);

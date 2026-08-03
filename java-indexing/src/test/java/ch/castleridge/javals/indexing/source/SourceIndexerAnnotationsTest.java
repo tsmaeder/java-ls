@@ -5,6 +5,7 @@ import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
 import ch.castleridge.javals.indexing.model.MethodEntry;
@@ -26,7 +27,7 @@ class SourceIndexerAnnotationsTest {
 
     @Test
     void capturesLiteralStringInSingleElementShorthand() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         SourceIndexer.index(
                 "test:///S.java",
                 "test:///src/",
@@ -52,7 +53,7 @@ class SourceIndexerAnnotationsTest {
 
     @Test
     void capturesArrayLiteralAndNamedElements() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         SourceIndexer.index(
                 "test:///S.java",
                 "test:///src/",
@@ -88,7 +89,7 @@ class SourceIndexerAnnotationsTest {
 
     @Test
     void capturesClassLiteralAndQualifiedEnumConstant() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         SourceIndexer.index(
                 "test:///S.java",
                 "test:///src/",
@@ -129,7 +130,7 @@ class SourceIndexerAnnotationsTest {
 
     @Test
     void unsupportedExpressionFallsBackToUnsupportedSentinel() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         SourceIndexer.index(
                 "test:///S.java",
                 "test:///src/",

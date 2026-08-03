@@ -35,6 +35,7 @@ import com.sun.tools.javac.util.Context;
 
 import ch.castleridge.javals.indexing.bytecode.ClassFileIndexer;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.FieldEntry;
@@ -69,7 +70,7 @@ class IndexCompileTest {
 
     @Test
     void sourceReferencingIndexedClassCompilesCleanly() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         index.add(typeWithMethod(SOURCE_URI, "java/lang/String", "<init>"));    
         
@@ -142,7 +143,7 @@ class IndexCompileTest {
 
     @Test
     void indexedFieldIsVisibleToSourceReference() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         index.add(new ClassFileTypeEntry(
                 "index:///com/example/Holder.class",
@@ -195,7 +196,7 @@ class IndexCompileTest {
 
     @Test
     void indexedNestedInterfaceIsVisibleAsQualifiedType() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         index.add(new ClassFileTypeEntry(
                 "index:///com/example/Foo.class",
@@ -258,7 +259,7 @@ class IndexCompileTest {
         String winnerUri = "index:///primary/";
         String loserUri = "index:///shadowed/";
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(winnerUri, "java/lang/Object", "<init>"));
         index.add(typeWithMethod(winnerUri, "com/example/Dup", "primary"));
         index.add(typeWithMethod(loserUri, "com/example/Dup", "shadowed"));
@@ -328,7 +329,7 @@ class IndexCompileTest {
         // because IndexClassReader hard-wired typarams_field to an empty list.
         // With class-level type parameters synthesised, parameterised uses of
         // an indexed generic type must compile cleanly.
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         index.add(typeWithMethod(SOURCE_URI, "java/lang/String", "<init>"));
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Number", "<init>"));
@@ -381,7 +382,7 @@ class IndexCompileTest {
 
     @Test
     void indexClassReader2ResolvesClassAndMethodTypeVariables() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         index.add(typeWithMethod(SOURCE_URI, "java/lang/String", "<init>"));
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Number", "<init>"));
@@ -479,7 +480,7 @@ class IndexCompileTest {
             JrtInput jrt = new JrtInput(jdk);
             String jrtUri = jrt.sourceUri().toString();
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
             assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -575,7 +576,7 @@ class IndexCompileTest {
         String onCp = "index:///on/";
         String offCp = "index:///off/";
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(onCp, "com/example/On", "yes"));
         index.add(typeWithMethod(offCp, "com/example/Off", "nope"));
 
@@ -615,7 +616,7 @@ class IndexCompileTest {
         assertTrue(compileTask.call(), "VarargHolder should compile");
         byte[] bytes = Files.readAllBytes(outDir.resolve("VarargHolder.class"));
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         ClassFileIndexer.index(
                 "index:///VarargHolder.class",
@@ -681,7 +682,7 @@ class IndexCompileTest {
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -734,7 +735,7 @@ class IndexCompileTest {
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -780,7 +781,7 @@ class IndexCompileTest {
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -828,7 +829,7 @@ class IndexCompileTest {
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -876,7 +877,7 @@ class IndexCompileTest {
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -926,7 +927,7 @@ class IndexCompileTest {
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         new Scanner().scanAll(List.of(jrt), index);
 
         ClasspathOrder cp = classPathOf(List.of(jrtUri));
@@ -948,7 +949,7 @@ class IndexCompileTest {
         String jrtUri = jrt.sourceUri().toString();
         String sourceUri = Path.of("target/encoder-cp-test-src").toAbsolutePath().toUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -1006,7 +1007,7 @@ class IndexCompileTest {
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -1068,7 +1069,7 @@ class IndexCompileTest {
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -1177,7 +1178,7 @@ class IndexCompileTest {
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -1276,7 +1277,7 @@ class IndexCompileTest {
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -1366,7 +1367,7 @@ class IndexCompileTest {
             resources = Path.of("java-ls/src/test/resources/ch/castleridge/javals/test");
         }
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Throwable", "<init>"));
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Error", "<init>"));
@@ -1496,7 +1497,7 @@ class IndexCompileTest {
     }
 
     private static Index indexWithJrt() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
         return index;
@@ -1576,7 +1577,7 @@ class IndexCompileTest {
                     "Constants should compile");
             byte[] constantsBytes = Files.readAllBytes(outDir.resolve("Constants.class"));
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
             index.add(typeWithMethod(SOURCE_URI, "java/lang/String", "<init>"));
 
@@ -1646,7 +1647,7 @@ class IndexCompileTest {
                 assertTrue(compiler.getTask(null, bfm2, d -> {}, List.of(), List.of(), List.of(nonFinalSrc)).call(),
                         "NonConst should compile");
                 byte[] nonConstBytes = Files.readAllBytes(outDir2.resolve("NonConst.class"));
-                Index index2 = new Index();
+                Index index2 = new InMemoryIndex();
                 index2.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
                 String nonConstUri = "index:///cp/nonconst/";
                 ClassFileIndexer.index(
@@ -1715,7 +1716,7 @@ class IndexCompileTest {
         // Use java.base's ModuleEntry to verify the synthesised bytes
         // are a faithful representation: re-index the synthesised
         // bytes and compare the resulting ModuleEntry to the original.
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(
                 List.of(new JrtInput(Path.of(System.getProperty("java.home")))), index);
         assertTrue(failures.isEmpty(), () -> "scan failures: " + failures);
@@ -1727,7 +1728,7 @@ class IndexCompileTest {
         IndexModuleFileObject mf = new IndexModuleFileObject(original);
         byte[] synthesized = mf.bytes();
 
-        Index reindexed = new Index();
+        Index reindexed = new InMemoryIndex();
         ClassFileIndexer.index(
                 "index:///roundtrip/java.base/module-info.class",
                 "index:///roundtrip/",
@@ -1761,7 +1762,7 @@ class IndexCompileTest {
         String jrtUri = jrt.sourceUri().toString();
         String cpUri = "index:///cp/vertx-like/";
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -1838,7 +1839,7 @@ class IndexCompileTest {
         String jrtUri = jrt.sourceUri().toString();
         String cpUri = "index:///cp/iface-members/";
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -1925,7 +1926,7 @@ class IndexCompileTest {
         String jrtUri = jrt.sourceUri().toString();
         String cpUri = "index:///cp/anno-missing/";
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -2030,7 +2031,7 @@ class IndexCompileTest {
             JrtInput jrt = new JrtInput(jdk);
             String jrtUri = jrt.sourceUri().toString();
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
             assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -2158,7 +2159,7 @@ class IndexCompileTest {
             JrtInput jrt = new JrtInput(jdk);
             String jrtUri = jrt.sourceUri().toString();
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
             assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -2253,7 +2254,7 @@ class IndexCompileTest {
             JrtInput jrt = new JrtInput(jdk);
             String jrtUri = jrt.sourceUri().toString();
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
             assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -2344,7 +2345,7 @@ class IndexCompileTest {
             JrtInput jrt = new JrtInput(jdk);
             String jrtUri = jrt.sourceUri().toString();
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
             assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -2431,7 +2432,7 @@ class IndexCompileTest {
             JrtInput jrt = new JrtInput(jdk);
             String jrtUri = jrt.sourceUri().toString();
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
             assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -2489,7 +2490,7 @@ class IndexCompileTest {
 
     @Test
     void indexedInterfaceDefaultMethodIsRecognisedAsDefault() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         SourceIndexer.index(
                 "mem:///Greeter.java",
@@ -2547,7 +2548,7 @@ class IndexCompileTest {
      */
     @Test
     void concreteClassResolvesInheritedDefaultMethod() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         SourceIndexer.index(
                 "mem:///Greeter.java",
@@ -2618,7 +2619,7 @@ class IndexCompileTest {
      */
     @Test
     void transitiveSuperInterfaceDefaultMethodResolves() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         SourceIndexer.index(
                 "mem:///Base.java",
@@ -2691,7 +2692,7 @@ class IndexCompileTest {
 
     @Test
     void sourceIndexedInterfacePrivateMethodIsOmitted() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         SourceIndexer.index(
                 "mem:///Api.java",
@@ -2748,7 +2749,7 @@ class IndexCompileTest {
 
     @Test
     void sourceIndexedPrivateConstructorBlocksInstantiation() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         SourceIndexer.index(
                 "mem:///Factory.java",
@@ -2830,7 +2831,7 @@ class IndexCompileTest {
         String jrtUri = jrt.sourceUri().toString();
         String sourceUri = vertxCoreSrc.toUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt, new DirInput(vertxCoreSrc)), index);
         assertTrue(failures.isEmpty(), () -> "scan failures: " + failures);
         assertNotNull(index.get("java/util/Base64$Encoder"), "Base64$Encoder must be indexed from jrt");
@@ -2890,7 +2891,7 @@ class IndexCompileTest {
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
@@ -2934,7 +2935,7 @@ class IndexCompileTest {
 
     @Test
     void ternaryLambdaWithMissingReturnTypeDoesNotCrash() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         index.add(new ClassFileTypeEntry(
                 "index:///com/example/Foo.class",
@@ -3019,7 +3020,7 @@ class IndexCompileTest {
 
     @Test
     void inheritedStaticNestedClassFromIndexedParentCompilesCleanly() throws Exception {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(typeWithMethod(SOURCE_URI, "java/lang/Object", "<init>"));
         SourceIndexer.index(
                 "mem:///Base.java",
@@ -3086,7 +3087,7 @@ class IndexCompileTest {
         String jrtUri = jrt.sourceUri().toString();
         String cpUri = "index:///cp/inherited-member/";
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
         SourceIndexer.index("mem:///Base.java", cpUri,
@@ -3132,7 +3133,7 @@ class IndexCompileTest {
         String jrtUri = jrt.sourceUri().toString();
         String cpUri = "index:///cp/sibling-nested/";
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
         SourceIndexer.index("mem:///Outer.java", cpUri,
@@ -3171,7 +3172,7 @@ class IndexCompileTest {
         String jrtUri = jrt.sourceUri().toString();
         String cpUri = "index:///cp/anno-type/";
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
         SourceIndexer.index("mem:///Marker.java", cpUri,
@@ -3209,7 +3210,7 @@ class IndexCompileTest {
         String jrtUri = jrt.sourceUri().toString();
         String cpUri = "index:///cp/enum-anno-value/";
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
         SourceIndexer.index("mem:///ProxyKind.java", cpUri,
@@ -3253,7 +3254,7 @@ class IndexCompileTest {
         String jrtUri = jrt.sourceUri().toString();
         String cpUri = "index:///cp/enum-members/";
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
         SourceIndexer.index("mem:///Color.java", cpUri,
@@ -3295,7 +3296,7 @@ class IndexCompileTest {
         String jrtUri = jrt.sourceUri().toString();
         String cpUri = "index:///cp/member-iface/";
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
         SourceIndexer.index("mem:///Holder.java", cpUri,
@@ -3335,7 +3336,7 @@ class IndexCompileTest {
         String jrtUri = jrt.sourceUri().toString();
         String cpUri = "index:///cp/sneaky-throws/";
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
         SourceIndexer.index("mem:///Utils.java", cpUri,
@@ -3376,7 +3377,7 @@ class IndexCompileTest {
         JrtInput jrt = new JrtInput(jdk);
         String jrtUri = jrt.sourceUri().toString();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
 
         ClasspathOrder cp = classPathOf(List.of(jrtUri));

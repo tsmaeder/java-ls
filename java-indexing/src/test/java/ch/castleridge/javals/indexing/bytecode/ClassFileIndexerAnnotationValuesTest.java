@@ -18,6 +18,7 @@ import javax.tools.ToolProvider;
 import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
 import ch.castleridge.javals.indexing.model.MethodEntry;
@@ -58,7 +59,7 @@ class ClassFileIndexerAnnotationValuesTest {
                     }
                     """);
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             ClassFileIndexer.index(
                     "index:///V.class",
                     "index:///cp/",
@@ -108,7 +109,7 @@ class ClassFileIndexerAnnotationValuesTest {
                     }
                     """);
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             ClassFileIndexer.index(
                     "index:///Use.class",
                     "index:///cp/",
@@ -147,7 +148,7 @@ class ClassFileIndexerAnnotationValuesTest {
                     }
                     """);
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             ClassFileIndexer.index(
                     "index:///WithDefault.class",
                     "index:///cp/",
@@ -176,7 +177,7 @@ class ClassFileIndexerAnnotationValuesTest {
             byte[] regularBytes = compile(outDir, "Reg.java", """
                     public class Reg { public void noDefault() {} }
                     """);
-            Index regIndex = new Index();
+            Index regIndex = new InMemoryIndex();
             ClassFileIndexer.index(
                     "index:///Reg.class",
                     "index:///cp/",

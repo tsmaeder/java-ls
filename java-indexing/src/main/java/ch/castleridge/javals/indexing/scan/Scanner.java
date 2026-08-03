@@ -14,6 +14,7 @@ import java.util.concurrent.Future;
 
 import ch.castleridge.javals.indexing.bytecode.ClassFileIndexer;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.source.SourceIndexer;
 
 /**
@@ -94,7 +95,7 @@ public final class Scanner {
 
     private void scanOneSource(InputSource src, Index into, List<Throwable> failures) {
         String srcUri = src.sourceUri();
-        Index temp = new Index();
+        Index temp = new InMemoryIndex();
         List<ForkJoinTask<?>> indexTasks = new ArrayList<>();
         try {
             src.walk((relativePath, fileName, bytes) -> {

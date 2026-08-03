@@ -9,6 +9,7 @@ import org.objectweb.asm.Opcodes;
 import com.sun.tools.javac.code.Flags;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.FieldEntry;
@@ -169,7 +170,7 @@ class IndexAccessFlagsTest {
     }
 
     private static TypeEntry indexSingle(String source, String jvmName) {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         SourceIndexer.index(RESOURCE_URI, SOURCE_URI, source, index);
         TypeEntry entry = index.get(jvmName);
         assertNotNull(entry, "Expected indexed type " + jvmName);

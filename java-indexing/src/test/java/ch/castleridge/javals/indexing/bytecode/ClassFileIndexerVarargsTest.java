@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.objectweb.asm.Opcodes;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
@@ -42,7 +43,7 @@ class ClassFileIndexerVarargsTest {
             };
             assertTrue(compiler.getTask(null, fm, d -> {}, List.of(), List.of(), List.of(src)).call());
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             ClassFileIndexer.index(
                     "index:///V.class",
                     "index:///cp/",
@@ -88,7 +89,7 @@ class ClassFileIndexerVarargsTest {
             };
             assertTrue(compiler.getTask(null, fm, d -> {}, List.of(), List.of(), List.of(src)).call());
 
-            Index index = new Index();
+            Index index = new InMemoryIndex();
             ClassFileIndexer.index(
                     "index:///Outer.class",
                     "index:///cp/",

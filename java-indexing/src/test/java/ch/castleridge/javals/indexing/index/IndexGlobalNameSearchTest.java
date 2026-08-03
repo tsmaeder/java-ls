@@ -18,7 +18,7 @@ class IndexGlobalNameSearchTest {
 
     @Test
     void searchTypesBySimpleNamePrefixMatchesAcrossPackages() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(sourceType("com/example/Foo"));
         index.add(sourceType("com/other/FooBar"));
         index.add(sourceType("com/example/Baz"));
@@ -30,7 +30,7 @@ class IndexGlobalNameSearchTest {
 
     @Test
     void searchTypesBySimpleNamePrefixExcludesNestedTypes() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(sourceType("com/example/Foo"));
         index.add(sourceType("com/example/Foo$Inner"));
 
@@ -41,7 +41,7 @@ class IndexGlobalNameSearchTest {
 
     @Test
     void searchTypesBySimpleNamePrefixRespectsLimit() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         for (int i = 0; i < 10; i++) {
             index.add(sourceType("com/example/Foo" + i));
         }
@@ -52,7 +52,7 @@ class IndexGlobalNameSearchTest {
 
     @Test
     void searchWithNoMatchesReturnsEmpty() {
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         index.add(sourceType("com/example/Foo"));
 
         assertTrue(index.searchTypesBySimpleNamePrefix("Zzz", 0).isEmpty());

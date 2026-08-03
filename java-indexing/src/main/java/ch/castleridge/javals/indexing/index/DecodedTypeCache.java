@@ -11,7 +11,7 @@ import ch.castleridge.javals.indexing.model.TypeEntryCodec;
  *
  * <p>{@code byte[]} keys use reference equality/hashCode, so each encoded
  * blob caches at most one decoded graph. Eviction drops the decoded object
- * graph only; the blob itself remains in the {@link Index}.
+ * graph only; the blob itself remains in the {@link InMemoryIndex}.
  */
 final class DecodedTypeCache {
 

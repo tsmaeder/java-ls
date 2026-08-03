@@ -18,6 +18,7 @@ import com.sun.source.util.TreePath;
 import com.sun.source.util.Trees;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.scan.JrtInput;
 import ch.castleridge.javals.indexing.scan.Scanner;
 
@@ -35,7 +36,7 @@ class DefinitionElementResolverTest {
                 "JDK not present");
 
         JrtInput jrt = new JrtInput(jdk);
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 

@@ -9,6 +9,7 @@ import org.objectweb.asm.Opcodes;
 
 import ch.castleridge.javals.indexing.bytecode.ClassFileIndexer;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.index.InMemoryIndex;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -53,7 +54,7 @@ class SignatureRefsTest {
                 "java/lang/Object", new String[] {"java/util/concurrent/CompletionStage"});
         cw.visitEnd();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         ClassFileIndexer.index(
                 "index:///pkg/Cf.class",
                 "index:///cp/",
@@ -124,7 +125,7 @@ class SignatureRefsTest {
         mv.visitEnd();
         cw.visitEnd();
 
-        Index index = new Index();
+        Index index = new InMemoryIndex();
         ClassFileIndexer.index(
                 "index:///pkg/Future.class",
                 "index:///cp/",
