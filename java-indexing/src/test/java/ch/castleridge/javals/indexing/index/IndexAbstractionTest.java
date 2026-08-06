@@ -87,10 +87,63 @@ class IndexAbstractionTest {
                 ch.castleridge.javals.indexing.IndexTestUtils.get(target, "com/example/Baz").jvmOwnerName());
     }
 
+    @Test
+    void duplicateJvmNamesAreKeptAndShareDecodedIdentityAcrossLookups() {
+        InMemoryIndex index = new InMemoryIndex();
+        index.add(sourceType("com/example/Foo", "file:///a/"));
+        index.add(sourceType("com/example/Foo", "file:///b/"));
+        index.add(sourceType("com/example/util/Bar", "file:///a/"));
+
+        assertEquals(2, index.size());
+        assertEquals(3, index.entryCount());
+
+        List<TypeEntry> foos = index.getAll("com/example/Foo");
+        assertEquals(2, foos.size());
+        assertEquals("file:///a/", foos.get(0).sourceUri());
+        assertEquals("file:///b/", foos.get(1).sourceUri());
+
+        List<TypeEntry> pkg = index.listPackage("com/example", false);
+        assertEquals(2, pkg.size());
+        assertSame(foos.get(0), pkg.get(0));
+        assertSame(foos.get(1), pkg.get(1));
+
+        List<TypeEntry> nested = index.listPackage("com", true);
+        assertEquals(3, nested.size());
+
+        TypeEntry viaGet = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "com/example/Foo");
+        assertSame(foos.get(0), viaGet);
+        assertSame(viaGet, ch.castleridge.javals.indexing.IndexTestUtils.get(index, "com/example/Foo"));
+    }
+
+    @Test
+    void inMemoryMergeRemapsIdsOntoExistingEntries() {
+        InMemoryIndex target = new InMemoryIndex();
+        target.add(sourceType("com/example/Existing", "file:///target/"));
+
+        InMemoryIndex source = new InMemoryIndex();
+        source.add(sourceType("com/example/Foo", "file:///src/a/"));
+        source.add(sourceType("com/example/Foo", "file:///src/b/"));
+        source.add(sourceType("com/other/Bar", "file:///src/a/"));
+
+        target.addAll(source);
+
+        assertEquals(3, target.size());
+        assertEquals(4, target.entryCount());
+        assertEquals(2, target.getAll("com/example/Foo").size());
+        assertEquals(3, target.listPackage("com/example", false).size());
+        assertEquals(1, target.listPackage("com/other", false).size());
+        assertEquals("com/example/Existing",
+                ch.castleridge.javals.indexing.IndexTestUtils.get(target, "com/example/Existing").jvmOwnerName());
+    }
+
     private static SourceTypeEntry sourceType(String jvmOwnerName) {
+        return sourceType(jvmOwnerName, "file:///" + jvmOwnerName + ".java");
+    }
+
+    private static SourceTypeEntry sourceType(String jvmOwnerName, String sourceUri) {
         return new SourceTypeEntry(
-                "file:///" + jvmOwnerName + ".java",
-                "file:///" + jvmOwnerName + ".java",
+                sourceUri + jvmOwnerName + ".java",
+                sourceUri,
                 jvmOwnerName,
                 0,
                 TypeDeclKind.CLASS,

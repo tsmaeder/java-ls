@@ -7,18 +7,18 @@ import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeEntryCodec;
 
 /**
- * Fixed-size LRU of decoded {@link TypeEntry}s keyed by blob identity.
+ * Fixed-size LRU of decoded {@link TypeEntry}s keyed by artificial type ID.
  *
- * <p>{@code byte[]} keys use reference equality/hashCode, so each encoded
- * blob caches at most one decoded graph. Eviction drops the decoded object
- * graph only; the blob itself remains in the {@link InMemoryIndex}.
+ * <p>IDs are index-local, append-only, and never reused, so they are stable
+ * cache identities for the life of an {@link InMemoryIndex}. Eviction drops
+ * the decoded object graph only; the encoded blob remains in the index.
  */
 final class DecodedTypeCache {
 
     static final int DEFAULT_CAPACITY = 4096;
 
     private final int capacity;
-    private final Map<byte[], TypeEntry> cache;
+    private final Map<Integer, TypeEntry> cache;
 
     DecodedTypeCache() {
         this(DEFAULT_CAPACITY);
@@ -31,30 +31,35 @@ final class DecodedTypeCache {
         this.capacity = capacity;
         this.cache = new LinkedHashMap<>(capacity, 0.75f, true) {
             @Override
-            protected boolean removeEldestEntry(Map.Entry<byte[], TypeEntry> eldest) {
+            protected boolean removeEldestEntry(Map.Entry<Integer, TypeEntry> eldest) {
                 return size() > DecodedTypeCache.this.capacity;
             }
         };
     }
 
-    TypeEntry get(byte[] blob) {
+    /**
+     * Return the decoded entry for {@code id}, decoding {@code blob} on a
+     * miss. {@code blob} must be the canonical encoding stored under
+     * {@code id} in the owning index.
+     */
+    TypeEntry get(int id, byte[] blob) {
         if (blob == null) return null;
         // Fast path: a hit only needs the (cheap) map lookup under the lock.
         // The access-ordered LRU mutates on read, so the get itself must be
         // guarded, but we keep the critical section to the map operation.
         synchronized (this) {
-            TypeEntry cached = cache.get(blob);
+            TypeEntry cached = cache.get(id);
             if (cached != null) return cached;
         }
-        // Decode outside the lock so concurrent decodes of different blobs
+        // Decode outside the lock so concurrent decodes of different IDs
         // run in parallel instead of serializing on this monitor. A racing
-        // duplicate decode of the same blob is harmless: we keep whichever
+        // duplicate decode of the same ID is harmless: we keep whichever
         // decoded graph wins the insert and drop the other for GC.
         TypeEntry decoded = TypeEntryCodec.decode(blob);
         synchronized (this) {
-            TypeEntry existing = cache.get(blob);
+            TypeEntry existing = cache.get(id);
             if (existing != null) return existing;
-            cache.put(blob, decoded);
+            cache.put(id, decoded);
             return decoded;
         }
     }

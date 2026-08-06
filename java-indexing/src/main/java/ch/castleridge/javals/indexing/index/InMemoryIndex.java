@@ -13,9 +13,11 @@ import ch.castleridge.javals.indexing.model.TypeEntryCodec;
  * Thread-safe in-memory {@link Index} implementation.
  *
  * <p>{@link TypeEntry}s are stored as compact {@code byte[]} blobs produced
- * by {@link TypeEntryCodec}, not as live object graphs. Each key maps to a
- * {@link List} of encoded blobs. Decoded records are reconstructed on demand
- * through a fixed-size {@link DecodedTypeCache}.
+ * by {@link TypeEntryCodec}, not as live object graphs. Each blob lives once
+ * in an append-only store addressed by a dense artificial ID; secondary
+ * indexes ({@code byJvmName}, {@code byPackage}) hold those IDs in compact
+ * {@link IntList}s. Decoded records are reconstructed on demand through a
+ * fixed-size {@link DecodedTypeCache} keyed by ID.
  *
  * <p>Thread-safety is provided by a single {@link ReentrantReadWriteLock}
  * guarding plain {@link HashMap}s rather than {@code ConcurrentHashMap}.
@@ -29,7 +31,7 @@ import ch.castleridge.javals.indexing.model.TypeEntryCodec;
  * it, avoiding the per-key CAS/bin-lock overhead of
  * {@code ConcurrentHashMap}. Encoding happens before the lock (or was
  * already done in the source index); critical sections only move blob
- * references.
+ * references and remap IDs.
  */
 public final class InMemoryIndex implements Index {
 
@@ -50,10 +52,14 @@ public final class InMemoryIndex implements Index {
         }
     }
 
-    /** JVM name → encoded TypeEntry blobs. */
-    private final Map<String, List<byte[]>> byJvmName = new HashMap<>();
-    /** Package → encoded TypeEntry blobs. */
-    private final Map<String, List<byte[]>> byPackage = new HashMap<>();
+    /** Canonical type-entry store; index into this array is the artificial ID. */
+    private byte[][] typeBlobs = new byte[16][];
+    private int typeCount = 0;
+
+    /** JVM name → type IDs. */
+    private final Map<String, IntList> byJvmName = new HashMap<>();
+    /** Package → type IDs. */
+    private final Map<String, IntList> byPackage = new HashMap<>();
     // Modules are addressed by module name, not by JVM binary name, and
     // duplicates across classpath sources are resolved by classpath
     // ordering at lookup time (mirroring the TypeEntry bucket strategy).
@@ -125,8 +131,9 @@ public final class InMemoryIndex implements Index {
         String pkg = entry.packageJvm();
         rwLock.writeLock().lock();
         try {
-            appendBucket(byJvmName, jvm, blob);
-            appendBucket(byPackage, pkg, blob);
+            int id = appendTypeBlobLocked(blob);
+            appendId(byJvmName, jvm, id);
+            appendId(byPackage, pkg, id);
         } finally {
             rwLock.writeLock().unlock();
         }
@@ -153,15 +160,19 @@ public final class InMemoryIndex implements Index {
     private void addAllInMemory(InMemoryIndex other) {
         // Snapshot the source outside our lock (each call takes the
         // source's own lock); then apply the whole batch at once.
-        Map<String, List<byte[]>> typeBlobsByJvm = other.snapshotTypeBlobsByJvmName();
-        Map<String, List<byte[]>> typeBlobsByPackage = other.snapshotTypeBlobsByPackage();
+        TypeStoreSnapshot snapshot = other.snapshotTypeStore();
         Collection<ModuleEntry> modules = other.allModules();
         Map<String, IdentifierBloomFilter> blooms = other.bloomFilters();
 
         rwLock.writeLock().lock();
         try {
-            mergeTypeBlobMap(byJvmName, typeBlobsByJvm);
-            mergeTypeBlobMap(byPackage, typeBlobsByPackage);
+            int baseOffset = typeCount;
+            ensureTypeBlobCapacity(typeCount + snapshot.blobs.length);
+            for (byte[] blob : snapshot.blobs) {
+                typeBlobs[typeCount++] = blob;
+            }
+            mergeIdMap(byJvmName, snapshot.byJvmName, baseOffset);
+            mergeIdMap(byPackage, snapshot.byPackage, baseOffset);
             for (ModuleEntry m : modules) addModuleLocked(m);
             blooms.forEach(this::registerBloomLocked);
         } finally {
@@ -190,9 +201,11 @@ public final class InMemoryIndex implements Index {
 
         rwLock.writeLock().lock();
         try {
+            ensureTypeBlobCapacity(typeCount + encoded.size());
             for (EncodedType e : encoded) {
-                appendBucket(byJvmName, e.jvm, e.blob);
-                appendBucket(byPackage, e.pkg, e.blob);
+                int id = appendTypeBlobLocked(e.blob);
+                appendId(byJvmName, e.jvm, id);
+                appendId(byPackage, e.pkg, id);
             }
             for (ModuleEntry m : modules) addModuleLocked(m);
             blooms.forEach(this::registerBloomLocked);
@@ -204,33 +217,79 @@ public final class InMemoryIndex implements Index {
 
     private record EncodedType(String jvm, String pkg, byte[] blob) {}
 
-    /** Shallow copy of encoded TypeEntry buckets keyed by JVM name. */
-    Map<String, List<byte[]>> snapshotTypeBlobsByJvmName() {
-        return read(() -> new HashMap<>(byJvmName));
+    /**
+     * Consistent shallow snapshot of the type store and both ID indexes.
+     * Blob array elements are shared by reference (no re-encode); IntLists
+     * are copied so the source index can keep mutating.
+     */
+    TypeStoreSnapshot snapshotTypeStore() {
+        return read(() -> {
+            byte[][] blobs = Arrays.copyOf(typeBlobs, typeCount);
+            return new TypeStoreSnapshot(blobs, copyIdMap(byJvmName), copyIdMap(byPackage));
+        });
     }
 
-    /** Shallow copy of encoded TypeEntry buckets keyed by package. */
-    Map<String, List<byte[]>> snapshotTypeBlobsByPackage() {
-        return read(() -> new HashMap<>(byPackage));
+    private static Map<String, IntList> copyIdMap(Map<String, IntList> source) {
+        Map<String, IntList> copy = new HashMap<>(source.size());
+        for (Map.Entry<String, IntList> e : source.entrySet()) {
+            copy.put(e.getKey(), e.getValue().copy());
+        }
+        return copy;
     }
 
-    /** Caller must hold the write lock. Appends each incoming blob under its key. */
-    private static void mergeTypeBlobMap(Map<String, List<byte[]>> target, Map<String, List<byte[]>> incoming) {
-        for (Map.Entry<String, List<byte[]>> e : incoming.entrySet()) {
-            target.computeIfAbsent(e.getKey(), k -> new ArrayList<>()).addAll(e.getValue());
+    /**
+     * Caller must hold the write lock. Merges remapped source IDs
+     * ({@code sourceId + baseOffset}) into {@code target}, pre-sizing each
+     * bucket so a bulk merge does not thrash mid-bucket copies.
+     */
+    private static void mergeIdMap(Map<String, IntList> target, Map<String, IntList> incoming, int baseOffset) {
+        for (Map.Entry<String, IntList> e : incoming.entrySet()) {
+            IntList src = e.getValue();
+            if (src == null || src.isEmpty()) continue;
+            IntList dest = target.computeIfAbsent(e.getKey(), k -> new IntList(src.size()));
+            dest.ensureCapacity(dest.size() + src.size());
+            dest.addAllRemapped(src, baseOffset);
         }
     }
 
     @Override
     public boolean isEmpty() {
-        return read(() -> byJvmName.isEmpty()
+        return read(() -> typeCount == 0
                 && byModuleName.isEmpty()
                 && bloomByResourceUri.isEmpty());
+    }
+
+    /** Caller must hold the write lock. Appends {@code id} to the bucket for {@code key}. */
+    private static void appendId(Map<String, IntList> map, String key, int id) {
+        map.computeIfAbsent(key, k -> new IntList()).add(id);
     }
 
     /** Caller must hold the write lock. Appends {@code value} to the bucket for {@code key}. */
     private static <T> void appendBucket(Map<String, List<T>> map, String key, T value) {
         map.computeIfAbsent(key, k -> new ArrayList<>()).add(value);
+    }
+
+    /** Caller must hold the write lock. Returns the new artificial ID. */
+    private int appendTypeBlobLocked(byte[] blob) {
+        ensureTypeBlobCapacity(typeCount + 1);
+        int id = typeCount;
+        typeBlobs[typeCount++] = blob;
+        return id;
+    }
+
+    /** Caller must hold the write lock. Grows the store by doubling. */
+    private void ensureTypeBlobCapacity(int minCapacity) {
+        if (minCapacity <= typeBlobs.length) return;
+        int newCap = typeBlobs.length;
+        while (newCap < minCapacity) {
+            int doubled = newCap << 1;
+            if (doubled < 0) {
+                newCap = minCapacity;
+                break;
+            }
+            newCap = Math.max(doubled, minCapacity);
+        }
+        typeBlobs = Arrays.copyOf(typeBlobs, newCap);
     }
 
     @Override
@@ -241,7 +300,7 @@ public final class InMemoryIndex implements Index {
     @Override
     public boolean contains(String jvmName) {
         return read(() -> {
-            List<byte[]> bucket = byJvmName.get(jvmName);
+            IntList bucket = byJvmName.get(jvmName);
             return bucket != null && !bucket.isEmpty();
         });
     }
@@ -251,8 +310,8 @@ public final class InMemoryIndex implements Index {
         return read(() -> {
             if (recurse) {
                 List<TypeEntry> entries = new ArrayList<>();
-                String prefix = packageJvm+'/';
-                for (Map.Entry<String, List<byte[]>> entry : byPackage.entrySet()) {
+                String prefix = packageJvm + '/';
+                for (Map.Entry<String, IntList> entry : byPackage.entrySet()) {
                     String packageName = entry.getKey();
                     if (packageName.startsWith(prefix)) {
                         addBucketTo(entry.getValue(), entries);
@@ -270,11 +329,12 @@ public final class InMemoryIndex implements Index {
         if (prefix == null) return List.of();
         return read(() -> {
             List<TypeEntry> out = new ArrayList<>();
-            for (Map.Entry<String, List<byte[]>> mapEntry : byJvmName.entrySet()) {
+            for (Map.Entry<String, IntList> mapEntry : byJvmName.entrySet()) {
                 String jvmOwnerName = mapEntry.getKey();
                 if (!simpleNameMatchesPrefix(jvmOwnerName, prefix)) continue;
-                for (byte[] blob : mapEntry.getValue()) {
-                    out.add(decodedCache.get(blob));
+                IntList ids = mapEntry.getValue();
+                for (int i = 0; i < ids.size(); i++) {
+                    out.add(decode(ids.get(i)));
                     if (limit > 0 && out.size() >= limit) return out;
                 }
             }
@@ -296,9 +356,9 @@ public final class InMemoryIndex implements Index {
     @Override
     public Collection<TypeEntry> all() {
         return read(() -> {
-            List<TypeEntry> out = new ArrayList<>();
-            for (List<byte[]> bucket : byJvmName.values()) {
-                addBucketTo(bucket, out);
+            List<TypeEntry> out = new ArrayList<>(typeCount);
+            for (int id = 0; id < typeCount; id++) {
+                out.add(decode(id));
             }
             return Collections.unmodifiableCollection(out);
         });
@@ -311,11 +371,7 @@ public final class InMemoryIndex implements Index {
 
     @Override
     public int entryCount() {
-        return read(() -> {
-            int n = 0;
-            for (List<byte[]> bucket : byJvmName.values()) n += bucket.size();
-            return n;
-        });
+        return read(() -> typeCount);
     }
 
     private static <T> List<T> toImmutableList(List<T> bucket) {
@@ -327,19 +383,24 @@ public final class InMemoryIndex implements Index {
         if (bucket != null) out.addAll(bucket);
     }
 
-    private List<TypeEntry> toList(List<byte[]> bucket) {
+    /** Caller must hold a lock. */
+    private TypeEntry decode(int id) {
+        return decodedCache.get(id, typeBlobs[id]);
+    }
+
+    private List<TypeEntry> toList(IntList bucket) {
         if (bucket == null || bucket.isEmpty()) return List.of();
         TypeEntry[] decoded = new TypeEntry[bucket.size()];
         for (int i = 0; i < bucket.size(); i++) {
-            decoded[i] = decodedCache.get(bucket.get(i));
+            decoded[i] = decode(bucket.get(i));
         }
         return List.of(decoded);
     }
 
-    private void addBucketTo(List<byte[]> bucket, List<TypeEntry> out) {
+    private void addBucketTo(IntList bucket, List<TypeEntry> out) {
         if (bucket == null) return;
-        for (byte[] blob : bucket) {
-            out.add(decodedCache.get(blob));
+        for (int i = 0; i < bucket.size(); i++) {
+            out.add(decode(bucket.get(i)));
         }
     }
 
@@ -392,4 +453,10 @@ public final class InMemoryIndex implements Index {
     public int moduleCount() {
         return read(byModuleName::size);
     }
+
+    /** Snapshot of canonical blobs plus both secondary ID indexes. */
+    record TypeStoreSnapshot(
+            byte[][] blobs,
+            Map<String, IntList> byJvmName,
+            Map<String, IntList> byPackage) {}
 }
