@@ -3,8 +3,6 @@ package ch.castleridge.javals.indexing.model;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import ch.castleridge.javals.indexing.intern.Interner;
-
 /**
  * A class-type reference that may need name resolution against the
  * classpath and enclosing compilation unit.
@@ -53,19 +51,15 @@ public sealed interface TypeRef extends Type
     ConcurrentMap<String, Resolved> RESOLVED_CACHE = new ConcurrentHashMap<>(1 << 13);
     ConcurrentMap<String, Unresolved> UNRESOLVED_CACHE = new ConcurrentHashMap<>(1 << 10);
 
-    /**
-     * Return a cached {@link Resolved} for {@code jvmBinaryName}. The name
-     * is interned through {@link Interner} so callers don't have to.
-     */
+    /** Return a cached {@link Resolved} for {@code jvmBinaryName}. */
     static Resolved resolved(String jvmBinaryName) {
         if (jvmBinaryName == null || jvmBinaryName.isEmpty()) {
             throw new IllegalArgumentException("jvmBinaryName must be non-empty");
         }
-        String key = Interner.intern(jvmBinaryName);
-        Resolved cached = RESOLVED_CACHE.get(key);
+        Resolved cached = RESOLVED_CACHE.get(jvmBinaryName);
         if (cached != null) return cached;
-        Resolved made = new Resolved(key);
-        Resolved prior = RESOLVED_CACHE.putIfAbsent(key, made);
+        Resolved made = new Resolved(jvmBinaryName);
+        Resolved prior = RESOLVED_CACHE.putIfAbsent(jvmBinaryName, made);
         return prior == null ? made : prior;
     }
 
@@ -74,11 +68,10 @@ public sealed interface TypeRef extends Type
         if (simpleName == null || simpleName.isEmpty()) {
             throw new IllegalArgumentException("simpleName must be non-empty");
         }
-        String key = Interner.intern(simpleName);
-        Unresolved cached = UNRESOLVED_CACHE.get(key);
+        Unresolved cached = UNRESOLVED_CACHE.get(simpleName);
         if (cached != null) return cached;
-        Unresolved made = new Unresolved(key);
-        Unresolved prior = UNRESOLVED_CACHE.putIfAbsent(key, made);
+        Unresolved made = new Unresolved(simpleName);
+        Unresolved prior = UNRESOLVED_CACHE.putIfAbsent(simpleName, made);
         return prior == null ? made : prior;
     }
 }

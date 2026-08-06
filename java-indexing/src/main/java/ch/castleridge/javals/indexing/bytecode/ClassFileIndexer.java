@@ -20,7 +20,6 @@ import org.objectweb.asm.TypePath;
 import org.objectweb.asm.TypeReference;
 
 import ch.castleridge.javals.indexing.index.Index;
-import ch.castleridge.javals.indexing.intern.Interner;
 import ch.castleridge.javals.indexing.model.AccessVisibility;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
@@ -132,13 +131,13 @@ public final class ClassFileIndexer {
             // an absolute URI; ResourceUris.compact normalises storage when
             // the TypeEntry / ModuleEntry is built.
             this.resourcePath = resourcePath;
-            this.sourceUri = sourceUri == null ? null : Interner.intern(sourceUri);
+            this.sourceUri = sourceUri;
         }
 
         @Override
         public void visit(int version, int access, String name, String signature,
                           String superName, String[] interfaces) {
-            this.jvmName = Interner.intern(name);
+            this.jvmName = name;
             this.access = access;
             if (superName == null) {
                 this.superRef = null;
@@ -187,7 +186,7 @@ public final class ClassFileIndexer {
                 parsedFieldType = Descriptors.parseField(descriptor);
             }
             final Type[] fieldTypeSlot = new Type[]{parsedFieldType};
-            final String fieldName = Interner.intern(name);
+            final String fieldName = name;
             // ASM hands us the ConstantValue attribute's payload directly:
             // boxed Integer / Long / Float / Double for primitives, String
             // for string constants, or null when there is no ConstantValue.
@@ -259,7 +258,7 @@ public final class ClassFileIndexer {
             }
             final boolean varargs = (mAccess & Opcodes.ACC_VARARGS) != 0;
             final boolean hasBody = (mAccess & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) == 0;
-            final String methodName = Interner.intern(name);
+            final String methodName = name;
             // Box so the inner visitor can update the annotation default
             // value asynchronously before visitEnd builds the MethodEntry.
             final AnnotationValue[] annotationDefaultSlot = new AnnotationValue[1];
@@ -302,7 +301,7 @@ public final class ClassFileIndexer {
                 public void visitParameter(String pName, int pAccess) {
                     int idx = parameterCursor[0]++;
                     if (idx >= 0 && idx < parameterNames.length) {
-                        parameterNames[idx] = pName == null ? null : Interner.intern(pName);
+                        parameterNames[idx] = pName;
                         parameterModifiers[idx] = pAccess;
                     }
                 }
@@ -383,14 +382,14 @@ public final class ClassFileIndexer {
             }
             if (outerName != null && outerName.equals(jvmName)
                     && AccessVisibility.shouldIndexType(access)) {
-                innerTypes.add(Interner.intern(name));
+                innerTypes.add(name);
             }
         }
 
         @Override
         public ModuleVisitor visitModule(String name, int moduleAccess, String version) {
-            final String modName = Interner.intern(name);
-            final String modVersion = version == null ? null : Interner.intern(version);
+            final String modName = name;
+            final String modVersion = version;
             final int modFlags = moduleAccess;
             final List<ModuleEntry.Requires> requires = new ArrayList<>();
             final List<ModuleEntry.Exports> exports = new ArrayList<>();
@@ -401,14 +400,14 @@ public final class ClassFileIndexer {
                 @Override
                 public void visitMainClass(String main) {
                     if (main != null && !main.isEmpty()) {
-                        mainClass = Interner.intern(main);
+                        mainClass = main;
                     }
                 }
 
                 @Override
                 public void visitPackage(String packaze) {
                     if (packaze != null && !packaze.isEmpty()) {
-                        modulePackages.add(Interner.intern(packaze));
+                        modulePackages.add(packaze);
                     }
                 }
 
@@ -416,17 +415,17 @@ public final class ClassFileIndexer {
                 public void visitRequire(String reqModule, int access, String reqVersion) {
                     if (reqModule == null || reqModule.isEmpty()) return;
                     requires.add(new ModuleEntry.Requires(
-                            Interner.intern(reqModule),
+                            reqModule,
                             access,
-                            reqVersion == null ? null : Interner.intern(reqVersion)));
+                            reqVersion));
                 }
 
                 @Override
                 public void visitExport(String packaze, int access, String... modules) {
                     if (packaze == null) return;
                     exports.add(new ModuleEntry.Exports(
-                            Interner.intern(packaze),
-                            asInternedArray(modules),
+                            packaze,
+                            compactArray(modules),
                             access));
                 }
 
@@ -434,23 +433,23 @@ public final class ClassFileIndexer {
                 public void visitOpen(String packaze, int access, String... modules) {
                     if (packaze == null) return;
                     opens.add(new ModuleEntry.Opens(
-                            Interner.intern(packaze),
-                            asInternedArray(modules),
+                            packaze,
+                            compactArray(modules),
                             access));
                 }
 
                 @Override
                 public void visitUse(String service) {
                     if (service == null) return;
-                    uses.add(Interner.intern(service));
+                    uses.add(service);
                 }
 
                 @Override
                 public void visitProvide(String service, String... providers) {
                     if (service == null) return;
                     provides.add(new ModuleEntry.Provides(
-                            Interner.intern(service),
-                            asInternedArray(providers)));
+                            service,
+                            compactArray(providers)));
                 }
 
                 @Override
@@ -472,12 +471,12 @@ public final class ClassFileIndexer {
             };
         }
 
-        private static String[] asInternedArray(String[] arr) {
+        private static String[] compactArray(String[] arr) {
             if (arr == null || arr.length == 0) return EmptyArrays.STRING;
             String[] out = new String[arr.length];
             int n = 0;
             for (String s : arr) {
-                if (s != null) out[n++] = Interner.intern(s);
+                if (s != null) out[n++] = s;
             }
             if (n == 0) return EmptyArrays.STRING;
             if (n == out.length) return out;
@@ -500,7 +499,7 @@ public final class ClassFileIndexer {
             if (componentType == null) {
                 componentType = Descriptors.parseField(descriptor);
             }
-            final String componentName = Interner.intern(name);
+            final String componentName = name;
             final Type finalComponentType = componentType;
             final List<AnnotationRef> componentAnnotations = new ArrayList<>();
             return new RecordComponentVisitor(ASM_API) {
@@ -620,7 +619,7 @@ public final class ClassFileIndexer {
         @Override
         public void visitEnum(String name, String enumDescriptor, String value) {
             Type enumType = Descriptors.parseField(enumDescriptor);
-            store(name, new AnnotationValue.EnumConst(enumType, Interner.intern(value)));
+            store(name, new AnnotationValue.EnumConst(enumType, value));
         }
 
         @Override
@@ -658,7 +657,7 @@ public final class ClassFileIndexer {
                 case DECLARATION, NESTED -> {
                     // Top-level: each element has a non-null name.
                     if (name != null) {
-                        values.put(Interner.intern(name), value);
+                        values.put(name, value);
                     }
                 }
                 case ARRAY -> arrayElements.add(value);
@@ -669,7 +668,7 @@ public final class ClassFileIndexer {
         private static String jvmNameFor(String descriptor) {
             Type ref = Descriptors.parseField(descriptor);
             if (ref instanceof TypeRef.Resolved r) return r.jvmBinaryName();
-            return Interner.intern(descriptor);
+            return descriptor;
         }
 
         /**

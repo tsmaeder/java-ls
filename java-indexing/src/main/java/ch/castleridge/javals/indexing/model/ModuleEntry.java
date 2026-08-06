@@ -1,7 +1,5 @@
 package ch.castleridge.javals.indexing.model;
 
-import ch.castleridge.javals.indexing.intern.Interner;
-
 /**
  * A single indexed module declaration, mirroring the JVMS Module attribute
  * (JEP 261 / JLS §7.7).
@@ -38,7 +36,6 @@ public record ModuleEntry(
         if (name == null || name.isEmpty()) {
             throw new IllegalArgumentException("module name must be non-empty");
         }
-        sourceUri = sourceUri == null ? null : Interner.intern(sourceUri);
         resourcePath = ResourceUris.compact(resourcePath, sourceUri);
         requires = EmptyArrays.orEmpty(requires, EmptyArrays.REQUIRES);
         exports = EmptyArrays.orEmpty(exports, EmptyArrays.EXPORTS);

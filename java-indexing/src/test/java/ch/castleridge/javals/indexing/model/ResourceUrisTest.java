@@ -2,7 +2,7 @@ package ch.castleridge.javals.indexing.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -55,11 +55,12 @@ class ResourceUrisTest {
     }
 
     @Test
-    void compactInternsSharedRelativePaths() {
+    void compactDoesNotInternSharedRelativePaths() {
         String jar = "file:///lib.jar";
         String a = ResourceUris.compact("jar:" + jar + "!/java/lang/Object.class", jar);
         String b = ResourceUris.compact("jar:" + jar + "!/java/lang/Object.class", jar);
-        assertSame(a, b);
+        assertEquals(a, b);
+        assertNotSame(a, b);
     }
 
     @Test

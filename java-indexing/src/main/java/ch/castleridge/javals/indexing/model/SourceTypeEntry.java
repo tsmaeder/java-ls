@@ -1,11 +1,9 @@
 package ch.castleridge.javals.indexing.model;
 
-import ch.castleridge.javals.indexing.intern.Interner;
-
 /**
  * Indexed type declaration produced from source parsing.
  *
- * <p>{@link #resourcePath()} holds either an interned path relative to
+ * <p>{@link #resourcePath()} holds either a path relative to
  * {@link #sourceUri()} or an absolute URI when compaction is not
  * loss-free. Prefer {@link #resourceUri()} for the full resource location.
  */
@@ -27,7 +25,6 @@ public record SourceTypeEntry(
         SourceResolutionHints hints) implements TypeEntry {
 
     public SourceTypeEntry {
-        sourceUri = sourceUri == null ? null : Interner.intern(sourceUri);
         resourcePath = ResourceUris.compact(resourcePath, sourceUri);
         interfaceRefs = EmptyArrays.orEmpty(interfaceRefs, EmptyArrays.TYPE);
         typeParams = EmptyArrays.orEmpty(typeParams, EmptyArrays.TYPE_PARAM);

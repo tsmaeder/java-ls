@@ -5,8 +5,6 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
-import ch.castleridge.javals.indexing.intern.Interner;
-
 /**
  * Process-wide, thread-safe, append-only int↔String arena used by
  * {@link TypeEntryCodec}. Blobs store string fields as integer ids into this
@@ -14,9 +12,7 @@ import ch.castleridge.javals.indexing.intern.Interner;
  * ({@code java/lang/Object}, {@code <init>}, shared {@code sourceUri}s, …)
  * collapse to a single entry across the whole index.
  *
- * <p>Id {@code 0} is reserved for {@code null}. Strings are first passed
- * through {@link Interner} so the arena shares the same canonical instances
- * the rest of the indexer already produces.
+ * <p>Id {@code 0} is reserved for {@code null}.
  */
 public final class StringTable {
 
@@ -45,17 +41,16 @@ public final class StringTable {
      */
     public static int intern(String s) {
         if (s == null) return 0;
-        String key = Interner.intern(s);
-        Integer existing = TO_ID.get(key);
+        Integer existing = TO_ID.get(s);
         if (existing != null) return existing;
         int id = NEXT_ID.getAndIncrement();
-        Integer prior = TO_ID.putIfAbsent(key, id);
+        Integer prior = TO_ID.putIfAbsent(s, id);
         if (prior != null) {
             // Lost the race; the allocated id is unused (append-only, so
             // we just leave a hole in the reverse table).
             return prior;
         }
-        store(id, key);
+        store(id, s);
         return id;
     }
 

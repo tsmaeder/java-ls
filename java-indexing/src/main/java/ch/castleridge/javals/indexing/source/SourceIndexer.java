@@ -44,7 +44,6 @@ import com.sun.tools.javac.tree.JCTree;
 
 import ch.castleridge.javals.indexing.index.InMemorySource;
 import ch.castleridge.javals.indexing.index.Index;
-import ch.castleridge.javals.indexing.intern.Interner;
 import ch.castleridge.javals.indexing.model.AccessVisibility;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
@@ -92,7 +91,7 @@ public final class SourceIndexer {
         JavaFileObject input = new InMemorySource(resourceUri, content);
         JavacTask task = (JavacTask) compiler.getTask(
                 null, null, d -> {}, List.of(), List.of(), List.of(input));
-        String sourceUriStr = sourceUri == null ? null : Interner.intern(sourceUri);
+        String sourceUriStr = sourceUri;
         try {
             for (CompilationUnitTree cu : task.parse()) {
                 indexCompilationUnit(resourcePath, sourceUriStr, cu, into);
@@ -114,7 +113,7 @@ public final class SourceIndexer {
 
     private static void indexCompilationUnit(String uri, String sourceUri, CompilationUnitTree cu, Index into) {
         String packageName = cu.getPackageName() == null ? "" : cu.getPackageName().toString();
-        String packageJvm = Interner.intern(packageName.replace('.', '/'));
+        String packageJvm = packageName.replace('.', '/');
 
         Map<String, String> singleTypeImports = new HashMap<>();
         List<String> onDemandImports = new ArrayList<>();
@@ -177,7 +176,6 @@ public final class SourceIndexer {
         } else {
             localName = enclosing.peekLast() + "$" + simple;
         }
-        localName = Interner.intern(localName);
 
         Set<String> classTypeParams = new HashSet<>(outerTypeParams);
         // Two-phase: enter the names first so bounds that reference
@@ -242,7 +240,7 @@ public final class SourceIndexer {
                     continue;
                 }
                 nested.add(inner);
-                String innerName = Interner.intern(localName + "$" + inner.getSimpleName().toString());
+                String innerName = localName + "$" + inner.getSimpleName().toString();
                 innerTypes.add(innerName);
             }
         }
@@ -292,7 +290,7 @@ public final class SourceIndexer {
         }
         return new FieldEntry(
                 flags,
-                Interner.intern(vt.getName().toString()),
+                vt.getName().toString(),
                 toTypeRef(vt.getType(), typeParams, ownerJvm),
                 constantValue,
                 annotationsOf(vt.getModifiers(), ownerJvm));
@@ -340,7 +338,7 @@ public final class SourceIndexer {
         List<ParameterEntry> paramEntries = new ArrayList<>();
         for (VariableTree p : mt.getParameters()) {
             paramEntries.add(new ParameterEntry(
-                    Interner.intern(p.getName().toString()),
+                    p.getName().toString(),
                     modifierFlags(p.getModifiers()),
                     toTypeRef(p.getType(), methodTypeParams, ownerJvm),
                     annotationsOf(p.getModifiers(), ownerJvm)));
@@ -360,7 +358,7 @@ public final class SourceIndexer {
             declaredMethodTypeParams.add(toTypeParamRef(tp, methodTypeParams, ownerJvm));
         }
 
-        String name = Interner.intern(mt.getName().toString());
+        String name = mt.getName().toString();
         Tree defaultTree = mt.getDefaultValue();
         AnnotationValue defaultValue = defaultTree instanceof ExpressionTree dt
                 ? toAnnotationValue(dt, ownerJvm)
@@ -381,7 +379,7 @@ public final class SourceIndexer {
     private static TypeParamRef toTypeParamRef(TypeParameterTree tp,
                                                Set<String> visibleTypeParams,
                                                String ownerJvm) {
-        String name = Interner.intern(tp.getName().toString());
+        String name = tp.getName().toString();
         List<? extends Tree> boundTrees = tp.getBounds();
         if (boundTrees == null || boundTrees.isEmpty()) {
             return TypeParamRef.of(name);
@@ -485,7 +483,7 @@ public final class SourceIndexer {
             int start = Math.max(ownerJvm.lastIndexOf('$'), ownerJvm.lastIndexOf('/')) + 1;
             String outerSimple = ownerJvm.substring(start);
             if (jvm.startsWith(outerSimple + "$")) {
-                return TypeRef.resolved(Interner.intern(ownerJvm + jvm.substring(outerSimple.length())));
+                return TypeRef.resolved(ownerJvm + jvm.substring(outerSimple.length()));
             }
         }
         return TypeRef.resolved(jvm);
@@ -519,7 +517,7 @@ public final class SourceIndexer {
                 sb.append('$').append(parts.get(i));
             }
         }
-        return Interner.intern(sb.toString());
+        return sb.toString();
     }
 
     private static void collectMemberSelectParts(Tree tree, List<String> parts) {
@@ -617,7 +615,7 @@ public final class SourceIndexer {
                 valueExpr = arg;
             }
             AnnotationValue value = toAnnotationValue(valueExpr, ownerJvm);
-            values.put(Interner.intern(elementName), value);
+            values.put(elementName, value);
         }
         return new AnnotationRef(annotationType, values);
     }
@@ -684,7 +682,7 @@ public final class SourceIndexer {
             if (selected.equals("class")) {
                 return new AnnotationValue.ClassRef(typeRefForExpression(ms.getExpression()));
             }
-            return new AnnotationValue.EnumConst(typeRefForExpression(ms.getExpression()), Interner.intern(selected));
+            return new AnnotationValue.EnumConst(typeRefForExpression(ms.getExpression()), selected);
         }
         if (expr instanceof IdentifierTree id) {
             // Unqualified identifier: could be an enum constant imported
@@ -693,7 +691,7 @@ public final class SourceIndexer {
             // will downgrade to Unsupported if it can't bind.
             return new AnnotationValue.EnumConst(
                     TypeRef.unresolved("?"),
-                    Interner.intern(id.getName().toString()));
+                    id.getName().toString());
         }
         return new AnnotationValue.Unsupported("non-constant expression");
     }
@@ -765,7 +763,7 @@ public final class SourceIndexer {
                 sb.append('$').append(parts.get(i));
             }
         }
-        return Interner.intern(sb.toString());
+        return sb.toString();
     }
 
     private static Object negateNumber(Number n) {

@@ -4,8 +4,6 @@ import java.util.Arrays;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import ch.castleridge.javals.indexing.intern.Interner;
-
 /**
  * A reference to a Java type produced by the indexer.
  *
@@ -182,11 +180,10 @@ public sealed interface Type
         if (name == null || name.isEmpty()) {
             throw new IllegalArgumentException("name must be non-empty");
         }
-        String key = Interner.intern(name);
-        TypeVariable cached = TYPE_VARIABLE_CACHE.get(key);
+        TypeVariable cached = TYPE_VARIABLE_CACHE.get(name);
         if (cached != null) return cached;
-        TypeVariable made = new TypeVariable(key);
-        TypeVariable prior = TYPE_VARIABLE_CACHE.putIfAbsent(key, made);
+        TypeVariable made = new TypeVariable(name);
+        TypeVariable prior = TYPE_VARIABLE_CACHE.putIfAbsent(name, made);
         return prior == null ? made : prior;
     }
 

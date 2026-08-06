@@ -16,8 +16,8 @@ import java.util.Map;
 /**
  * Analytical estimator for the retained heap size of an arbitrary object
  * graph. Walks references via reflection with identity-based dedup, so
- * objects shared across the graph (typically interned strings, URIs shared
- * across many index entries) are counted exactly once.
+ * objects shared across the graph (such as cached values or shared URIs)
+ * are counted exactly once.
  *
  * <p>Layout assumptions match HotSpot 64-bit with compressed oops and
  * compressed class pointers:

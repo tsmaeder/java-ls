@@ -3,8 +3,6 @@ package ch.castleridge.javals.indexing.model;
 import java.util.ArrayList;
 import java.util.List;
 
-import ch.castleridge.javals.indexing.intern.Interner;
-
 /**
  * Helpers for translating JVM descriptor strings into {@link Type}
  * values. Classfile-sourced entries go through here exclusively; source
@@ -76,7 +74,7 @@ public final class Descriptors {
             case 'L': {
                 int semi = desc.indexOf(';', pos[0]);
                 if (semi < 0) return null;
-                String name = Interner.intern(desc.substring(pos[0] + 1, semi));
+                String name = desc.substring(pos[0] + 1, semi);
                 pos[0] = semi + 1;
                 return TypeRef.resolved(name);
             }

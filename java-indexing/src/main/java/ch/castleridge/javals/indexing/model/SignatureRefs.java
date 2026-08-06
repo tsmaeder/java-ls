@@ -8,8 +8,6 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.signature.SignatureReader;
 import org.objectweb.asm.signature.SignatureVisitor;
 
-import ch.castleridge.javals.indexing.intern.Interner;
-
 /**
  * Parses JVM {@code Signature} attribute strings into {@link Type} trees.
  */
@@ -191,7 +189,7 @@ public final class SignatureRefs {
         public void visitFormalTypeParameter(String name) {
             flush();
             if (name != null && !name.isEmpty()) {
-                currentName = Interner.intern(name);
+                currentName = name;
                 currentBounds = new ArrayList<>();
             }
         }
@@ -323,13 +321,13 @@ public final class SignatureRefs {
 
         @Override
         public void visitClassType(String name) {
-            className = Interner.intern(name);
+            className = name;
         }
 
         @Override
         public void visitInnerClassType(String name) {
             inner = new ClassTypeFrame(sink);
-            inner.className = Interner.intern(className + "$" + name);
+            inner.className = className + "$" + name;
         }
 
         @Override

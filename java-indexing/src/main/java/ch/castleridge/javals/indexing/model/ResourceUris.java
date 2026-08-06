@@ -3,17 +3,15 @@ package ch.castleridge.javals.indexing.model;
 import java.net.URI;
 import java.nio.file.Path;
 
-import ch.castleridge.javals.indexing.intern.Interner;
-
 /**
  * Compacts resource URIs stored on index entries by separating the shared
  * classpath {@code sourceUri} prefix from the per-entry relative path.
  *
  * <p>Jar and jrt walkers emit one long resource URI per class that repeats
  * the same jar/JDK path thousands of times. Directory inputs similarly
- * repeat the source-root URI. Storing only the interned relative entry
- * (e.g. {@code com/example/Foo.class}) beside the already-interned
- * {@code sourceUri} removes that duplicated prefix from the retained heap;
+ * repeat the source-root URI. Storing only the relative entry
+ * (e.g. {@code com/example/Foo.class}) removes that duplicated prefix from
+ * the retained heap;
  * {@link #resolve(String, String)} rebuilds the full URI on demand.
  *
  * <p>When a resource URI cannot be reconstructed losslessly from
@@ -27,21 +25,21 @@ public final class ResourceUris {
 
     /**
      * Compact {@code resourceUri} for storage alongside {@code sourceUri}.
-     * Returns an interned relative path when round-trippable; otherwise the
-     * original {@code resourceUri} (not interned — those strings are unique).
+     * Returns a relative path when round-trippable; otherwise the original
+     * {@code resourceUri}.
      */
     public static String compact(String resourceUri, String sourceUri) {
         if (resourceUri == null) return null;
-        // Already-compact relative paths (or opaque non-URI tokens) just need interning.
+        // Already-compact relative paths (or opaque non-URI tokens) need no work.
         if (!isAbsoluteResource(resourceUri)) {
-            return Interner.intern(resourceUri);
+            return resourceUri;
         }
         if (sourceUri == null || sourceUri.isEmpty()) return resourceUri;
         String relative = relativePath(resourceUri, sourceUri);
         if (relative == null || relative.isEmpty()) return resourceUri;
         String rebuilt = join(sourceUri, relative);
         if (!resourceUri.equals(rebuilt)) return resourceUri;
-        return Interner.intern(relative);
+        return relative;
     }
 
     /**
