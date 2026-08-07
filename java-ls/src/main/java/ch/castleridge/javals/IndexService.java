@@ -16,9 +16,9 @@ import ch.castleridge.javals.indexing.cli.HeapSizeEstimator;
 import ch.castleridge.javals.indexing.mbt.*;
 import ch.castleridge.javals.indexing.scan.*;
 import ch.castleridge.javals.indexing.scan.Scanner;
-import ch.castleridge.javals.javac.ClasspathEntry;
-import ch.castleridge.javals.javac.ClasspathOrder;
-import ch.castleridge.javals.javac.UriClasspathEntry;
+import ch.castleridge.javals.classpath.ClasspathEntry;
+import ch.castleridge.javals.classpath.ClasspathOrder;
+import ch.castleridge.javals.classpath.UriClasspathEntry;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.WorkspaceFolder;
@@ -41,9 +41,17 @@ public final class IndexService {
     private final JavaLanguageServer server;
     private final AtomicReference<State> state = new AtomicReference<>(State.empty());
     private final List<Runnable> indexChangedListeners = new CopyOnWriteArrayList<>();
+    private volatile ch.castleridge.javals.indexing.source.SourceIndexer sourceIndexer =
+            ch.castleridge.javals.indexing.source.SourceIndexer.javac();
 
     public IndexService(JavaLanguageServer server) {
         this.server = server;
+    }
+
+    public void setSourceIndexer(ch.castleridge.javals.indexing.source.SourceIndexer sourceIndexer) {
+        this.sourceIndexer = sourceIndexer == null
+                ? ch.castleridge.javals.indexing.source.SourceIndexer.javac()
+                : sourceIndexer;
     }
 
     public void addIndexChangedListener(Runnable listener) {
@@ -106,7 +114,7 @@ public final class IndexService {
             index.addChangedListener(this::notifyIndexChanged);
             state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar));
             notifyIndexChanged();
-            Scanner scanner = new Scanner();
+            Scanner scanner = new Scanner(sourceIndexer);
             long t0 = System.nanoTime();
             List<Throwable> failures = scanner.scanAll(sources.values(), index);
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
@@ -309,16 +317,9 @@ public final class IndexService {
     }
 
     private static Path workspacePathFromInitializationOptions(InitializeParams params) {
-        if (params == null) return null;
-        Object options = params.getInitializationOptions();
-        if (!(options instanceof Map<?, ?> map)) {
-            return null;
-        }
-        Object workspacePath = map.get("workspacePath");
-        if (workspacePath instanceof String s) {
-            return pathFromClientString(s);
-        }
-        return null;
+        return InitializationOptions.workspacePath(params)
+                .map(IndexService::pathFromClientString)
+                .orElse(null);
     }
 
     private static List<Path> workspaceRoots(InitializeParams params) {

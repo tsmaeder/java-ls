@@ -43,18 +43,28 @@ public final class Scanner {
 
     private final ForkJoinPool pool;
     private final boolean ownsPool;
+    private final SourceIndexer sourceIndexer;
 
     public Scanner() {
-        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true);
+        this(SourceIndexer.javac());
+    }
+
+    public Scanner(SourceIndexer sourceIndexer) {
+        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, sourceIndexer);
     }
 
     public Scanner(ForkJoinPool pool) {
-        this(pool, false);
+        this(pool, false, SourceIndexer.javac());
     }
 
-    private Scanner(ForkJoinPool pool, boolean owns) {
+    public Scanner(ForkJoinPool pool, SourceIndexer sourceIndexer) {
+        this(pool, false, sourceIndexer);
+    }
+
+    private Scanner(ForkJoinPool pool, boolean owns, SourceIndexer sourceIndexer) {
         this.pool = pool;
         this.ownsPool = owns;
+        this.sourceIndexer = sourceIndexer == null ? SourceIndexer.javac() : sourceIndexer;
     }
 
     public List<Throwable> scanAll(Collection<InputSource> sources, Index into) {
@@ -101,7 +111,7 @@ public final class Scanner {
             src.walk((relativePath, fileName, bytes) -> {
                 ForkJoinTask<?> task = pool.submit(() -> {
                     try {
-                        indexOne(relativePath, srcUri, fileName, bytes.get(), temp);
+                        indexOne(sourceIndexer, relativePath, srcUri, fileName, bytes.get(), temp);
                     } catch (Throwable t) {
                         failures.add(t);
                     }
@@ -127,11 +137,12 @@ public final class Scanner {
         into.addAll(temp);
     }
 
-    private static void indexOne(String relativePath, String sourceUri, String fileName, byte[] content, Index into) {
+    private static void indexOne(SourceIndexer sourceIndexer, String relativePath, String sourceUri,
+                                 String fileName, byte[] content, Index into) {
         if (fileName.endsWith(".class")) {
             ClassFileIndexer.index(relativePath, sourceUri, content, into);
         } else if (fileName.endsWith(".java")) {
-            SourceIndexer.index(relativePath, sourceUri,
+            sourceIndexer.index(relativePath, sourceUri,
                     new String(content, StandardCharsets.UTF_8), into);
         }
     }

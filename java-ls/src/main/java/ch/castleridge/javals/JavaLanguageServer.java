@@ -16,11 +16,21 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     private final IndexService indexService;
     private LanguageClient client;
     private int errorCode = 1;
+    private volatile String compilerBackend = "javac";
 
     public JavaLanguageServer() {
         this.indexService = new IndexService(this);
         this.textDocumentService = new JavaTextDocumentService(this, indexService);
         this.workspaceService = new JavaWorkspaceService(this);
+        indexService.addIndexChangedListener(this::rebindWorkspaceCompiler);
+    }
+
+    private void rebindWorkspaceCompiler() {
+        JavaTextDocumentService tds = (JavaTextDocumentService) textDocumentService;
+        tds.setWorkspaceCompiler(ch.castleridge.javals.analysis.BackendFactory.workspaceCompiler(
+                compilerBackend,
+                tds.symbolLocator(),
+                indexService.sourceJarByBinaryJar()));
     }
 
     public IndexService getIndexService() {
@@ -29,6 +39,14 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
 
     @Override
     public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
+        InitializationOptions.Backend backend = InitializationOptions.backend(params);
+        this.compilerBackend = backend.compiler();
+        indexService.setSourceIndexer(
+                ch.castleridge.javals.indexing.source.SourceIndexer.of(backend.indexer()));
+        rebindWorkspaceCompiler();
+        logMessage(MessageType.Info,
+                "Backend: indexer=" + backend.indexer() + ", compiler=" + backend.compiler());
+
         indexService.initialize(params);
         InitializationOptions.referencesCandidateCap(params)
                 .ifPresent(((JavaTextDocumentService) textDocumentService)::setReferencesCandidateCap);

@@ -16,33 +16,22 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-import javax.lang.model.element.Element;
-import javax.lang.model.util.Elements;
-import javax.lang.model.util.Types;
-import javax.tools.JavaFileObject;
-
-import com.sun.source.tree.CompilationUnitTree;
-import com.sun.source.tree.LineMap;
-import com.sun.source.util.TreePath;
-import com.sun.source.util.Trees;
-
+import ch.castleridge.javals.analysis.AnalysisSession;
+import ch.castleridge.javals.analysis.BackendFactory;
+import ch.castleridge.javals.analysis.PublishedDiagnostic;
+import ch.castleridge.javals.analysis.ResolvedSymbol;
+import ch.castleridge.javals.analysis.SymbolIdentity;
+import ch.castleridge.javals.analysis.WorkspaceCompiler;
+import ch.castleridge.javals.analysis.javac.SourceCache;
+import ch.castleridge.javals.analysis.javac.SymbolLocator;
+import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.UriCoding;
-import ch.castleridge.javals.javac.ClasspathOrder;
-import ch.castleridge.javals.javac.CompletionProposer;
-import ch.castleridge.javals.javac.DefinitionElementResolver;
-import ch.castleridge.javals.javac.LspPositions;
-import ch.castleridge.javals.javac.ReferenceFinder;
-import ch.castleridge.javals.javac.SourceCache;
-import ch.castleridge.javals.javac.SymbolKey;
-import ch.castleridge.javals.javac.SymbolLocator;
-import ch.castleridge.javals.javac.TreePathLocator;
-import ch.castleridge.javals.javac.WorkspaceCompiler;
 
 /**
- * Text Document Service implementation handling document operations
- * Copyright Anysphere Inc.
+ * Text Document Service implementation handling document operations.
+ * Compiler-backend agnostic: all analysis goes through {@link WorkspaceCompiler}.
  */
 public class JavaTextDocumentService implements TextDocumentService {
 
@@ -52,6 +41,7 @@ public class JavaTextDocumentService implements TextDocumentService {
     private final Map<String, CachedCompile> compileCache = new ConcurrentHashMap<>();
     private final SourceCache sourceCache = new SourceCache();
     private final SymbolLocator symbolLocator = new SymbolLocator(sourceCache);
+    private volatile WorkspaceCompiler workspaceCompiler = BackendFactory.workspaceCompiler("javac");
     /** Max files to scan for cross-file references; {@code <= 0} means no cap. */
     private volatile int referencesCandidateCap;
     private final ScheduledExecutorService refreshScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -67,6 +57,12 @@ public class JavaTextDocumentService implements TextDocumentService {
         indexService.addIndexChangedListener(this::scheduleRefreshOpenDocuments);
     }
 
+    public void setWorkspaceCompiler(WorkspaceCompiler workspaceCompiler) {
+        this.workspaceCompiler = workspaceCompiler == null
+                ? BackendFactory.workspaceCompiler("javac")
+                : workspaceCompiler;
+    }
+
     public void setReferencesCandidateCap(int referencesCandidateCap) {
         this.referencesCandidateCap = referencesCandidateCap;
     }
@@ -75,10 +71,11 @@ public class JavaTextDocumentService implements TextDocumentService {
         return referencesCandidateCap;
     }
 
-    private record CachedCompile(int version, WorkspaceCompiler.Result result) {
+    SymbolLocator symbolLocator() {
+        return symbolLocator;
     }
 
-    private record ResolvedElement(WorkspaceCompiler.Result compiled, Element element) {
+    private record CachedCompile(int version, AnalysisSession session) {
     }
 
     @Override
@@ -96,7 +93,6 @@ public class JavaTextDocumentService implements TextDocumentService {
         List<TextDocumentContentChangeEvent> changes = params.getContentChanges();
 
         if (!changes.isEmpty()) {
-            // For full sync, just take the last change which contains the full text
             TextDocumentContentChangeEvent change = changes.get(changes.size() - 1);
             TextDocumentItem doc = documents.get(uri);
             if (doc != null) {
@@ -119,17 +115,6 @@ public class JavaTextDocumentService implements TextDocumentService {
         server.logMessage(MessageType.Info, "Document closed: " + uri);
     }
 
-    /**
-     * Recompile {@code uri} in the background and refresh
-     * {@link #compileCache} + publish diagnostics for it. Guarded against
-     * stale writes: if the document has been edited again while we were
-     * compiling, drop the result on the floor - a fresher refresh is
-     * already (or will be) in flight.
-     */
-    /**
-     * Recompile every open document. Called when the workspace index
-     * changes so diagnostics reflect the latest classpath.
-     */
     public void refreshOpenDocuments() {
         for (String uri : documents.keySet()) {
             refreshCompile(uri);
@@ -170,28 +155,19 @@ public class JavaTextDocumentService implements TextDocumentService {
                 return;
             }
 
-            WorkspaceCompiler.Result result;
+            AnalysisSession session;
             long t0 = System.currentTimeMillis();
             try {
-                result = WorkspaceCompiler.compile(docUri, text, index, classpath);
+                session = workspaceCompiler.analyze(docUri, text, index, classpath);
                 long t1 = System.currentTimeMillis();
                 server.logMessage(MessageType.Log,
                         "Refresh compile took " + (t1 - t0) + "ms for " + uri);
             } catch (RuntimeException | Error e) {
-                // javac signals fatal internal failures with Error subtypes
-                // (com.sun.tools.javac.util.Abort, AssertionError) and deep
-                // resolution cycles surface as StackOverflowError - none of
-                // which are RuntimeExceptions. Catching only RuntimeException
-                // let those escape the async task, which then died silently:
-                // no diagnostics were ever published and the failure was
-                // invisible. Catch Throwable-but-rethrow-nothing so every
-                // compile failure becomes a visible compiler-internal-error.
                 server.logMessage(MessageType.Error,
                         "Compile failed for " + uri + ": " + describe(e));
                 server.logException(e);
                 TextDocumentItem latestOnError = documents.get(uri);
                 if (latestOnError == null || latestOnError.getVersion() != versionAtStart) {
-                    // Superseded by a newer edit (or document closed) - drop.
                     return;
                 }
                 publishCompilerErrorDiagnostic(uri, e);
@@ -200,11 +176,10 @@ public class JavaTextDocumentService implements TextDocumentService {
 
             TextDocumentItem latest = documents.get(uri);
             if (latest == null || latest.getVersion() != versionAtStart) {
-                // Superseded by a newer edit (or document closed) - drop.
                 return;
             }
-            compileCache.put(uri, new CachedCompile(versionAtStart, result));
-            publishDiagnostics(uri, result.cu(), result.source(), result.diagnostics());
+            compileCache.put(uri, new CachedCompile(versionAtStart, session));
+            publishDiagnostics(uri, session.diagnostics());
         });
     }
 
@@ -213,13 +188,6 @@ public class JavaTextDocumentService implements TextDocumentService {
         server.logMessage(MessageType.Info, "Document saved: " + UriCoding.decode(params.getTextDocument().getUri()));
     }
 
-    /**
-     * Compute completion candidates for types, fields and methods at the
-     * cursor. Reuses the cached compile from the last {@link #refreshCompile}
-     * (same as {@link #resolveElementAt}, no version check) so completion
-     * stays cheap; falls back to a synchronous compile of the current
-     * buffer when nothing is cached yet (e.g. right after {@code didOpen}).
-     */
     @Override
     public CompletableFuture<Either<List<CompletionItem>, CompletionList>> completion(CompletionParams params) {
         String uri = UriCoding.decode(params.getTextDocument().getUri());
@@ -232,23 +200,19 @@ public class JavaTextDocumentService implements TextDocumentService {
         if (doc == null)
             return List.of();
 
-        WorkspaceCompiler.Result compiled = compiledForCompletion(uri, doc);
-        if (compiled == null || compiled.cu() == null)
-            return List.of();
-
-        long offset = positionToOffset(compiled.cu().getLineMap(), position);
-        if (offset < 0)
+        AnalysisSession session = sessionForCompletion(uri, doc);
+        if (session == null || !session.isUsable())
             return List.of();
 
         Index index = indexService.index().orElse(null);
         ClasspathOrder classpath = indexService.classPathFor(uri);
-        return CompletionProposer.propose(compiled, doc.getText(), offset, index, classpath);
+        return session.complete(doc.getText(), position, index, classpath);
     }
 
-    private WorkspaceCompiler.Result compiledForCompletion(String uri, TextDocumentItem doc) {
+    private AnalysisSession sessionForCompletion(String uri, TextDocumentItem doc) {
         CachedCompile cached = compileCache.get(uri);
-        if (cached != null && cached.result() != null) {
-            return cached.result();
+        if (cached != null && cached.session() != null) {
+            return cached.session();
         }
 
         Optional<Index> indexOpt = indexService.index();
@@ -264,7 +228,7 @@ public class JavaTextDocumentService implements TextDocumentService {
 
         ClasspathOrder classpath = indexService.classPathFor(uri);
         try {
-            return WorkspaceCompiler.compile(docUri, doc.getText(), indexOpt.get(), classpath);
+            return workspaceCompiler.analyze(docUri, doc.getText(), indexOpt.get(), classpath);
         } catch (RuntimeException | Error e) {
             server.logMessage(MessageType.Error, "Completion compile failed for " + uri + ": " + describe(e));
             server.logException(e);
@@ -274,7 +238,6 @@ public class JavaTextDocumentService implements TextDocumentService {
 
     @Override
     public CompletableFuture<CompletionItem> resolveCompletionItem(CompletionItem item) {
-        // Add additional information to completion item if needed
         return CompletableFuture.completedFuture(item);
     }
 
@@ -305,23 +268,6 @@ public class JavaTextDocumentService implements TextDocumentService {
         return CompletableFuture.completedFuture(help);
     }
 
-    /**
-     * Resolve "go to definition" by recompiling the open document under
-     * the workspace's {@link Index} and {@link ClasspathOrder}, then
-     * mapping the resolved javac {@link Element} back to a source range
-     * via {@link SymbolLocator}.
-     *
-     * <p>
-     * If the workspace index has not finished loading yet, the call
-     * still succeeds for symbols whose declaration lives in the open
-     * document but cannot resolve cross-file references.
-     *
-     * <p>
-     * See {@link SymbolLocator} for the resolution algorithm and its
-     * caveats around overload disambiguation, bytecode-only dependencies
-     * and {@code jar:} / {@code jrt:} URIs in the returned
-     * {@link Location}.
-     */
     @Override
     public CompletableFuture<Either<List<? extends Location>, List<? extends LocationLink>>> definition(
             DefinitionParams params) {
@@ -331,58 +277,27 @@ public class JavaTextDocumentService implements TextDocumentService {
     }
 
     private List<Location> computeDefinition(String uri, Position position) {
-        Optional<ResolvedElement> resolved = resolveElementAt(uri, position);
+        Optional<ResolvedSymbol> resolved = resolveSymbolAt(uri, position);
         if (resolved.isEmpty())
             return List.of();
 
-        WorkspaceCompiler.Result compiled = resolved.get().compiled();
-        Element element = resolved.get().element();
-        CompilationUnitTree cu = compiled.cu();
-        Trees trees = compiled.trees();
+        CachedCompile cached = compileCache.get(uri);
+        if (cached == null || cached.session() == null)
+            return List.of();
 
-        return symbolLocator.locate(element, trees, cu, uri, indexService.sourceJarByBinaryJar())
-                .map(List::of)
-                .orElse(List.of());
+        return cached.session().definitionOf(resolved.get()).map(List::of).orElse(List.of());
     }
 
-    private Optional<ResolvedElement> resolveElementAt(String uri, Position position) {
-        TextDocumentItem doc = documents.get(uri);
-        if (doc == null)
-            return Optional.empty();
-
+    private Optional<ResolvedSymbol> resolveSymbolAt(String uri, Position position) {
         CachedCompile cached = compileCache.get(uri);
-        if (cached == null)
+        if (cached == null || cached.session() == null)
             return Optional.empty();
-        WorkspaceCompiler.Result compiled = cached.result();
-        if (compiled == null)
-            return Optional.empty();
-
-        CompilationUnitTree cu = compiled.cu();
-        if (cu == null) {
+        AnalysisSession session = cached.session();
+        if (!session.isUsable()) {
             refreshCompile(uri);
             return Optional.empty();
         }
-
-        long offset = positionToOffset(cu.getLineMap(), position);
-        if (offset < 0)
-            return Optional.empty();
-
-        Trees trees = compiled.trees();
-        TreePath path = TreePathLocator.findAt(trees, cu, offset);
-        if (path == null)
-            return Optional.empty();
-
-        Element element = DefinitionElementResolver.resolve(trees, path);
-        if (element == null)
-            return Optional.empty();
-
-        return Optional.of(new ResolvedElement(compiled, element));
-    }
-
-    private static long positionToOffset(LineMap lineMap, Position position) {
-        // LSP character is a UTF-16 offset; do not use LineMap.getPosition,
-        // which interprets the column with tab expansion.
-        return LspPositions.offsetAt(lineMap, position);
+        return session.resolveAt(position);
     }
 
     @Override
@@ -395,34 +310,27 @@ public class JavaTextDocumentService implements TextDocumentService {
     }
 
     private List<Location> computeReferences(String uri, Position position, boolean includeDeclaration) {
-        Optional<ResolvedElement> resolved = resolveElementAt(uri, position);
-        if (resolved.isEmpty())
+        Optional<ResolvedSymbol> resolvedOpt = resolveSymbolAt(uri, position);
+        if (resolvedOpt.isEmpty())
             return List.of();
 
-        WorkspaceCompiler.Result compiled = resolved.get().compiled();
-        Element element = resolved.get().element();
-        CompilationUnitTree cu = compiled.cu();
-        Trees trees = compiled.trees();
-
-        Elements elements = compiled.task().getElements();
-        Types types = compiled.task().getTypes();
-        Optional<SymbolKey> targetKeyOpt = SymbolKey.of(element, elements, types, trees);
-        if (targetKeyOpt.isEmpty())
+        CachedCompile cached = compileCache.get(uri);
+        if (cached == null || cached.session() == null)
             return List.of();
-        SymbolKey targetKey = targetKeyOpt.get();
 
-        Optional<String> originUri = SymbolKey.originResourceUri(element, trees);
+        AnalysisSession session = cached.session();
+        ResolvedSymbol resolved = resolvedOpt.get();
+        SymbolIdentity identity = resolved.identity();
 
-        if (targetKey.fileLocal()) {
-            Set<Location> locations = ReferenceFinder.findReferences(
-                    cu, trees, elements, types, uri, targetKey, element);
-            return finalizeReferences(locations, includeDeclaration, element, trees, cu, uri);
+        if (resolved.fileLocal()) {
+            Set<Location> locations = new LinkedHashSet<>(session.referencesInUnit(resolved));
+            return finalizeReferences(locations, includeDeclaration, session, resolved);
         }
 
         Set<String> bloomCandidates = new LinkedHashSet<>();
         Optional<Index> indexOpt = indexService.index();
         if (indexOpt.isPresent()) {
-            String simpleName = targetKey.simpleName();
+            String simpleName = identity.simpleName();
             for (Map.Entry<String, IdentifierBloomFilter> entry : indexOpt.get().bloomFilters().entrySet()) {
                 if (entry.getValue().mightContain(simpleName)) {
                     bloomCandidates.add(entry.getKey());
@@ -434,13 +342,13 @@ public class JavaTextDocumentService implements TextDocumentService {
 
         Set<String> candidates = new LinkedHashSet<>(bloomCandidates);
         candidates.addAll(documents.keySet());
-        originUri.filter(u -> u.endsWith(".java")).ifPresent(candidates::add);
+        resolved.originResourceUri().filter(u -> u.endsWith(".java")).ifPresent(candidates::add);
 
         int totalBeforeCap = candidates.size();
         String capNote = "";
         if (referencesCandidateCap > 0 && candidates.size() > referencesCandidateCap) {
             Set<String> capped = new LinkedHashSet<>(documents.keySet());
-            originUri.filter(u -> u.endsWith(".java")).ifPresent(capped::add);
+            resolved.originResourceUri().filter(u -> u.endsWith(".java")).ifPresent(capped::add);
             for (String candidateUri : bloomCandidates) {
                 if (capped.size() >= referencesCandidateCap) {
                     break;
@@ -452,10 +360,10 @@ public class JavaTextDocumentService implements TextDocumentService {
         }
 
         server.logMessage(MessageType.Log,
-                "References: '" + targetKey.simpleName() + "' -> " + candidates.size()
+                "References: '" + identity.simpleName() + "' -> " + candidates.size()
                         + " candidates (" + bloomHits + " bloom hits, " + openDocs + " open docs"
                         + capNote
-                        + originUri.map(u -> ", origin " + u).orElse("") + ")");
+                        + resolved.originResourceUri().map(u -> ", origin " + u).orElse("") + ")");
 
         long t0 = System.nanoTime();
         Set<Location> locations = Collections.synchronizedSet(new LinkedHashSet<>());
@@ -476,31 +384,18 @@ public class JavaTextDocumentService implements TextDocumentService {
                 return;
             ClasspathOrder classpath = indexService.classPathFor(candidateUri);
 
-            WorkspaceCompiler.Result result;
+            AnalysisSession candidateSession;
             try {
-                result = WorkspaceCompiler.compile(docUri, text, index.get(), classpath);
+                candidateSession = workspaceCompiler.analyze(docUri, text, index.get(), classpath);
             } catch (RuntimeException e) {
                 server.logMessage(MessageType.Error,
                         "Error compiling candidate " + candidateUri + ": " + e.getMessage());
                 server.logException(e);
                 return;
             }
-
-            CompilationUnitTree candidateCu = result.cu();
-            if (candidateCu == null)
+            if (!candidateSession.isUsable())
                 return;
-
-            Trees candidateTrees = result.trees();
-            Elements candidateElements = result.task().getElements();
-            Types candidateTypes = result.task().getTypes();
-            locations.addAll(ReferenceFinder.findReferences(
-                    candidateCu,
-                    candidateTrees,
-                    candidateElements,
-                    candidateTypes,
-                    candidateUri,
-                    targetKey,
-                    element));
+            locations.addAll(candidateSession.findReferencesTo(identity));
         });
 
         long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
@@ -508,17 +403,14 @@ public class JavaTextDocumentService implements TextDocumentService {
                 "References: resolved " + locations.size() + " references across "
                         + candidates.size() + " files in " + elapsedMs + " ms");
 
-        return finalizeReferences(locations, includeDeclaration, element, trees, cu, uri);
+        return finalizeReferences(locations, includeDeclaration, session, resolved);
     }
 
     private List<Location> finalizeReferences(Set<Location> locations,
             boolean includeDeclaration,
-            Element element,
-            Trees trees,
-            CompilationUnitTree cu,
-            String uri) {
-        Optional<Location> declaration = symbolLocator.locate(
-                element, trees, cu, uri, indexService.sourceJarByBinaryJar());
+            AnalysisSession session,
+            ResolvedSymbol resolved) {
+        Optional<Location> declaration = session.definitionOf(resolved);
         if (includeDeclaration) {
             declaration.ifPresent(locations::add);
         } else {
@@ -583,48 +475,25 @@ public class JavaTextDocumentService implements TextDocumentService {
         return CompletableFuture.completedFuture(edit);
     }
 
-    /**
-     * Translate javac diagnostics into LSP diagnostics and push them to
-     * the client. Diagnostics whose source isn't {@code compiledSource}
-     * are dropped - they belong to indexed classpath files that the
-     * client has no buffer for.
-     */
-    private void publishDiagnostics(String uri,
-            CompilationUnitTree cu,
-            JavaFileObject compiledSource,
-            List<javax.tools.Diagnostic<? extends JavaFileObject>> diags) {
+    private void publishDiagnostics(String uri, List<PublishedDiagnostic> diags) {
         LanguageClient client = server.getClient();
         if (client == null)
             return;
 
-        LineMap lineMap = cu != null ? cu.getLineMap() : null;
         List<Diagnostic> out = new ArrayList<>();
-        for (javax.tools.Diagnostic<? extends JavaFileObject> d : diags) {
-            if (compiledSource != null && d.getSource() != null && d.getSource() != compiledSource) {
-                continue;
-            }
-            Range range = rangeOf(lineMap, d);
-            Diagnostic lsp = new Diagnostic(range, d.getMessage(Locale.ROOT));
-            lsp.setSeverity(severityOf(d.getKind()));
-            lsp.setSource("javac");
-            String code = d.getCode();
-            if (code != null && !code.isEmpty()) {
-                lsp.setCode(code);
+        for (PublishedDiagnostic d : diags) {
+            Diagnostic lsp = new Diagnostic(d.range(), d.message());
+            lsp.setSeverity(d.severity());
+            lsp.setSource(d.source());
+            if (d.code() != null && !d.code().isEmpty()) {
+                lsp.setCode(d.code());
             }
             out.add(lsp);
         }
 
-        PublishDiagnosticsParams params = new PublishDiagnosticsParams(uri, out);
-        client.publishDiagnostics(params);
+        client.publishDiagnostics(new PublishDiagnosticsParams(uri, out));
     }
 
-    /**
-     * Publish a single error diagnostic representing a crash in the
-     * workspace compiler itself (as opposed to a javac diagnostic about the
-     * user's source). Without this, a {@link RuntimeException} during
-     * {@link WorkspaceCompiler#compile} would leave the file with no
-     * diagnostics at all, making the failure invisible to the client.
-     */
     private void publishCompilerErrorDiagnostic(String uri, Throwable error) {
         LanguageClient client = server.getClient();
         if (client == null)
@@ -654,55 +523,5 @@ public class JavaTextDocumentService implements TextDocumentService {
         if (client == null)
             return;
         client.publishDiagnostics(new PublishDiagnosticsParams(uri, new ArrayList<>()));
-    }
-
-    private static Range rangeOf(LineMap lineMap, javax.tools.Diagnostic<?> d) {
-        long start = clampPos(d.getStartPosition());
-        long end = clampPos(d.getEndPosition());
-        if (end < start)
-            end = start;
-
-        if (lineMap != null) {
-            try {
-                Position s = positionAt(lineMap, start);
-                Position e = positionAt(lineMap, end);
-                return new Range(s, e);
-            } catch (IndexOutOfBoundsException | IllegalArgumentException ignored) {
-                // fall through to line/column fallback below
-            }
-        }
-
-        // Fallback: javac reports 1-based line/column; LSP wants 0-based.
-        long line = d.getLineNumber();
-        long col = d.getColumnNumber();
-        int lspLine = line > 0 ? (int) (line - 1) : 0;
-        int lspCol = col > 0 ? (int) (col - 1) : 0;
-        Position p = new Position(lspLine, lspCol);
-        return new Range(p, p);
-    }
-
-    private static long clampPos(long pos) {
-        return pos < 0 ? 0 : pos;
-    }
-
-    private static Position positionAt(LineMap lineMap, long offset) {
-        return LspPositions.positionAt(lineMap, offset);
-    }
-
-    private static DiagnosticSeverity severityOf(javax.tools.Diagnostic.Kind kind) {
-        if (kind == null)
-            return DiagnosticSeverity.Hint;
-        switch (kind) {
-            case ERROR:
-                return DiagnosticSeverity.Error;
-            case WARNING:
-            case MANDATORY_WARNING:
-                return DiagnosticSeverity.Warning;
-            case NOTE:
-                return DiagnosticSeverity.Information;
-            case OTHER:
-            default:
-                return DiagnosticSeverity.Hint;
-        }
     }
 }

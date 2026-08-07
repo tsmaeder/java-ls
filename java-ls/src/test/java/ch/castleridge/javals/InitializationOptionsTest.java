@@ -46,6 +46,30 @@ class InitializationOptionsTest {
         assertEquals(1, textService.referencesCandidateCap());
     }
 
+    @Test
+    void backendDefaultsToJavacAndReadsNestedConfig() {
+        assertEquals("javac", InitializationOptions.backend(new InitializeParams()).indexer());
+        assertEquals("javac", InitializationOptions.backend(new InitializeParams()).compiler());
+
+        Map<String, Object> options = new HashMap<>();
+        options.put("backend", Map.of("indexer", "ecj", "compiler", "ECJ"));
+        InitializeParams params = new InitializeParams();
+        params.setInitializationOptions(options);
+        InitializationOptions.Backend backend = InitializationOptions.backend(params);
+        assertEquals("ecj", backend.indexer());
+        assertEquals("ecj", backend.compiler());
+
+        JsonObject json = new JsonObject();
+        JsonObject backendJson = new JsonObject();
+        backendJson.addProperty("indexer", "javac");
+        backendJson.addProperty("compiler", "ecj");
+        json.add("backend", backendJson);
+        params.setInitializationOptions(json);
+        backend = InitializationOptions.backend(params);
+        assertEquals("javac", backend.indexer());
+        assertEquals("ecj", backend.compiler());
+    }
+
     private static OptionalInt capFrom(Map<String, Object> options) {
         InitializeParams params = new InitializeParams();
         params.setInitializationOptions(options);
