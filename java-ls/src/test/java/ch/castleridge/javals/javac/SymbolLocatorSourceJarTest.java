@@ -81,5 +81,7 @@ class SymbolLocatorSourceJarTest {
                 SymbolLocator.outerClassJavaEntry("java/util/Base64$Encoder.class"));
         assertEquals("com/example/Hello.java",
                 SymbolLocator.outerClassJavaEntry("com/example/Hello.class"));
+        assertEquals("pkg/Outer.java",
+                SymbolLocator.outerClassJavaEntry("pkg/Outer$Inner$Deep.class"));
     }
 }

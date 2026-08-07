@@ -265,6 +265,93 @@ class TypeEntryCodecTest {
         assertEquals("java/lang/Object", StringTable.get(a));
     }
 
+    @Test
+    void encodeOmitsDefaultClassFileResourcePath() {
+        ClassFileTypeEntry original = new ClassFileTypeEntry(
+                "com/example/Hello.class",
+                "file:///lib.jar",
+                "com/example/Hello",
+                0x0021,
+                TypeRef.resolved("java/lang/Object"),
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.TYPE_REF,
+                EmptyArrays.RECORD_COMPONENT,
+                EmptyArrays.ANNOTATION_REF);
+
+        byte[] blob = TypeEntryCodec.encode(original);
+        // kind byte (CLASSFILE=1), then resourcePath string id = 0 (omitted).
+        assertEquals(1, blob[0] & 0xFF);
+        assertEquals(0, blob[1] & 0xFF);
+
+        TypeEntry decoded = TypeEntryCodec.decode(blob);
+        assertInstanceOf(ClassFileTypeEntry.class, decoded);
+        assertEquals("com/example/Hello.class", ((ClassFileTypeEntry) decoded).resourcePath());
+        assertDeepEquals(original, decoded);
+    }
+
+    @Test
+    void encodeOmitsDefaultSourceResourcePathForNestedType() {
+        SourceTypeEntry original = new SourceTypeEntry(
+                "pkg/Outer.java",
+                "file:///src/",
+                "pkg/Outer$Inner",
+                0x0001,
+                TypeDeclKind.CLASS,
+                TypeRef.resolved("java/lang/Object"),
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.TYPE_REF,
+                EmptyArrays.RECORD_COMPONENT,
+                EmptyArrays.ANNOTATION_REF,
+                new SourceResolutionHints("", Map.of(), EmptyArrays.STRING, Set.of()));
+
+        byte[] blob = TypeEntryCodec.encode(original);
+        assertEquals(0, blob[0] & 0xFF); // KIND_SOURCE
+        assertEquals(0, blob[1] & 0xFF); // omitted resourcePath
+
+        TypeEntry decoded = TypeEntryCodec.decode(blob);
+        assertInstanceOf(SourceTypeEntry.class, decoded);
+        assertEquals("pkg/Outer.java", ((SourceTypeEntry) decoded).resourcePath());
+        assertDeepEquals(original, decoded);
+    }
+
+    @Test
+    void encodeKeepsMismatchedResourcePath() {
+        // Secondary top-level type: Helper lives in Foo.java.
+        SourceTypeEntry original = new SourceTypeEntry(
+                "pkg/Foo.java",
+                "file:///src/",
+                "pkg/Helper",
+                0x0000,
+                TypeDeclKind.CLASS,
+                TypeRef.resolved("java/lang/Object"),
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.TYPE_REF,
+                EmptyArrays.RECORD_COMPONENT,
+                EmptyArrays.ANNOTATION_REF,
+                new SourceResolutionHints("pkg", Map.of(), EmptyArrays.STRING, Set.of("Foo", "Helper")));
+
+        assertEquals("pkg/Foo.java",
+                ResourcePaths.forStorage(original.resourcePath(), original.jvmOwnerName(),
+                        ResourcePaths.Kind.SOURCE));
+
+        TypeEntry decoded = TypeEntryCodec.decode(TypeEntryCodec.encode(original));
+        assertInstanceOf(SourceTypeEntry.class, decoded);
+        assertEquals("pkg/Foo.java", ((SourceTypeEntry) decoded).resourcePath());
+        assertDeepEquals(original, decoded);
+    }
+
     private static void assertDeepEquals(TypeEntry expected, TypeEntry actual) {
         assertTrue(deepEquals(expected, actual),
                 () -> "deep equals failed\nexpected=" + expected + "\nactual=" + actual);

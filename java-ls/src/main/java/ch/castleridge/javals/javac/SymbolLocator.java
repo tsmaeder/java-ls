@@ -41,6 +41,7 @@ import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ArrayType;
 
 import ch.castleridge.javals.indexing.model.IndexedClassRef;
+import ch.castleridge.javals.indexing.model.ResourcePaths;
 
 /**
  * Maps a resolved javac {@link Element} to an LSP {@link Location} that
@@ -190,15 +191,11 @@ public final class SymbolLocator {
     /**
      * Map a {@code .class} archive entry to its companion {@code .java}
      * entry. Nested types are compiled to {@code Outer$Inner.class} but
-     * ship in {@code Outer.java}, so strip the nested suffix.
+     * ship in {@code Outer.java}, so strip to the outermost type.
      */
     static String outerClassJavaEntry(String classEntryPath) {
         String withoutExt = classEntryPath.substring(0, classEntryPath.length() - ".class".length());
-        int dollar = withoutExt.lastIndexOf('$');
-        if (dollar >= 0) {
-            withoutExt = withoutExt.substring(0, dollar);
-        }
-        return withoutExt + ".java";
+        return ResourcePaths.defaultPath(withoutExt, ResourcePaths.Kind.SOURCE);
     }
 
     private static String jarEntryUri(String jarFileUri, String entryName) {

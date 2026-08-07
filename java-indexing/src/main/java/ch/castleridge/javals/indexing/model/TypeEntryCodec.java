@@ -60,7 +60,10 @@ public final class TypeEntryCodec {
         Writer w = new Writer();
         if (entry instanceof SourceTypeEntry source) {
             w.writeByte(KIND_SOURCE);
-            writeCommon(w, source.resourcePath(), source.sourceUri(), source.jvmOwnerName(),
+            writeCommon(w,
+                    ResourcePaths.forStorage(source.resourcePath(), source.jvmOwnerName(),
+                            ResourcePaths.Kind.SOURCE),
+                    source.sourceUri(), source.jvmOwnerName(),
                     source.modifiers(), source.superRef(), source.interfaceRefs(),
                     source.typeParams(), source.fields(), source.methods(),
                     source.innerTypeJvmNames(), source.permittedSubclasses(),
@@ -69,7 +72,10 @@ public final class TypeEntryCodec {
             writeHints(w, source.hints());
         } else if (entry instanceof ClassFileTypeEntry classFile) {
             w.writeByte(KIND_CLASSFILE);
-            writeCommon(w, classFile.resourcePath(), classFile.sourceUri(), classFile.jvmOwnerName(),
+            writeCommon(w,
+                    ResourcePaths.forStorage(classFile.resourcePath(), classFile.jvmOwnerName(),
+                            ResourcePaths.Kind.CLASSFILE),
+                    classFile.sourceUri(), classFile.jvmOwnerName(),
                     classFile.modifiers(), classFile.superRef(), classFile.interfaceRefs(),
                     classFile.typeParams(), classFile.fields(), classFile.methods(),
                     classFile.innerTypeJvmNames(), classFile.permittedSubclasses(),
@@ -101,6 +107,8 @@ public final class TypeEntryCodec {
         AnnotationRef[] annotations = readAnnotations(r);
         return switch (kind) {
             case KIND_SOURCE -> {
+                resourcePath = ResourcePaths.effective(
+                        resourcePath, jvmOwnerName, ResourcePaths.Kind.SOURCE);
                 TypeDeclKind declKind = TypeDeclKind.values()[r.readByte() & 0xFF];
                 SourceResolutionHints hints = readHints(r);
                 yield new SourceTypeEntry(
@@ -109,10 +117,14 @@ public final class TypeEntryCodec {
                         innerTypeJvmNames, permittedSubclasses, recordComponents,
                         annotations, hints);
             }
-            case KIND_CLASSFILE -> new ClassFileTypeEntry(
-                    resourcePath, sourceUri, jvmOwnerName, modifiers,
-                    superRef, interfaceRefs, typeParams, fields, methods,
-                    innerTypeJvmNames, permittedSubclasses, recordComponents, annotations);
+            case KIND_CLASSFILE -> {
+                resourcePath = ResourcePaths.effective(
+                        resourcePath, jvmOwnerName, ResourcePaths.Kind.CLASSFILE);
+                yield new ClassFileTypeEntry(
+                        resourcePath, sourceUri, jvmOwnerName, modifiers,
+                        superRef, interfaceRefs, typeParams, fields, methods,
+                        innerTypeJvmNames, permittedSubclasses, recordComponents, annotations);
+            }
             default -> throw new IllegalArgumentException("unknown TypeEntry kind: " + kind);
         };
     }
