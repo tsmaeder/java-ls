@@ -80,11 +80,7 @@ final class IndexNameEnvironment implements INameEnvironment {
         }
         if (!name.isEmpty()) name.append('/');
         name.append(packageName);
-        String packageJvm = name.toString();
-        for (TypeEntry entry : index.listPackage(packageJvm, true)) {
-            if (classpath.rank(entry.sourceUri()) >= 0) return true;
-        }
-        return false;
+        return index.hasPackage(name.toString());
     }
 
     @Override

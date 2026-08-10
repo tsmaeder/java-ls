@@ -1,6 +1,7 @@
 package ch.castleridge.javals.indexing.index;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -136,6 +137,44 @@ class IndexAbstractionTest {
                 ch.castleridge.javals.indexing.IndexTestUtils.get(target, "com/example/Existing").jvmOwnerName());
     }
 
+    @Test
+    void hasPackageIncludesIntermediateParentsWithoutOwningTypes() {
+        InMemoryIndex index = new InMemoryIndex();
+        index.add(sourceType("demo/util/Thing"));
+
+        assertTrue(index.hasPackage("demo/util"));
+        assertTrue(index.hasPackage("demo"));
+        assertFalse(index.hasPackage("demo/other"));
+        assertTrue(index.listPackage("demo", false).isEmpty());
+        assertEquals(1, index.listPackage("demo/util", false).size());
+    }
+
+    @Test
+    void hasPackageParentsSurviveInMemoryMerge() {
+        InMemoryIndex source = new InMemoryIndex();
+        source.add(sourceType("demo/util/Thing"));
+
+        InMemoryIndex target = new InMemoryIndex();
+        target.addAll(source);
+
+        assertTrue(target.hasPackage("demo"));
+        assertTrue(target.hasPackage("demo/util"));
+        assertTrue(target.listPackage("demo", false).isEmpty());
+    }
+
+    @Test
+    void hasPackageParentsSurviveForeignMerge() {
+        ListIndex foreign = new ListIndex();
+        foreign.add(sourceType("demo/util/Thing"));
+
+        InMemoryIndex target = new InMemoryIndex();
+        target.addAll(foreign);
+
+        assertTrue(target.hasPackage("demo"));
+        assertTrue(target.hasPackage("demo/util"));
+        assertTrue(target.listPackage("demo", false).isEmpty());
+    }
+
     private static SourceTypeEntry sourceType(String jvmOwnerName) {
         return sourceType(jvmOwnerName, "file:///" + jvmOwnerName + ".java");
     }
@@ -201,6 +240,11 @@ class IndexAbstractionTest {
         @Override
         public boolean contains(String jvmName) {
             return !getAll(jvmName).isEmpty();
+        }
+
+        @Override
+        public boolean hasPackage(String packageJvm) {
+            return false;
         }
 
         @Override

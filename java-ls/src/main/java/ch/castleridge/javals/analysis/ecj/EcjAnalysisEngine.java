@@ -29,8 +29,7 @@ final class EcjAnalysisEngine {
 
     private EcjAnalysisEngine() {}
 
-    static EcjAnalysisSession analyze(URI uri, CharSequence text, Index index, ClasspathOrder classpath,
-                                      Map<String, String> sourceJarByBinaryJar) {
+    static EcjAnalysisSession analyze(URI uri, CharSequence text, Index index, ClasspathOrder classpath) {
         if (!index.contains(OBJECT_JVM_NAME)) return EcjAnalysisSession.empty();
 
         String source = text == null ? "" : text.toString();
@@ -53,12 +52,12 @@ final class EcjAnalysisEngine {
         try {
             compiler.compile(new ICompilationUnit[] { input });
             return new EcjAnalysisSession(uri, source, compiler.unit, mapProblems(problems, source),
-                    index, classpath, sourceJarByBinaryJar);
+                    index, classpath);
         } catch (RuntimeException | Error failure) {
             List<PublishedDiagnostic> diagnostics = mapProblems(problems, source);
             if (!diagnostics.isEmpty() || compiler.unit != null) {
                 return new EcjAnalysisSession(uri, source, compiler.unit, diagnostics,
-                        index, classpath, sourceJarByBinaryJar);
+                        index, classpath);
             }
             return EcjAnalysisSession.empty();
         } finally {
@@ -136,15 +135,17 @@ final class EcjAnalysisEngine {
         }
 
         @Override
-        public void process(CompilationUnitDeclaration unit, int index) {
-            this.unit = unit;
-            super.process(unit, index);
-            this.unit = unit;
-        }
-
-        @Override
-        public boolean shouldCleanup(int index) {
-            return false;
+        protected void processCompiledUnits(int startingIndex, boolean lastRound) {
+            // Compiler's implementation cleans the AST and resets the lookup
+            // environment. This compiler is single-use, and the analysis
+            // session needs both structures after compilation.
+            for (int i = startingIndex; i < totalUnits; i++) {
+                CompilationUnitDeclaration current = unitsToProcess[i];
+                if (current.compilationResult != null && current.compilationResult.hasBeenAccepted) continue;
+                unit = current;
+                process(current, i);
+                requestor.acceptResult(current.compilationResult.tagAsAccepted());
+            }
         }
     }
 }

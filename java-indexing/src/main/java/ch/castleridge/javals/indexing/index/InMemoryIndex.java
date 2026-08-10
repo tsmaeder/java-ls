@@ -58,8 +58,14 @@ public final class InMemoryIndex implements Index {
 
     /** JVM name → type IDs. */
     private final Map<String, IntList> byJvmName = new HashMap<>();
-    /** Package → type IDs. */
+    /** Package → type IDs (leaf packages that directly own types only). */
     private final Map<String, IntList> byPackage = new HashMap<>();
+    /**
+     * Every package name that {@link #hasPackage} should accept, including
+     * intermediate parents of leaf packages (e.g. {@code java} when only
+     * {@code java/lang} has types). Populated at write time so lookups stay O(1).
+     */
+    private final Set<String> knownPackages = new HashSet<>();
     // Modules are addressed by module name, not by JVM binary name, and
     // duplicates across classpath sources are resolved by classpath
     // ordering at lookup time (mirroring the TypeEntry bucket strategy).
@@ -134,6 +140,7 @@ public final class InMemoryIndex implements Index {
             int id = appendTypeBlobLocked(blob);
             appendId(byJvmName, jvm, id);
             appendId(byPackage, pkg, id);
+            registerPackageAncestorsLocked(pkg);
         } finally {
             rwLock.writeLock().unlock();
         }
@@ -173,6 +180,7 @@ public final class InMemoryIndex implements Index {
             }
             mergeIdMap(byJvmName, snapshot.byJvmName, baseOffset);
             mergeIdMap(byPackage, snapshot.byPackage, baseOffset);
+            knownPackages.addAll(snapshot.knownPackages);
             for (ModuleEntry m : modules) addModuleLocked(m);
             blooms.forEach(this::registerBloomLocked);
         } finally {
@@ -206,6 +214,7 @@ public final class InMemoryIndex implements Index {
                 int id = appendTypeBlobLocked(e.blob);
                 appendId(byJvmName, e.jvm, id);
                 appendId(byPackage, e.pkg, id);
+                registerPackageAncestorsLocked(e.pkg);
             }
             for (ModuleEntry m : modules) addModuleLocked(m);
             blooms.forEach(this::registerBloomLocked);
@@ -218,15 +227,34 @@ public final class InMemoryIndex implements Index {
     private record EncodedType(String jvm, String pkg, byte[] blob) {}
 
     /**
-     * Consistent shallow snapshot of the type store and both ID indexes.
-     * Blob array elements are shared by reference (no re-encode); IntLists
-     * are copied so the source index can keep mutating.
+     * Consistent shallow snapshot of the type store, ID indexes, and
+     * known package names (including parents). Blob array elements are
+     * shared by reference (no re-encode); IntLists / sets are copied so
+     * the source index can keep mutating.
      */
     TypeStoreSnapshot snapshotTypeStore() {
         return read(() -> {
             byte[][] blobs = Arrays.copyOf(typeBlobs, typeCount);
-            return new TypeStoreSnapshot(blobs, copyIdMap(byJvmName), copyIdMap(byPackage));
+            return new TypeStoreSnapshot(
+                    blobs,
+                    copyIdMap(byJvmName),
+                    copyIdMap(byPackage),
+                    Set.copyOf(knownPackages));
         });
+    }
+
+    /**
+     * Caller must hold the write lock. Registers {@code packageJvm} and
+     * every non-empty slash-separated parent (e.g. {@code a/b/c} →
+     * {@code a/b/c}, {@code a/b}, {@code a}).
+     */
+    private void registerPackageAncestorsLocked(String packageJvm) {
+        String pkg = packageJvm;
+        while (pkg != null && !pkg.isEmpty()) {
+            knownPackages.add(pkg);
+            int slash = pkg.lastIndexOf('/');
+            pkg = slash < 0 ? "" : pkg.substring(0, slash);
+        }
     }
 
     private static Map<String, IntList> copyIdMap(Map<String, IntList> source) {
@@ -306,11 +334,20 @@ public final class InMemoryIndex implements Index {
     }
 
     @Override
+    public boolean hasPackage(String packageJvm) {
+        return read(() -> knownPackages.contains(packageJvm));
+    }
+
+    @Override
     public List<TypeEntry> listPackage(String packageJvm, boolean recurse) {
         return read(() -> {
             if (recurse) {
                 List<TypeEntry> entries = new ArrayList<>();
                 String prefix = packageJvm + '/';
+                IntList ids = byPackage.get(packageJvm);
+                if (ids != null) {
+                    addBucketTo(ids, entries);
+                }
                 for (Map.Entry<String, IntList> entry : byPackage.entrySet()) {
                     String packageName = entry.getKey();
                     if (packageName.startsWith(prefix)) {
@@ -454,9 +491,10 @@ public final class InMemoryIndex implements Index {
         return read(byModuleName::size);
     }
 
-    /** Snapshot of canonical blobs plus both secondary ID indexes. */
+    /** Snapshot of canonical blobs, secondary ID indexes, and known packages. */
     record TypeStoreSnapshot(
             byte[][] blobs,
             Map<String, IntList> byJvmName,
-            Map<String, IntList> byPackage) {}
+            Map<String, IntList> byPackage,
+            Set<String> knownPackages) {}
 }

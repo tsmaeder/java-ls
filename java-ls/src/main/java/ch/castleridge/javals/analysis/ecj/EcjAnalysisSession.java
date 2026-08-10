@@ -55,33 +55,27 @@ final class EcjAnalysisSession implements AnalysisSession {
     private final List<PublishedDiagnostic> diagnostics;
     private final Index index;
     private final ClasspathOrder classpath;
-    @SuppressWarnings("unused")
-    private final Map<String, String> sourceJarByBinaryJar;
 
     EcjAnalysisSession(URI uri,
                        String source,
                        CompilationUnitDeclaration unit,
                        List<PublishedDiagnostic> diagnostics,
                        Index index,
-                       ClasspathOrder classpath,
-                       Map<String, String> sourceJarByBinaryJar) {
+                       ClasspathOrder classpath) {
         this.uri = uri;
         this.source = source;
         this.unit = unit;
         this.diagnostics = diagnostics;
         this.index = index;
         this.classpath = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
-        this.sourceJarByBinaryJar = sourceJarByBinaryJar;
     }
 
-    static AnalysisSession compile(URI uri, CharSequence text, Index index, ClasspathOrder classpath,
-                                   Map<String, String> sourceJarByBinaryJar) {
-        return EcjAnalysisEngine.analyze(uri, text, index, classpath, sourceJarByBinaryJar);
+    static AnalysisSession compile(URI uri, CharSequence text, Index index, ClasspathOrder classpath) {
+        return EcjAnalysisEngine.analyze(uri, text, index, classpath);
     }
 
     static EcjAnalysisSession empty() {
-        return new EcjAnalysisSession(null, "", null, List.of(), null,
-                ClasspathOrder.UNRESTRICTED, Map.of());
+        return new EcjAnalysisSession(null, "", null, List.of(), null, ClasspathOrder.UNRESTRICTED);
     }
 
     @Override

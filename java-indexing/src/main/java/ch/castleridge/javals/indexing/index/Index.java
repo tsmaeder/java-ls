@@ -71,6 +71,14 @@ public interface Index {
     boolean contains(String jvmName);
 
     /**
+     * True when {@code packageJvm} is a known package in this index,
+     * including intermediate parents of packages that own types
+     * (e.g. {@code java} when only {@code java/lang} has entries).
+     * Does not imply the package directly contains a type.
+     */
+    boolean hasPackage(String packageJvm);
+
+    /**
      * Return every {@link TypeEntry} whose declaring package is
      * {@code packageJvm}. May contain duplicates (same JVM name from
      * multiple sources) - consumers apply their own deduplication.

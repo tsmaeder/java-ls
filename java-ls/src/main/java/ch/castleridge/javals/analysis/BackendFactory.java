@@ -22,7 +22,7 @@ public final class BackendFactory {
                                                       SymbolLocator symbolLocator,
                                                       Map<String, String> sourceJarByBinaryJar) {
         if (name != null && name.trim().equalsIgnoreCase("ecj")) {
-            return new EcjWorkspaceCompiler(sourceJarByBinaryJar);
+            return new EcjWorkspaceCompiler();
         }
         return new JavacWorkspaceCompiler(symbolLocator, sourceJarByBinaryJar);
     }
