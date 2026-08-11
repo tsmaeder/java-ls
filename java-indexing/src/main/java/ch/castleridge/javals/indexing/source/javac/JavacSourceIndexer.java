@@ -84,6 +84,15 @@ public final class JavacSourceIndexer {
 
     public static final ch.castleridge.javals.indexing.source.SourceIndexer INSTANCE = JavacSourceIndexer::index;
 
+    /**
+     * Parsing needs no classpath, and every task must be kept away from the
+     * server's own one: {@code BasicJavacTask.initPlugins} runs a
+     * {@link java.util.ServiceLoader} lookup through a fresh
+     * {@code URLClassLoader} over {@code CLASS_PATH}, which re-opens and
+     * re-parses the manifest of every classpath jar once per indexed file.
+     */
+    private static final List<String> PARSE_ONLY_OPTIONS = List.of("-proc:none", "-classpath", "");
+
     private JavacSourceIndexer() {}
 
     public static void index(String resourcePath, String sourceUri, CharSequence content, Index into) {
@@ -92,7 +101,7 @@ public final class JavacSourceIndexer {
         URI resourceUri = resourceUriStr == null ? null : URI.create(resourceUriStr);
         JavaFileObject input = new InMemorySource(resourceUri, content);
         JavacTask task = (JavacTask) compiler.getTask(
-                null, null, d -> {}, List.of(), List.of(), List.of(input));
+                null, null, d -> {}, PARSE_ONLY_OPTIONS, List.of(), List.of(input));
         String sourceUriStr = sourceUri;
         try {
             for (CompilationUnitTree cu : task.parse()) {

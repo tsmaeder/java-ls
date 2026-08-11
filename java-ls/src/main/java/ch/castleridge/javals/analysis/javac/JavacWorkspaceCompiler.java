@@ -35,6 +35,15 @@ public final class JavacWorkspaceCompiler implements WorkspaceCompiler {
 
     private static final String OBJECT_JVM_NAME = "java/lang/Object";
 
+    /**
+     * Types are resolved through {@link IndexFileManager}, never through the
+     * server's own classpath. Saying so explicitly also keeps
+     * {@code BasicJavacTask.initPlugins} from building a fresh
+     * {@code URLClassLoader} over {@code CLASS_PATH} for every task, which
+     * re-opens and re-parses the manifest of every classpath jar.
+     */
+    private static final List<String> TASK_OPTIONS = List.of("-proc:none", "-classpath", "");
+
     private final SymbolLocator symbolLocator;
     private final Map<String, String> sourceJarByBinaryJar;
 
@@ -99,7 +108,7 @@ public final class JavacWorkspaceCompiler implements WorkspaceCompiler {
                 null,
                 fm,
                 collector,
-                List.of(),
+                TASK_OPTIONS,
                 List.of(),
                 List.of(input),
                 ctx);
