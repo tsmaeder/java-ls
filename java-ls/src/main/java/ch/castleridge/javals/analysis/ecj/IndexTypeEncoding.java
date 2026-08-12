@@ -1,5 +1,13 @@
 package ch.castleridge.javals.analysis.ecj;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.MethodEntry;
@@ -26,6 +34,9 @@ final class IndexTypeEncoding {
     private final TypeEntry owner;
     private final Index index;
     private final ClasspathOrder classpath;
+    // A type's members mention the same simple names over and over, and the
+    // member-type scope walk below re-reads the supertype graph every time.
+    private final Map<String, String> resolvedSimpleNames = new HashMap<>();
 
     IndexTypeEncoding(TypeEntry owner, Index index, ClasspathOrder classpath) {
         this.owner = owner;
@@ -163,17 +174,55 @@ final class IndexTypeEncoding {
     }
 
     String resolve(TypeRef ref) {
-        if (ref instanceof TypeRef.Resolved resolved) return resolved.jvmBinaryName();
+        if (ref instanceof TypeRef.Resolved resolved) return qualify(resolved.jvmBinaryName());
         String simple = ((TypeRef.Unresolved) ref).simpleName();
-        if (!(owner instanceof SourceTypeEntry source)) return simple.replace('.', '/');
-        SourceResolutionHints hints = source.hints();
+        if (!(owner instanceof SourceTypeEntry)) return simple.replace('.', '/');
+        return resolveCached(simple);
+    }
+
+    /**
+     * Source indexing emits a member select rooted at a simple name (e.g.
+     * {@code Storage.Builder} under {@code import ...metastore.Storage}) as the
+     * package-less {@code Storage$Builder}. Re-attach the package by resolving
+     * the outermost segment the same way a bare simple name is resolved.
+     */
+    private String qualify(String jvmBinaryName) {
+        if (jvmBinaryName.indexOf('/') >= 0 || !(owner instanceof SourceTypeEntry)) {
+            return jvmBinaryName;
+        }
+        int dollar = jvmBinaryName.indexOf('$');
+        String outerSimple = dollar < 0 ? jvmBinaryName : jvmBinaryName.substring(0, dollar);
+        String nested = dollar < 0 ? "" : jvmBinaryName.substring(dollar);
+        return resolveCached(outerSimple) + nested;
+    }
+
+    private String resolveCached(String simple) {
+        String cached = resolvedSimpleNames.get(simple);
+        if (cached != null) return cached;
+        String resolved = resolveSimple(simple);
+        resolvedSimpleNames.put(simple, resolved);
+        return resolved;
+    }
+
+    /**
+     * Resolve a simple type name against {@code owner}'s compilation unit,
+     * following JLS 6.5.5.1: member types in scope first, then types declared
+     * in the same compilation unit, single-type imports, the same package,
+     * on-demand imports and finally the implicit {@code java.lang} import.
+     * Falls back to the same package so an unresolvable name is reported
+     * against the package that was actually searched.
+     */
+    private String resolveSimple(String simple) {
+        String inScope = memberTypeInScope(simple, owner, new HashSet<>());
+        if (inScope != null) return inScope;
+
+        SourceResolutionHints hints = ((SourceTypeEntry) owner).hints();
+        String samePackage = join(hints.sourcePackage(), simple);
+        if (hints.siblingSimpleNames().contains(simple) && available(samePackage)) {
+            return samePackage;
+        }
         String imported = hints.singleTypeImports().get(simple);
         if (available(imported)) return imported;
-        if (hints.siblingSimpleNames().contains(simple)) {
-            String candidate = join(hints.sourcePackage(), simple);
-            if (available(candidate)) return candidate;
-        }
-        String samePackage = join(hints.sourcePackage(), simple);
         if (available(samePackage)) return samePackage;
         for (String packageName : hints.onDemandImports()) {
             String candidate = join(packageName, simple);
@@ -183,22 +232,122 @@ final class IndexTypeEncoding {
         return available(javaLang) ? javaLang : samePackage;
     }
 
+    /**
+     * Search for {@code simple} as a member type visible from the body of
+     * {@code scope}: walk outwards through the lexically enclosing types and,
+     * at each level, search that type and all of its supertypes for a nested
+     * type with a matching simple name. The indexer has no cross-file view and
+     * emits such a reference as a bare simple name, so without this walk a
+     * nested or inherited type like {@code Table.Builder} referenced as
+     * {@code Builder} would be looked for in the wrong package.
+     */
+    private String memberTypeInScope(String simple, TypeEntry scope, Set<String> visited) {
+        for (TypeEntry current = scope; current != null; current = outerOf(current)) {
+            String hit = inheritedMemberType(simple, current, visited);
+            if (hit != null) return hit;
+        }
+        return null;
+    }
+
+    private String inheritedMemberType(String simple, TypeEntry type, Set<String> visited) {
+        if (type == null || !visited.add(type.jvmOwnerName())) return null;
+        for (String nested : type.innerTypeJvmNames()) {
+            if (simpleNameOf(nested).equals(simple)) return nested;
+        }
+        for (Type superType : supertypesOf(type)) {
+            String hit = inheritedMemberType(simple, entryForSupertype(superType, type), visited);
+            if (hit != null) return hit;
+        }
+        return null;
+    }
+
+    private List<Type> supertypesOf(TypeEntry type) {
+        List<Type> out = new ArrayList<>();
+        if (type.superRef() != null) out.add(type.superRef());
+        out.addAll(Arrays.asList(type.interfaceRefs()));
+        return out;
+    }
+
+    /**
+     * Resolve a supertype reference to its indexed entry. A supertype named by
+     * a bare simple name is resolved against the subtype's imports and package
+     * only: re-entering the member-type search here would be mutually recursive
+     * with {@link #inheritedMemberType}, and a supertype is in practice always
+     * an import, a fully-qualified name, a same-package type or an on-demand
+     * import.
+     */
+    private TypeEntry entryForSupertype(Type superType, TypeEntry context) {
+        Type plain = unwrap(superType);
+        TypeRef ref = plain instanceof Parameterized parameterized ? parameterized.raw()
+                : plain instanceof TypeRef typeRef ? typeRef
+                : null;
+        if (ref == null || !(context instanceof SourceTypeEntry source)) return null;
+        String jvmName = switch (ref) {
+            case TypeRef.Resolved resolved -> resolved.jvmBinaryName();
+            case TypeRef.Unresolved unresolved -> importedName(unresolved.simpleName(), source.hints());
+        };
+        if (jvmName == null || jvmName.isEmpty()) return null;
+        return classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri);
+    }
+
+    private String importedName(String simple, SourceResolutionHints hints) {
+        String samePackage = join(hints.sourcePackage(), simple);
+        if (hints.siblingSimpleNames().contains(simple) && available(samePackage)) return samePackage;
+        String imported = hints.singleTypeImports().get(simple);
+        if (available(imported)) return imported;
+        if (available(samePackage)) return samePackage;
+        for (String packageName : hints.onDemandImports()) {
+            String candidate = join(packageName, simple);
+            if (available(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    private TypeEntry outerOf(TypeEntry entry) {
+        String jvmName = entry.jvmOwnerName();
+        int dollar = jvmName.lastIndexOf('$');
+        if (dollar <= 0) return null;
+        return classpath.pick(index.getAll(jvmName.substring(0, dollar)), TypeEntry::sourceUri);
+    }
+
+    private static String simpleNameOf(String jvmName) {
+        return jvmName.substring(Math.max(jvmName.lastIndexOf('$'), jvmName.lastIndexOf('/')) + 1);
+    }
+
+    /**
+     * Emit {@code <T:Lcls;:Lifc;>} per JVMS 4.7.9.1: a type parameter has one
+     * optional class bound followed by any number of interface bounds, and a
+     * parameter bounded only by interfaces writes an empty class bound
+     * ({@code T::Lifc;}). Indexing records a bound list without saying which
+     * kind each bound is - the source indexer cannot know, since telling a
+     * class from an interface needs resolution - so the split is recovered
+     * here by asking the index what the first bound actually is. Declaring an
+     * interface bound as a class bound makes ECJ reject otherwise valid type
+     * arguments against that parameter.
+     */
     private void appendTypeParameters(StringBuilder out, TypeParamRef[] params) {
         if (params.length == 0) return;
         out.append('<');
         for (TypeParamRef param : params) {
             out.append(param.name()).append(':');
             Type[] bounds = param.bounds();
-            if (bounds.length == 0) {
-                out.append("Ljava/lang/Object;");
-            } else {
-                for (int i = 0; i < bounds.length; i++) {
-                    if (i > 0) out.append(':');
-                    out.append(signature(bounds[i]));
-                }
+            int next = 0;
+            if (bounds.length > 0 && !isInterfaceBound(bounds[0])) {
+                out.append(signature(bounds[0]));
+                next = 1;
+            }
+            for (int i = next; i < bounds.length; i++) {
+                out.append(':').append(signature(bounds[i]));
             }
         }
         out.append('>');
+    }
+
+    private boolean isInterfaceBound(Type bound) {
+        Type plain = unwrap(bound);
+        if (plain instanceof TypeVariable || plain instanceof Array) return false;
+        TypeEntry entry = classpath.pick(index.getAll(erasedJvm(plain)), TypeEntry::sourceUri);
+        return entry != null && IndexBinaryAccessFlags.isInterfaceOwner(entry);
     }
 
     private boolean hasInterface(String jvmName) {

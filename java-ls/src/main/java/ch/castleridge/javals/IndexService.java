@@ -86,16 +86,37 @@ public final class IndexService {
         return CompletableFuture.runAsync(() -> loadFrom(mbt, workspacePath));
     }
    
-   public ClasspathOrder classPathFor(String uri) {
-      for(ClasspathOrder classpath : state.get().classpathsByNamespace.values()) {
-         if (classpath.contains(uri)) {
-            return classpath;
-         }
-      }
-      return ClasspathOrder.UNRESTRICTED;
+    /**
+     * Classpath to compile {@code uri} against: the one of the namespace that
+     * <em>owns</em> the file, i.e. lists it under its own source roots.
+     *
+     * <p>A file is claimed by every namespace that can see it, so a module's
+     * sources are also on the classpath of each of its dependents. Picking any
+     * claimant would compile the file against a dependent's classpath, which
+     * lacks the module's own dependencies (namespace dependencies are not
+     * transitive here) and makes perfectly good imports unresolvable. The
+     * owning namespace lists the file's source root before the roots it
+     * inherits from {@code dependsOn}, so the lowest {@link
+     * ClasspathOrder#rank(String) rank} identifies it. Namespace id breaks
+     * ties so the choice does not depend on map iteration order.
+     */
+    public ClasspathOrder classPathFor(String uri) {
+        ClasspathOrder best = null;
+        int bestRank = Integer.MAX_VALUE;
+        String bestNamespace = null;
+        for (Map.Entry<String, ClasspathOrder> entry : state.get().classpathsByNamespace.entrySet()) {
+            int rank = entry.getValue().rank(uri);
+            if (rank < 0) continue;
+            if (rank < bestRank || (rank == bestRank && entry.getKey().compareTo(bestNamespace) < 0)) {
+                bestRank = rank;
+                best = entry.getValue();
+                bestNamespace = entry.getKey();
+            }
+        }
+        return best == null ? ClasspathOrder.UNRESTRICTED : best;
+    }
 
-   } 
- 
+
     private void loadFrom(Path mbt, Path workspacePath) {
         try {
             MbtInfo info = MbtJson.read(mbt);
@@ -154,7 +175,9 @@ public final class IndexService {
         } catch (IOException e) {
             log(MessageType.Error, "Failed to load mbt.json " + mbt + ": " + e.getMessage());
         } catch (RuntimeException e) {
-            log(MessageType.Error, "Indexing failed for " + mbt + ": " + e.getMessage());
+            StringWriter writer = new StringWriter();
+            e.printStackTrace(new PrintWriter(writer));
+            log(MessageType.Error, "Indexing failed for " + mbt + ": " + writer);
         }
     }
 

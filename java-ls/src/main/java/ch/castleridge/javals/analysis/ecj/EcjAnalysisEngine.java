@@ -47,6 +47,9 @@ final class EcjAnalysisEngine {
         options.performMethodsFullRecovery = true;
         options.performStatementsRecovery = true;
         options.produceReferenceInfo = true;
+        // ECJ's batch default stops recording after 100 problems per unit. An
+        // editor wants every squiggle in the file it has open.
+        options.maxProblemsPerUnit = Integer.MAX_VALUE;
         options.sourceLevel = CompilerOptions.versionToJdkLevel(CompilerOptions.getLatestVersion());
         options.complianceLevel = options.sourceLevel;
         options.targetJDK = options.sourceLevel;

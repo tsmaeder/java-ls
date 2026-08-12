@@ -45,6 +45,7 @@ import org.eclipse.jdt.internal.compiler.ast.ParameterizedQualifiedTypeReference
 import org.eclipse.jdt.internal.compiler.ast.ParameterizedSingleTypeReference;
 import org.eclipse.jdt.internal.compiler.ast.QualifiedNameReference;
 import org.eclipse.jdt.internal.compiler.ast.QualifiedTypeReference;
+import org.eclipse.jdt.internal.compiler.ast.RecordComponent;
 import org.eclipse.jdt.internal.compiler.ast.SingleMemberAnnotation;
 import org.eclipse.jdt.internal.compiler.ast.SingleNameReference;
 import org.eclipse.jdt.internal.compiler.ast.SingleTypeReference;
@@ -74,6 +75,7 @@ import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ParameterEntry;
+import ch.castleridge.javals.indexing.model.RecordComponentEntry;
 import ch.castleridge.javals.indexing.model.ResourceUris;
 import ch.castleridge.javals.indexing.model.SourceResolutionHints;
 import ch.castleridge.javals.indexing.model.SourceTypeEntry;
@@ -247,6 +249,17 @@ final class EcjSourceIndexerEngine {
             }
         }
 
+        List<RecordComponentEntry> recordComponents = new ArrayList<>();
+        if (td.recordComponents != null) {
+            for (RecordComponent component : td.recordComponents) {
+                if (component == null || component.name == null || component.name.length == 0) continue;
+                recordComponents.add(new RecordComponentEntry(
+                        new String(component.name),
+                        toTypeRef(component.type, classTypeParams, localName),
+                        annotationsOf(component.annotations, localName)));
+            }
+        }
+
         List<FieldEntry> fields = new ArrayList<>();
         List<MethodEntry> methods = new ArrayList<>();
         List<String> innerTypes = new ArrayList<>();
@@ -303,7 +316,7 @@ final class EcjSourceIndexerEngine {
                 EmptyArrays.toArray(methods, EmptyArrays.METHOD),
                 EmptyArrays.toArray(innerTypes, EmptyArrays.STRING),
                 EmptyArrays.toArray(permittedSubclasses, EmptyArrays.TYPE_REF),
-                EmptyArrays.RECORD_COMPONENT,
+                EmptyArrays.toArray(recordComponents, EmptyArrays.RECORD_COMPONENT),
                 annotationsOf(td.annotations, localName),
                 hints);
         into.add(entry);

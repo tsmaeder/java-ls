@@ -41,11 +41,23 @@ final class IndexBinaryMethod implements IBinaryMethod {
 
     /** Synthetic method not backed by an indexed {@link MethodEntry}. */
     IndexBinaryMethod(String name, String descriptor, int modifiers) {
+        this(name, descriptor, null, null, modifiers);
+    }
+
+    /**
+     * Synthetic method not backed by an indexed {@link MethodEntry}, carrying
+     * a generic signature and/or parameter names. Record accessors and
+     * canonical constructors need both: without the signature their component
+     * types would erase (a {@code List<String>} component would only be
+     * assignable as a raw {@code List}).
+     */
+    IndexBinaryMethod(String name, String descriptor, String signature,
+                      char[][] argumentNames, int modifiers) {
         this.selector = name.toCharArray();
         this.descriptor = descriptor.toCharArray();
-        this.signature = null;
+        this.signature = signature == null ? null : signature.toCharArray();
         this.exceptions = null;
-        this.argumentNames = null;
+        this.argumentNames = argumentNames;
         this.modifiers = modifiers;
         this.tagBits = 0L;
         this.annotations = null;

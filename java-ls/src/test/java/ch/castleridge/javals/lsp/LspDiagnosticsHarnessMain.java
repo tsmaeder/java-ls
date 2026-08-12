@@ -2,7 +2,9 @@ package ch.castleridge.javals.lsp;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
@@ -29,7 +31,8 @@ public final class LspDiagnosticsHarnessMain {
         Path workspaceRoot = Path.of(args[0]).toAbsolutePath().normalize();
         boolean hasErrors = false;
 
-        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspaceRoot)) {
+        try (LspDiagnosticsHarness harness =
+                LspDiagnosticsHarness.start(workspaceRoot, TIMEOUT, backendOptions())) {
             try {
                 harness.awaitIndexReady(TIMEOUT);
             } catch (Exception e) {
@@ -65,6 +68,16 @@ public final class LspDiagnosticsHarnessMain {
         }
 
         System.exit(hasErrors ? 1 : 0);
+    }
+
+    /** {@code -Dbackend.indexer=ecj -Dbackend.compiler=ecj} select the ECJ backend. */
+    private static Map<String, Object> backendOptions() {
+        Map<String, Object> backend = new HashMap<>();
+        String indexer = System.getProperty("backend.indexer");
+        String compiler = System.getProperty("backend.compiler");
+        if (indexer != null) backend.put("indexer", indexer);
+        if (compiler != null) backend.put("compiler", compiler);
+        return backend.isEmpty() ? Map.of() : Map.of("backend", backend);
     }
 
     private static void printDiagnostics(Path file, List<Diagnostic> diagnostics) {

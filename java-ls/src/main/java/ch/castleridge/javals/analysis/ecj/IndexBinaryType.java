@@ -2,7 +2,9 @@ package ch.castleridge.javals.analysis.ecj;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.eclipse.jdt.internal.compiler.classfmt.ClassFileConstants;
 import org.eclipse.jdt.internal.compiler.env.IBinaryAnnotation;
@@ -75,12 +77,12 @@ final class IndexBinaryType implements IBinaryType {
         String signature = encoding.classSignature();
         this.genericSignature = signature == null ? null : signature.toCharArray();
         this.permittedSubtypes = permitted(entry);
-        this.modifiers = IndexBinaryAccessFlags.classModifiers(entry);
+        this.modifiers = modifiers(entry, index, order);
         this.tagBits = IndexBinaryAccessFlags.annotationTagBits(annotationsOf(entry));
         this.record = IndexBinaryAccessFlags.isRecord(entry);
         this.member = enclosingTypeName != null;
         this.fields = fields(entry, encoding);
-        this.methods = methods(entry, encoding);
+        this.methods = methods(entry, encoding, this.modifiers);
         this.memberTypes = memberTypes(entry, index, order);
         this.recordComponents = recordComponents(entry, encoding);
         this.annotations = IndexBinaryAnnotations.of(annotationsOf(entry), encoding);
@@ -228,6 +230,25 @@ final class IndexBinaryType implements IBinaryType {
         return fileName;
     }
 
+    /**
+     * Modifiers of a member type include the ones its declaration site implies
+     * but never spells out - every member of an interface is public and static,
+     * and a nested record, enum or interface is always static. The indexer only
+     * records explicit modifiers, and ECJ reads a member's access from its own
+     * binding rather than from the enclosing type's nested-type table, so
+     * without this a nested {@code record} in an interface looks package-private
+     * and is rejected as "not visible" outside its package.
+     */
+    private static int modifiers(TypeEntry entry, Index index, ClasspathOrder classpath) {
+        String jvmName = entry.jvmOwnerName();
+        int dollar = jvmName.lastIndexOf('$');
+        if (dollar <= 0) return IndexBinaryAccessFlags.classModifiers(entry);
+        TypeEntry outer = classpath.pick(index.getAll(jvmName.substring(0, dollar)), TypeEntry::sourceUri);
+        return outer == null
+                ? IndexBinaryAccessFlags.classModifiers(entry)
+                : IndexBinaryAccessFlags.innerClassModifiers(outer, entry);
+    }
+
     private static IBinaryField[] fields(TypeEntry entry, IndexTypeEncoding encoding) {
         FieldEntry[] fields = entry.fields();
         if (fields.length == 0) return null;
@@ -238,8 +259,9 @@ final class IndexBinaryType implements IBinaryType {
         return out;
     }
 
-    private static IBinaryMethod[] methods(TypeEntry entry, IndexTypeEncoding encoding) {
+    private static IBinaryMethod[] methods(TypeEntry entry, IndexTypeEncoding encoding, int classModifiers) {
         List<IBinaryMethod> out = new ArrayList<>(entry.methods().length + 3);
+        Set<String> declared = new HashSet<>();
         boolean hasConstructor = false;
         boolean hasValues = false;
         boolean hasValueOf = false;
@@ -248,14 +270,12 @@ final class IndexBinaryType implements IBinaryType {
             if ("<init>".equals(method.name())) hasConstructor = true;
             if ("values".equals(method.name())) hasValues = true;
             if ("valueOf".equals(method.name())) hasValueOf = true;
+            declared.add(method.name() + encoding.methodDescriptor(method));
             out.add(new IndexBinaryMethod(method, entry, encoding));
         }
+        addRecordMembers(entry, encoding, out, declared, visibilityOf(classModifiers));
         if (needsDefaultConstructor(entry, hasConstructor)) {
-            int access = IndexBinaryAccessFlags.classModifiers(entry)
-                    & (ClassFileConstants.AccPublic
-                    | ClassFileConstants.AccProtected
-                    | ClassFileConstants.AccPrivate);
-            out.add(new IndexBinaryMethod("<init>", "()V", access));
+            out.add(new IndexBinaryMethod("<init>", "()V", visibilityOf(classModifiers)));
         }
         if (entry instanceof SourceTypeEntry source && source.declKind() == TypeDeclKind.ENUM) {
             String own = "L" + entry.jvmOwnerName() + ";";
@@ -280,7 +300,59 @@ final class IndexBinaryType implements IBinaryType {
         if (!(entry instanceof SourceTypeEntry source)) return false;
         return source.declKind() != TypeDeclKind.INTERFACE
                 && source.declKind() != TypeDeclKind.ANNOTATION
-                && source.declKind() != TypeDeclKind.ENUM;
+                && source.declKind() != TypeDeclKind.ENUM
+                && source.declKind() != TypeDeclKind.RECORD;
+    }
+
+    /**
+     * Add the members a record gets implicitly: one accessor per component and
+     * the canonical constructor. javac writes these into the class file, so a
+     * bytecode-derived entry already carries them, but an entry indexed from
+     * source only has what the header declares. Without them every
+     * {@code point.x()} call and {@code new Point(1, 2)} on a workspace record
+     * fails to resolve. A component whose accessor or canonical constructor is
+     * spelled out explicitly in the body keeps that declaration.
+     */
+    private static void addRecordMembers(TypeEntry entry, IndexTypeEncoding encoding,
+                                         List<IBinaryMethod> out, Set<String> declared,
+                                         int visibility) {
+        if (!IndexBinaryAccessFlags.isRecord(entry)) return;
+        // A component-less record still has a canonical constructor - the
+        // no-argument one - so the loop below may legitimately do nothing.
+        RecordComponentEntry[] components = entry.recordComponents();
+
+        for (RecordComponentEntry component : components) {
+            String descriptor = "()" + encoding.descriptor(component.type());
+            if (!declared.add(component.name() + descriptor)) continue;
+            String returned = encoding.fieldSignature(component.type());
+            out.add(new IndexBinaryMethod(component.name(), descriptor,
+                    returned == null ? null : "()" + returned,
+                    null, ClassFileConstants.AccPublic));
+        }
+
+        StringBuilder descriptor = new StringBuilder("(");
+        StringBuilder signature = new StringBuilder("(");
+        boolean generic = false;
+        char[][] parameterNames = new char[components.length][];
+        for (int i = 0; i < components.length; i++) {
+            descriptor.append(encoding.descriptor(components[i].type()));
+            signature.append(encoding.signature(components[i].type()));
+            generic |= IndexTypeEncoding.needsSignature(components[i].type());
+            parameterNames[i] = components[i].name().toCharArray();
+        }
+        descriptor.append(")V");
+        signature.append(")V");
+        if (!declared.add("<init>" + descriptor)) return;
+        out.add(new IndexBinaryMethod("<init>", descriptor.toString(),
+                generic ? signature.toString() : null, parameterNames, visibility));
+    }
+
+    /** The canonical constructor of a record, and the default constructor of a
+     * class, are as accessible as the type that declares them. */
+    private static int visibilityOf(int classModifiers) {
+        return classModifiers & (ClassFileConstants.AccPublic
+                | ClassFileConstants.AccProtected
+                | ClassFileConstants.AccPrivate);
     }
 
     private static IBinaryNestedType[] memberTypes(
