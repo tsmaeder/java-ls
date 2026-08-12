@@ -33,16 +33,18 @@ final class IndexTypeEncoding {
         this.classpath = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
     }
 
+    /**
+     * Interfaces and annotation types name {@code java/lang/Object} as their
+     * superclass, matching the class file convention. ECJ dereferences the
+     * superclass of every binary type it sorts, so leaving it unset yields an
+     * internal compiler error rather than a missing supertype.
+     */
     String superName() {
         if (owner.superRef() != null) return erasedJvm(owner.superRef());
         if ("java/lang/Object".equals(owner.jvmOwnerName())) return null;
         if (owner instanceof SourceTypeEntry source) {
             if (source.declKind() == TypeDeclKind.ENUM) return "java/lang/Enum";
             if (source.declKind() == TypeDeclKind.RECORD) return "java/lang/Record";
-            if (source.declKind() == TypeDeclKind.INTERFACE
-                    || source.declKind() == TypeDeclKind.ANNOTATION) {
-                return null;
-            }
         }
         return "java/lang/Object";
     }
