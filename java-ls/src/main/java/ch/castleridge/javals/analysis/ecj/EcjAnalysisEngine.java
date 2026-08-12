@@ -2,9 +2,12 @@ package ch.castleridge.javals.analysis.ecj;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import org.eclipse.jdt.core.compiler.CategorizedProblem;
 import org.eclipse.jdt.internal.compiler.CompilationResult;
@@ -15,6 +18,7 @@ import org.eclipse.jdt.internal.compiler.ast.CompilationUnitDeclaration;
 import org.eclipse.jdt.internal.compiler.batch.CompilationUnit;
 import org.eclipse.jdt.internal.compiler.env.ICompilationUnit;
 import org.eclipse.jdt.internal.compiler.impl.CompilerOptions;
+import org.eclipse.jdt.internal.compiler.problem.AbortCompilation;
 import org.eclipse.jdt.internal.compiler.problem.DefaultProblemFactory;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.Position;
@@ -51,9 +55,11 @@ final class EcjAnalysisEngine {
         CapturingCompiler compiler = new CapturingCompiler(environment, options, requestor);
         try {
             compiler.compile(new ICompilationUnit[] { input });
+            mergeUnitProblems(compiler.unit, problems);
             return new EcjAnalysisSession(uri, source, compiler.unit, mapProblems(problems, source),
                     index, classpath);
         } catch (RuntimeException | Error failure) {
+            mergeUnitProblems(compiler.unit, problems);
             List<PublishedDiagnostic> diagnostics = mapProblems(problems, source);
             if (!diagnostics.isEmpty() || compiler.unit != null) {
                 return new EcjAnalysisSession(uri, source, compiler.unit, diagnostics,
@@ -69,6 +75,22 @@ final class EcjAnalysisEngine {
         CategorizedProblem[] found = result.getProblems();
         if (found != null) {
             for (CategorizedProblem problem : found) out.add(problem);
+        }
+    }
+
+    /**
+     * Problems recorded on the unit's result but never handed to the requestor
+     * (e.g. when compilation aborted before acceptResult) still have to reach
+     * the published diagnostics.
+     */
+    private static void mergeUnitProblems(CompilationUnitDeclaration unit, List<CategorizedProblem> problems) {
+        if (unit == null || unit.compilationResult == null) return;
+        CategorizedProblem[] all = unit.compilationResult.getAllProblems();
+        if (all == null) return;
+        Set<CategorizedProblem> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        seen.addAll(problems);
+        for (CategorizedProblem problem : all) {
+            if (problem != null && seen.add(problem)) problems.add(problem);
         }
     }
 
@@ -138,13 +160,25 @@ final class EcjAnalysisEngine {
         protected void processCompiledUnits(int startingIndex, boolean lastRound) {
             // Compiler's implementation cleans the AST and resets the lookup
             // environment. This compiler is single-use, and the analysis
-            // session needs both structures after compilation.
-            for (int i = startingIndex; i < totalUnits; i++) {
-                CompilationUnitDeclaration current = unitsToProcess[i];
-                if (current.compilationResult != null && current.compilationResult.hasBeenAccepted) continue;
-                unit = current;
-                process(current, i);
-                requestor.acceptResult(current.compilationResult.tagAsAccepted());
+            // session needs both structures after compilation. The abort and
+            // exception handling mirrors the base class: handleInternalException
+            // records the failure as a problem and hands the result to the
+            // requestor, so mid-compile failures surface as diagnostics instead
+            // of silently yielding a half-resolved unit.
+            CompilationUnitDeclaration current = null;
+            try {
+                for (int i = startingIndex; i < totalUnits; i++) {
+                    current = unitsToProcess[i];
+                    if (current.compilationResult != null && current.compilationResult.hasBeenAccepted) continue;
+                    unit = current;
+                    process(current, i);
+                    requestor.acceptResult(current.compilationResult.tagAsAccepted());
+                }
+            } catch (AbortCompilation e) {
+                handleInternalException(e, current);
+            } catch (Error | RuntimeException e) {
+                handleInternalException(e, current, null);
+                throw e;
             }
         }
     }
