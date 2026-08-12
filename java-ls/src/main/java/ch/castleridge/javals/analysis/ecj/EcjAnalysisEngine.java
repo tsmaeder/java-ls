@@ -33,7 +33,12 @@ final class EcjAnalysisEngine {
 
     private EcjAnalysisEngine() {}
 
-    static EcjAnalysisSession analyze(URI uri, CharSequence text, Index index, ClasspathOrder classpath) {
+    static EcjAnalysisSession analyze(URI uri,
+                                      CharSequence text,
+                                      Index index,
+                                      ClasspathOrder classpath,
+                                      EcjDeclarationLocator declarationLocator,
+                                      Map<String, String> sourceJarByBinaryJar) {
         if (!index.contains(OBJECT_JVM_NAME)) return EcjAnalysisSession.empty();
 
         String source = text == null ? "" : text.toString();
@@ -60,13 +65,13 @@ final class EcjAnalysisEngine {
             compiler.compile(new ICompilationUnit[] { input });
             mergeUnitProblems(compiler.unit, problems);
             return new EcjAnalysisSession(uri, source, compiler.unit, mapProblems(problems, source),
-                    index, classpath);
+                    index, classpath, declarationLocator, sourceJarByBinaryJar);
         } catch (RuntimeException | Error failure) {
             mergeUnitProblems(compiler.unit, problems);
             List<PublishedDiagnostic> diagnostics = mapProblems(problems, source);
             if (!diagnostics.isEmpty() || compiler.unit != null) {
                 return new EcjAnalysisSession(uri, source, compiler.unit, diagnostics,
-                        index, classpath);
+                        index, classpath, declarationLocator, sourceJarByBinaryJar);
             }
             return EcjAnalysisSession.empty();
         } finally {

@@ -1,9 +1,7 @@
 package ch.castleridge.javals.analysis.javac;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Iterator;
@@ -23,6 +21,7 @@ import com.sun.source.util.SourcePositions;
 import com.sun.source.util.Trees;
 import com.sun.tools.javac.api.JavacTool;
 
+import ch.castleridge.javals.analysis.SourceText;
 import ch.castleridge.javals.indexing.index.InMemorySource;
 
 /**
@@ -32,10 +31,9 @@ import ch.castleridge.javals.indexing.index.InMemorySource;
  * into AST positions without re-parsing on every {@code definition}
  * request.
  *
- * <p>Reads bytes through {@link URL#openStream()} so it transparently
- * supports {@code file:}, {@code jar:} and {@code jrt:} URIs - the same
- * URI shapes the indexer already stamps on its entries. Parse failures
- * yield an empty {@link Optional} and are not cached.
+ * <p>Reads through {@link SourceText}, so {@code file:}, {@code jar:} and
+ * {@code jrt:} URIs all work. Parse failures yield an empty
+ * {@link Optional} and are not cached.
  */
 public final class SourceCache {
 
@@ -89,7 +87,7 @@ public final class SourceCache {
         } catch (IllegalArgumentException e) {
             return null;
         }
-        String text = read(uri);
+        String text = SourceText.read(uriStr);
         if (text == null) return null;
 
         JavacTool tool = JavacTool.create();
@@ -105,32 +103,6 @@ public final class SourceCache {
             Trees trees = Trees.instance(task);
             return new ParsedSource(uri, task, cu, trees, cu.getLineMap(), trees.getSourcePositions());
         } catch (IOException e) {
-            return null;
-        }
-    }
-
-    /**
-     * Read the UTF-8 text of a source file addressed by {@code uriStr}.
-     * Returns {@code null} when the URI cannot be read.
-     */
-    public static String readText(String uriStr) {
-        if (uriStr == null || uriStr.isBlank()) return null;
-        URI uri;
-        try {
-            uri = URI.create(uriStr);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
-        return read(uri);
-    }
-
-    private static String read(URI uri) {
-        try {
-            URL url = uri.toURL();
-            try (InputStream in = url.openStream()) {
-                return new String(in.readAllBytes(), StandardCharsets.UTF_8);
-            }
-        } catch (IOException | IllegalArgumentException e) {
             return null;
         }
     }

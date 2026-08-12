@@ -62,27 +62,30 @@ final class EcjAnalysisSession implements AnalysisSession {
     private final List<PublishedDiagnostic> diagnostics;
     private final Index index;
     private final ClasspathOrder classpath;
+    private final EcjDeclarationLocator declarationLocator;
+    private final Map<String, String> sourceJarByBinaryJar;
 
     EcjAnalysisSession(URI uri,
                        String source,
                        CompilationUnitDeclaration unit,
                        List<PublishedDiagnostic> diagnostics,
                        Index index,
-                       ClasspathOrder classpath) {
+                       ClasspathOrder classpath,
+                       EcjDeclarationLocator declarationLocator,
+                       Map<String, String> sourceJarByBinaryJar) {
         this.uri = uri;
         this.source = source;
         this.unit = unit;
         this.diagnostics = diagnostics;
         this.index = index;
         this.classpath = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
-    }
-
-    static AnalysisSession compile(URI uri, CharSequence text, Index index, ClasspathOrder classpath) {
-        return EcjAnalysisEngine.analyze(uri, text, index, classpath);
+        this.declarationLocator = declarationLocator;
+        this.sourceJarByBinaryJar = sourceJarByBinaryJar == null ? Map.of() : sourceJarByBinaryJar;
     }
 
     static EcjAnalysisSession empty() {
-        return new EcjAnalysisSession(null, "", null, List.of(), null, ClasspathOrder.UNRESTRICTED);
+        return new EcjAnalysisSession(null, "", null, List.of(), null, ClasspathOrder.UNRESTRICTED,
+                null, Map.of());
     }
 
     @Override
@@ -99,7 +102,7 @@ final class EcjAnalysisSession implements AnalysisSession {
         if (occurrence == null || occurrence.binding == null) return Optional.empty();
         SymbolIdentity identity = identityOf(occurrence.binding);
         if (identity == null) return Optional.empty();
-        Optional<Location> definition = definitionFor(occurrence.binding, identity);
+        Optional<Location> definition = definitionFor(occurrence.binding);
         return Optional.of(new EcjResolvedSymbol(identity, definition, occurrence.binding));
     }
 
@@ -156,7 +159,7 @@ final class EcjAnalysisSession implements AnalysisSession {
         if (symbol == null) return Optional.empty();
         if (symbol.definition().isPresent()) return symbol.definition();
         if (symbol instanceof EcjResolvedSymbol ecj) {
-            return definitionFor(ecj.binding(), ecj.identity());
+            return definitionFor(ecj.binding());
         }
         return Optional.empty();
     }
@@ -460,7 +463,7 @@ final class EcjAnalysisSession implements AnalysisSession {
         return leaf instanceof ReferenceBinding ? leaf : null;
     }
 
-    private Optional<Location> definitionFor(Binding binding, SymbolIdentity identity) {
+    private Optional<Location> definitionFor(Binding binding) {
         SymbolOccurrence[] declaration = new SymbolOccurrence[1];
         visitOccurrences(candidate -> {
             if (candidate.declaration && declaration[0] == null && (candidate.binding == binding
@@ -471,11 +474,33 @@ final class EcjAnalysisSession implements AnalysisSession {
         if (declaration[0] != null) {
             return Optional.of(location(declaration[0].start, declaration[0].end));
         }
-        if (identity.originResourceUri().isPresent()) {
-            Position zero = new Position(0, 0);
-            return Optional.of(new Location(identity.originResourceUri().get(), new Range(zero, zero)));
+        return externalDefinition(binding);
+    }
+
+    /**
+     * Declarations the analysed unit does not spell out live in the source of
+     * whichever indexed type declares them: another workspace file, or the
+     * {@code .java} entry of the sources archive attached to a jar or the JDK.
+     */
+    private Optional<Location> externalDefinition(Binding binding) {
+        if (declarationLocator == null) return Optional.empty();
+        String ownerJvm = ownerJvmName(binding);
+        if (ownerJvm == null) return Optional.empty();
+        return declarationLocator.locate(entry(ownerJvm), binding, sourceJarByBinaryJar);
+    }
+
+    private static String ownerJvmName(Binding binding) {
+        if (binding instanceof TypeBinding type) {
+            TypeBinding leaf = type.leafComponentType().erasure();
+            return leaf instanceof ReferenceBinding reference ? new String(reference.constantPoolName()) : null;
         }
-        return Optional.empty();
+        if (binding instanceof MethodBinding method && method.declaringClass != null) {
+            return new String(method.declaringClass.erasure().constantPoolName());
+        }
+        if (binding instanceof FieldBinding field && field.declaringClass != null) {
+            return new String(field.declaringClass.erasure().constantPoolName());
+        }
+        return null;
     }
 
     private SymbolIdentity identityOf(Binding binding) {
@@ -520,11 +545,17 @@ final class EcjAnalysisSession implements AnalysisSession {
 
     private Optional<String> origin(String ownerJvm) {
         if (uri != null && declares(ownerJvm)) return Optional.of(uri.toString());
-        TypeEntry entry = classpath.pick(index.getAll(ownerJvm), TypeEntry::sourceUri);
+        TypeEntry entry = entry(ownerJvm);
         if (entry != null && entry.resourceUri() != null && !entry.resourceUri().isBlank()) {
             return Optional.of(entry.resourceUri());
         }
         return Optional.empty();
+    }
+
+    /** The indexed declaration of {@code ownerJvm} this classpath sees. */
+    private TypeEntry entry(String ownerJvm) {
+        if (index == null) return null;
+        return classpath.pick(index.getAll(ownerJvm), TypeEntry::sourceUri);
     }
 
     private boolean declares(String ownerJvm) {

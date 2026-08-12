@@ -30,6 +30,7 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
         tds.setWorkspaceCompiler(ch.castleridge.javals.analysis.BackendFactory.workspaceCompiler(
                 compilerBackend,
                 tds.symbolLocator(),
+                tds.declarationLocator(),
                 indexService.sourceJarByBinaryJar()));
     }
 

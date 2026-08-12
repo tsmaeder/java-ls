@@ -21,7 +21,9 @@ import ch.castleridge.javals.analysis.BackendFactory;
 import ch.castleridge.javals.analysis.PublishedDiagnostic;
 import ch.castleridge.javals.analysis.ResolvedSymbol;
 import ch.castleridge.javals.analysis.SymbolIdentity;
+import ch.castleridge.javals.analysis.SourceText;
 import ch.castleridge.javals.analysis.WorkspaceCompiler;
+import ch.castleridge.javals.analysis.ecj.EcjDeclarationLocator;
 import ch.castleridge.javals.analysis.javac.SourceCache;
 import ch.castleridge.javals.analysis.javac.SymbolLocator;
 import ch.castleridge.javals.classpath.ClasspathOrder;
@@ -41,6 +43,7 @@ public class JavaTextDocumentService implements TextDocumentService {
     private final Map<String, CachedCompile> compileCache = new ConcurrentHashMap<>();
     private final SourceCache sourceCache = new SourceCache();
     private final SymbolLocator symbolLocator = new SymbolLocator(sourceCache);
+    private final EcjDeclarationLocator declarationLocator = new EcjDeclarationLocator();
     private volatile WorkspaceCompiler workspaceCompiler = BackendFactory.workspaceCompiler("javac");
     /** Max files to scan for cross-file references; {@code <= 0} means no cap. */
     private volatile int referencesCandidateCap;
@@ -73,6 +76,10 @@ public class JavaTextDocumentService implements TextDocumentService {
 
     SymbolLocator symbolLocator() {
         return symbolLocator;
+    }
+
+    EcjDeclarationLocator declarationLocator() {
+        return declarationLocator;
     }
 
     private record CachedCompile(int version, AnalysisSession session) {
@@ -133,10 +140,20 @@ public class JavaTextDocumentService implements TextDocumentService {
         }
     }
 
+    /**
+     * Declarations in {@code uri} are located in a parse of the file as the
+     * index saw it, so an edit invalidates those positions.
+     */
+    private void forgetParsedSource(String uri) {
+        sourceCache.invalidate(uri);
+        declarationLocator.invalidate(uri);
+    }
+
     private void refreshCompile(String uri) {
         TextDocumentItem doc = documents.get(uri);
         if (doc == null)
             return;
+        forgetParsedSource(uri);
         int versionAtStart = doc.getVersion();
         String text = doc.getText();
 
@@ -185,7 +202,9 @@ public class JavaTextDocumentService implements TextDocumentService {
 
     @Override
     public void didSave(DidSaveTextDocumentParams params) {
-        server.logMessage(MessageType.Info, "Document saved: " + UriCoding.decode(params.getTextDocument().getUri()));
+        String uri = UriCoding.decode(params.getTextDocument().getUri());
+        forgetParsedSource(uri);
+        server.logMessage(MessageType.Info, "Document saved: " + uri);
     }
 
     @Override
@@ -423,7 +442,7 @@ public class JavaTextDocumentService implements TextDocumentService {
         TextDocumentItem doc = documents.get(uri);
         if (doc != null)
             return doc.getText();
-        return SourceCache.readText(uri);
+        return SourceText.read(uri);
     }
 
     private static boolean locationsEqual(Location a, Location b) {

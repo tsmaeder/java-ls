@@ -678,6 +678,76 @@ class LspDiagnosticsHarnessTest {
         }
     }
 
+    /**
+     * With the ECJ backend, navigating to a JDK type has to land in the
+     * {@code src.zip} the index service attaches to the JRT image, not on the
+     * class file the type was resolved from.
+     */
+    @Test
+    void ecjBackendNavigatesIntoAttachedJdkSource(@TempDir Path workspace) throws Exception {
+        Path srcZip = Path.of(System.getProperty("java.home")).resolve("lib/src.zip");
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                Files.isRegularFile(srcZip), "JDK src.zip not present");
+
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+
+        Path greeterFile = sourceDir.resolve("Greeter.java");
+        Files.writeString(greeterFile, """
+                package com.example;
+
+                public class Greeter {
+                    public String greet() {
+                        return "hi";
+                    }
+                }
+                """);
+
+        Path mainFile = sourceDir.resolve("Main.java");
+        Files.writeString(mainFile, """
+                package com.example;
+
+                import java.util.Base64.Encoder;
+
+                public class Main {
+                    void run(Greeter greeter, Encoder encoder) {
+                    }
+                }
+                """);
+
+        Map<String, Object> ecj = Map.of("backend", Map.of("compiler", "ecj"));
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace, TIMEOUT, ecj)) {
+            harness.awaitIndexReady(TIMEOUT);
+            harness.openAndAwaitDiagnostics(mainFile, TIMEOUT);
+
+            List<String> lines = Files.readAllLines(mainFile);
+            int runLine = lineContaining(lines, "void run(");
+
+            List<Location> encoderDefs = harness.definitionAt(
+                    mainFile.toUri(), new Position(runLine, lines.get(runLine).indexOf("Encoder")));
+            assertEquals(1, encoderDefs.size(), () -> "expected one definition, got: " + encoderDefs);
+            Location encoder = encoderDefs.get(0);
+            assertEquals("jar:" + srcZip.toUri() + "!/java.base/java/util/Base64.java", encoder.getUri());
+            assertTrue(encoder.getRange().getStart().getLine() > 0,
+                    () -> "expected the Encoder declaration, not the top of the file: " + encoder.getRange());
+
+            List<Location> greeterDefs = harness.definitionAt(
+                    mainFile.toUri(), new Position(runLine, lines.get(runLine).indexOf("Greeter")));
+            assertEquals(1, greeterDefs.size(), () -> "expected one definition, got: " + greeterDefs);
+            assertEquals(greeterFile.toUri().toString(), greeterDefs.get(0).getUri());
+            assertEquals(new Position(2, "public class ".length()),
+                    greeterDefs.get(0).getRange().getStart());
+        }
+    }
+
+    private static int lineContaining(List<String> lines, String needle) {
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).contains(needle)) return i;
+        }
+        throw new AssertionError("no line contains " + needle);
+    }
+
     private static boolean hasError(List<Diagnostic> diagnostics) {
         return diagnostics.stream().anyMatch(d -> d.getSeverity() == DiagnosticSeverity.Error);
     }

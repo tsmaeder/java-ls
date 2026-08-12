@@ -40,8 +40,8 @@ import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Type;
 import com.sun.tools.javac.code.Type.ArrayType;
 
+import ch.castleridge.javals.analysis.AttachedSource;
 import ch.castleridge.javals.indexing.model.IndexedClassRef;
-import ch.castleridge.javals.indexing.model.ResourcePaths;
 
 /**
  * Maps a resolved javac {@link Element} to an LSP {@link Location} that
@@ -137,7 +137,8 @@ public final class SymbolLocator {
         IndexedClassRef ref = classRefFor(classfile, enclosing);
         if (ref == null) return Optional.empty();
 
-        Optional<String> sourceUriOpt = sourceResourceUri(ref, sourceJarByBinaryJar);
+        Optional<String> sourceUriOpt =
+                AttachedSource.javaUri(ref.resourceUri(), ref.sourceUri(), sourceJarByBinaryJar);
         if (sourceUriOpt.isEmpty()) return Optional.empty();
         String sourceUri = sourceUriOpt.get();
 
@@ -164,42 +165,6 @@ public final class SymbolLocator {
             return new IndexedClassRef(uri, uri, jvmName);
         }
         return null;
-    }
-
-    static Optional<String> sourceResourceUri(IndexedClassRef ref,
-                                              Map<String, String> sourceJarByBinaryJar) {
-        if (ref == null) return Optional.empty();
-        String resourceUri = ref.resourceUri();
-        if (resourceUri == null || resourceUri.isBlank()) return Optional.empty();
-        if (!resourceUri.endsWith(".class")) return Optional.of(resourceUri);
-
-        String sourceJarUri = sourceJarByBinaryJar.get(ref.sourceUri());
-        if (sourceJarUri == null || sourceJarUri.isBlank()) return Optional.empty();
-
-        int sep = resourceUri.indexOf("!/");
-        if (sep < 0 || sep + 2 >= resourceUri.length()) return Optional.empty();
-        String classEntry = resourceUri.substring(sep + 2);
-        if (!classEntry.endsWith(".class")) return Optional.empty();
-        String javaEntry = outerClassJavaEntry(classEntry);
-        try {
-            return Optional.of(jarEntryUri(sourceJarUri, javaEntry));
-        } catch (IllegalArgumentException e) {
-            return Optional.empty();
-        }
-    }
-
-    /**
-     * Map a {@code .class} archive entry to its companion {@code .java}
-     * entry. Nested types are compiled to {@code Outer$Inner.class} but
-     * ship in {@code Outer.java}, so strip to the outermost type.
-     */
-    static String outerClassJavaEntry(String classEntryPath) {
-        String withoutExt = classEntryPath.substring(0, classEntryPath.length() - ".class".length());
-        return ResourcePaths.defaultPath(withoutExt, ResourcePaths.Kind.SOURCE);
-    }
-
-    private static String jarEntryUri(String jarFileUri, String entryName) {
-        return "jar:" + java.net.URI.create(jarFileUri) + "!/" + entryName;
     }
 
     private static ClassSymbol enclosingClass(Element element) {
