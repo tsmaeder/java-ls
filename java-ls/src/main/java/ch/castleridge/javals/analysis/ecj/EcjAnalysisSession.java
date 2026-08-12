@@ -11,13 +11,18 @@ import java.util.Set;
 
 import org.eclipse.jdt.internal.compiler.ASTVisitor;
 import org.eclipse.jdt.internal.compiler.ast.Argument;
+import org.eclipse.jdt.internal.compiler.ast.ArrayQualifiedTypeReference;
+import org.eclipse.jdt.internal.compiler.ast.ArrayTypeReference;
 import org.eclipse.jdt.internal.compiler.ast.CompilationUnitDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.ConstructorDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.FieldDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.FieldReference;
+import org.eclipse.jdt.internal.compiler.ast.ImportReference;
 import org.eclipse.jdt.internal.compiler.ast.LocalDeclaration;
 import org.eclipse.jdt.internal.compiler.ast.MessageSend;
 import org.eclipse.jdt.internal.compiler.ast.MethodDeclaration;
+import org.eclipse.jdt.internal.compiler.ast.ParameterizedQualifiedTypeReference;
+import org.eclipse.jdt.internal.compiler.ast.ParameterizedSingleTypeReference;
 import org.eclipse.jdt.internal.compiler.ast.QualifiedNameReference;
 import org.eclipse.jdt.internal.compiler.ast.QualifiedTypeReference;
 import org.eclipse.jdt.internal.compiler.ast.SingleNameReference;
@@ -26,7 +31,9 @@ import org.eclipse.jdt.internal.compiler.ast.TypeDeclaration;
 import org.eclipse.jdt.internal.compiler.lookup.Binding;
 import org.eclipse.jdt.internal.compiler.lookup.BlockScope;
 import org.eclipse.jdt.internal.compiler.lookup.ClassScope;
+import org.eclipse.jdt.internal.compiler.lookup.CompilationUnitScope;
 import org.eclipse.jdt.internal.compiler.lookup.FieldBinding;
+import org.eclipse.jdt.internal.compiler.lookup.ImportBinding;
 import org.eclipse.jdt.internal.compiler.lookup.LocalVariableBinding;
 import org.eclipse.jdt.internal.compiler.lookup.MethodBinding;
 import org.eclipse.jdt.internal.compiler.lookup.ReferenceBinding;
@@ -240,6 +247,30 @@ final class EcjAnalysisSession implements AnalysisSession {
             }
 
             @Override
+            public boolean visit(ArrayTypeReference node, BlockScope scope) {
+                singleTypeName(consumer, node);
+                return true;
+            }
+
+            @Override
+            public boolean visit(ArrayTypeReference node, ClassScope scope) {
+                singleTypeName(consumer, node);
+                return true;
+            }
+
+            @Override
+            public boolean visit(ParameterizedSingleTypeReference node, BlockScope scope) {
+                singleTypeName(consumer, node);
+                return true;
+            }
+
+            @Override
+            public boolean visit(ParameterizedSingleTypeReference node, ClassScope scope) {
+                singleTypeName(consumer, node);
+                return true;
+            }
+
+            @Override
             public boolean visit(QualifiedTypeReference node, BlockScope scope) {
                 accept(consumer, validType(node.resolvedType), node.sourceStart, node.sourceEnd);
                 return true;
@@ -248,6 +279,36 @@ final class EcjAnalysisSession implements AnalysisSession {
             @Override
             public boolean visit(QualifiedTypeReference node, ClassScope scope) {
                 accept(consumer, validType(node.resolvedType), node.sourceStart, node.sourceEnd);
+                return true;
+            }
+
+            @Override
+            public boolean visit(ArrayQualifiedTypeReference node, BlockScope scope) {
+                qualifiedTypeName(consumer, node);
+                return true;
+            }
+
+            @Override
+            public boolean visit(ArrayQualifiedTypeReference node, ClassScope scope) {
+                qualifiedTypeName(consumer, node);
+                return true;
+            }
+
+            @Override
+            public boolean visit(ParameterizedQualifiedTypeReference node, BlockScope scope) {
+                qualifiedTypeName(consumer, node);
+                return true;
+            }
+
+            @Override
+            public boolean visit(ParameterizedQualifiedTypeReference node, ClassScope scope) {
+                qualifiedTypeName(consumer, node);
+                return true;
+            }
+
+            @Override
+            public boolean visit(ImportReference node, CompilationUnitScope scope) {
+                imported(consumer, node, scope);
                 return true;
             }
 
@@ -300,7 +361,10 @@ final class EcjAnalysisSession implements AnalysisSession {
                 declare(consumer, node.binding, start, start + node.selector.length - 1);
                 return true;
             }
-        }, unit.scope);
+        // ECJ's two-arg traverse skips units tagged as having errors, e.g. a file
+        // with a single malformed declaration, dropping every occurrence in it.
+        // The bindings that did resolve remain usable and accept() filters the rest.
+        }, unit.scope, false);
     }
 
     private static void qualified(java.util.function.Consumer<SymbolOccurrence> consumer,
@@ -308,6 +372,72 @@ final class EcjAnalysisSession implements AnalysisSession {
         Binding binding = node.lastFieldBinding();
         long position = node.sourcePositions[node.sourcePositions.length - 1];
         accept(consumer, binding, high(position), low(position));
+    }
+
+    /**
+     * Records the type name on array / parameterized single-type nodes. ECJ
+     * dispatches these to their own visit overloads (not {@code SingleTypeReference}),
+     * and their traverse methods do not expose a child for the leaf name.
+     */
+    private static void singleTypeName(java.util.function.Consumer<SymbolOccurrence> consumer,
+                                       SingleTypeReference node) {
+        int end = node.token == null || node.token.length == 0
+                ? node.sourceEnd
+                : node.sourceStart + node.token.length - 1;
+        if (node instanceof ArrayTypeReference array && array.originalSourceEnd >= node.sourceStart) {
+            end = array.originalSourceEnd;
+        }
+        accept(consumer, validType(node.resolvedType), node.sourceStart, end);
+    }
+
+    /**
+     * Records the last segment of a qualified array / parameterized type name.
+     */
+    private static void qualifiedTypeName(java.util.function.Consumer<SymbolOccurrence> consumer,
+                                          QualifiedTypeReference node) {
+        if (node.sourcePositions == null || node.sourcePositions.length == 0) {
+            accept(consumer, validType(node.resolvedType), node.sourceStart, node.sourceEnd);
+            return;
+        }
+        long position = node.sourcePositions[node.sourcePositions.length - 1];
+        accept(consumer, validType(node.resolvedType), high(position), low(position));
+    }
+
+    private static void imported(java.util.function.Consumer<SymbolOccurrence> consumer,
+                                 ImportReference node,
+                                 CompilationUnitScope scope) {
+        if (node.sourcePositions == null || node.sourcePositions.length == 0) return;
+        Binding resolved = resolvedImport(node, scope);
+        long last = node.sourcePositions[node.sourcePositions.length - 1];
+        if (resolved instanceof TypeBinding type) {
+            accept(consumer, validType(type), high(last), low(last));
+            return;
+        }
+        ReferenceBinding owner = importedMemberOwner(resolved);
+        if (owner == null) return;
+        accept(consumer, resolved, high(last), low(last));
+        // A static member import also spells out the declaring type in the
+        // segment before the member, which is a reference to that type.
+        if (node.sourcePositions.length >= 2) {
+            long ownerPosition = node.sourcePositions[node.sourcePositions.length - 2];
+            accept(consumer, owner.erasure(), high(ownerPosition), low(ownerPosition));
+        }
+    }
+
+    private static ReferenceBinding importedMemberOwner(Binding binding) {
+        if (binding instanceof MethodBinding method) return method.declaringClass;
+        if (binding instanceof FieldBinding field) return field.declaringClass;
+        return null;
+    }
+
+    private static Binding resolvedImport(ImportReference node, CompilationUnitScope scope) {
+        if (scope == null || scope.imports == null) return null;
+        for (ImportBinding imported : scope.imports) {
+            if (imported != null && imported.reference == node) {
+                return imported.getResolvedImport();
+            }
+        }
+        return null;
     }
 
     private static void accept(java.util.function.Consumer<SymbolOccurrence> consumer,
