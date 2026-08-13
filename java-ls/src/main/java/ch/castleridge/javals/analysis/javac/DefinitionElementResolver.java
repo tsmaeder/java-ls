@@ -1,3 +1,13 @@
+/**
+ * Copyright 2026 by Anysphere Inc.
+ * 
+ * Licensed under the MIT License.
+ * 
+ * SPDX-License-Identifier: MIT
+ *
+ * Author: Thomas Mäder, Castle Ridge Software
+ *
+ */
 package ch.castleridge.javals.analysis.javac;
 
 import javax.lang.model.element.Element;

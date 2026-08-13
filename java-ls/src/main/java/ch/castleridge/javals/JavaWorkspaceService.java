@@ -1,3 +1,13 @@
+/**
+ * Copyright 2026 by Anysphere Inc.
+ * 
+ * Licensed under the MIT License.
+ * 
+ * SPDX-License-Identifier: MIT
+ *
+ * Author: Thomas Mäder, Castle Ridge Software
+ *
+ */
 package ch.castleridge.javals;
 
 import org.eclipse.lsp4j.*;
@@ -10,7 +20,6 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * Workspace Service implementation handling workspace-wide operations
- * Copyright Anysphere Inc.
  */
 public class JavaWorkspaceService implements WorkspaceService {
 

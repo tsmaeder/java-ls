@@ -1,3 +1,13 @@
+/**
+ * Copyright 2026 by Anysphere Inc.
+ * 
+ * Licensed under the MIT License.
+ * 
+ * SPDX-License-Identifier: MIT
+ *
+ * Author: Thomas Mäder, Castle Ridge Software
+ *
+ */
 package ch.castleridge.javals;
 
 import org.eclipse.lsp4j.jsonrpc.Launcher;
@@ -14,7 +24,6 @@ import java.util.logging.Logger;
 
 /**
  * Main entry point for the Java Language Server
- * Copyright Anysphere Inc.
  */
 public class App {
     
