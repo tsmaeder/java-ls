@@ -351,7 +351,10 @@ public class JavaTextDocumentService implements TextDocumentService {
         if (indexOpt.isPresent()) {
             String simpleName = identity.simpleName();
             for (Map.Entry<String, IdentifierBloomFilter> entry : indexOpt.get().bloomFilters().entrySet()) {
-                if (entry.getValue().mightContain(simpleName)) {
+                // Only source blooms can yield source reference locations.
+                // Classfile-keyed blooms (jar/jrt *.class) would otherwise be
+                // read as text and compiled as garbage, so skip them here.
+                if (entry.getKey().endsWith(".java") && entry.getValue().mightContain(simpleName)) {
                     bloomCandidates.add(entry.getKey());
                 }
             }

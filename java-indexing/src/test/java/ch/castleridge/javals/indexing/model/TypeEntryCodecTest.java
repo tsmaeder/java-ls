@@ -266,7 +266,7 @@ class TypeEntryCodecTest {
     }
 
     @Test
-    void encodeOmitsDefaultClassFileResourcePath() {
+    void peekIdentityReadsLeadingSourceUriAndResourcePath() {
         ClassFileTypeEntry original = new ClassFileTypeEntry(
                 "com/example/Hello.class",
                 "file:///lib.jar",
@@ -283,9 +283,11 @@ class TypeEntryCodecTest {
                 EmptyArrays.ANNOTATION_REF);
 
         byte[] blob = TypeEntryCodec.encode(original);
-        // kind byte (CLASSFILE=1), then resourcePath string id = 0 (omitted).
-        assertEquals(1, blob[0] & 0xFF);
-        assertEquals(0, blob[1] & 0xFF);
+        assertEquals("file:///lib.jar", TypeEntryCodec.peekSourceUri(blob));
+        assertEquals("com/example/Hello.class", TypeEntryCodec.peekResourcePath(blob));
+        String[] identity = TypeEntryCodec.peekIdentity(blob);
+        assertEquals("file:///lib.jar", identity[0]);
+        assertEquals("com/example/Hello.class", identity[1]);
 
         TypeEntry decoded = TypeEntryCodec.decode(blob);
         assertInstanceOf(ClassFileTypeEntry.class, decoded);
@@ -294,7 +296,7 @@ class TypeEntryCodecTest {
     }
 
     @Test
-    void encodeOmitsDefaultSourceResourcePathForNestedType() {
+    void encodeStoresEffectiveSourceResourcePathForNestedType() {
         SourceTypeEntry original = new SourceTypeEntry(
                 "pkg/Outer.java",
                 "file:///src/",
@@ -313,8 +315,8 @@ class TypeEntryCodecTest {
                 new SourceResolutionHints("", Map.of(), EmptyArrays.STRING, Set.of()));
 
         byte[] blob = TypeEntryCodec.encode(original);
-        assertEquals(0, blob[0] & 0xFF); // KIND_SOURCE
-        assertEquals(0, blob[1] & 0xFF); // omitted resourcePath
+        assertEquals("file:///src/", TypeEntryCodec.peekSourceUri(blob));
+        assertEquals("pkg/Outer.java", TypeEntryCodec.peekResourcePath(blob));
 
         TypeEntry decoded = TypeEntryCodec.decode(blob);
         assertInstanceOf(SourceTypeEntry.class, decoded);
@@ -346,7 +348,10 @@ class TypeEntryCodecTest {
                 ResourcePaths.forStorage(original.resourcePath(), original.jvmOwnerName(),
                         ResourcePaths.Kind.SOURCE));
 
-        TypeEntry decoded = TypeEntryCodec.decode(TypeEntryCodec.encode(original));
+        byte[] blob = TypeEntryCodec.encode(original);
+        assertEquals("pkg/Foo.java", TypeEntryCodec.peekResourcePath(blob));
+
+        TypeEntry decoded = TypeEntryCodec.decode(blob);
         assertInstanceOf(SourceTypeEntry.class, decoded);
         assertEquals("pkg/Foo.java", ((SourceTypeEntry) decoded).resourcePath());
         assertDeepEquals(original, decoded);

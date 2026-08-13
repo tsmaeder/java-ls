@@ -9,6 +9,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
 
 import org.eclipse.lsp4j.DiagnosticSeverity;
@@ -147,6 +148,11 @@ class EcjAnalysisEngineAbortTest {
         @Override
         public Collection<TypeEntry> all() {
             return delegate.all();
+        }
+
+        @Override
+        public Collection<TypeEntry> all(BiPredicate<String, String> filter) {
+            return delegate.all(filter);
         }
 
         @Override

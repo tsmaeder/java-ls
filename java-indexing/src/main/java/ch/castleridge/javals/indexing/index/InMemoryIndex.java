@@ -2,6 +2,7 @@ package ch.castleridge.javals.indexing.index;
 
 import java.util.*;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.BiPredicate;
 import java.util.function.Supplier;
 
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
@@ -392,9 +393,24 @@ public final class InMemoryIndex implements Index {
 
     @Override
     public Collection<TypeEntry> all() {
+        return all(null);
+    }
+
+    @Override
+    public Collection<TypeEntry> all(BiPredicate<String, String> filter) {
         return read(() -> {
-            List<TypeEntry> out = new ArrayList<>(typeCount);
+            if (filter == null) {
+                List<TypeEntry> out = new ArrayList<>(typeCount);
+                for (int id = 0; id < typeCount; id++) {
+                    out.add(decode(id));
+                }
+                return Collections.unmodifiableCollection(out);
+            }
+            List<TypeEntry> out = new ArrayList<>();
             for (int id = 0; id < typeCount; id++) {
+                byte[] blob = typeBlobs[id];
+                String[] identity = TypeEntryCodec.peekIdentity(blob);
+                if (!filter.test(identity[0], identity[1])) continue;
                 out.add(decode(id));
             }
             return Collections.unmodifiableCollection(out);

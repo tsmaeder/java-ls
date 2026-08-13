@@ -3,6 +3,7 @@ package ch.castleridge.javals.indexing.index;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiPredicate;
 
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
@@ -97,6 +98,14 @@ public interface Index {
 
     /** Every {@link TypeEntry} currently stored, including duplicates. */
     Collection<TypeEntry> all();
+
+    /**
+     * Decode and return entries whose peeked {@code (sourceUri, resourcePath)}
+     * satisfy {@code filter}. The predicate sees the blob-prefix strings only —
+     * no full {@link TypeEntry} is built for blobs that fail the test.
+     * {@code null} filter is treated as match-all (same as {@link #all()}).
+     */
+    Collection<TypeEntry> all(BiPredicate<String, String> filter);
 
     /** Number of distinct JVM binary names indexed (ignoring duplicates). */
     int size();

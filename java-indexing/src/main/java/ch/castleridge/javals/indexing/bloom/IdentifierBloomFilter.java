@@ -5,8 +5,9 @@ import java.util.Collection;
 /**
  * A compact, immutable bloom filter over identifier simple names.
  *
- * <p>Built per source file during indexing; after construction the filter
- * is thread-safe for concurrent {@link #mightContain} queries.
+ * <p>Built per indexed resource (source compilation unit or classfile)
+ * during indexing; after construction the filter is thread-safe for
+ * concurrent {@link #mightContain} queries.
  */
 public final class IdentifierBloomFilter {
 

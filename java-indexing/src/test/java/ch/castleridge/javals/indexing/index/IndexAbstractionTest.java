@@ -11,10 +11,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiPredicate;
 
 import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
+import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.SourceTypeEntry;
@@ -38,6 +40,22 @@ class IndexAbstractionTest {
         assertEquals("com/example/Foo",
                 ch.castleridge.javals.indexing.IndexTestUtils.get(index, "com/example/Foo").jvmOwnerName());
         assertEquals(1, index.searchTypesBySimpleNamePrefix("Fo", 10).size());
+    }
+
+    @Test
+    void allWithPredicatePeeksIdentityWithoutRequiringFullScanSemantics() {
+        InMemoryIndex index = new InMemoryIndex();
+        index.add(sourceType("com/example/Foo", "file:///a/"));
+        index.add(sourceType("com/example/Bar", "file:///b/"));
+
+        Collection<TypeEntry> onlyA = index.all((sourceUri, resourcePath) -> "file:///a/".equals(sourceUri));
+        assertEquals(1, onlyA.size());
+        assertEquals("com/example/Foo", onlyA.iterator().next().jvmOwnerName());
+
+        Collection<TypeEntry> byPath = index.all((sourceUri, resourcePath) ->
+                resourcePath != null && resourcePath.endsWith("Bar.java"));
+        assertEquals(1, byPath.size());
+        assertEquals("com/example/Bar", byPath.iterator().next().jvmOwnerName());
     }
 
     @Test
@@ -260,6 +278,20 @@ class IndexAbstractionTest {
         @Override
         public Collection<TypeEntry> all() {
             return List.copyOf(types);
+        }
+
+        @Override
+        public Collection<TypeEntry> all(BiPredicate<String, String> filter) {
+            if (filter == null) return all();
+            List<TypeEntry> out = new ArrayList<>();
+            for (TypeEntry t : types) {
+                String path = switch (t) {
+                    case SourceTypeEntry s -> s.resourcePath();
+                    case ClassFileTypeEntry c -> c.resourcePath();
+                };
+                if (filter.test(t.sourceUri(), path)) out.add(t);
+            }
+            return List.copyOf(out);
         }
 
         @Override

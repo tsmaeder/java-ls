@@ -1,6 +1,7 @@
 package ch.castleridge.javals.analysis;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -16,7 +17,9 @@ import org.objectweb.asm.Opcodes;
 import com.google.gson.JsonElement;
 
 import ch.castleridge.javals.classpath.ClasspathOrder;
+import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.model.ResourceUris;
 import ch.castleridge.javals.indexing.model.SourceResolutionHints;
 import ch.castleridge.javals.indexing.model.SourceTypeEntry;
 import ch.castleridge.javals.indexing.model.Type;
@@ -27,9 +30,10 @@ import ch.castleridge.javals.indexing.model.TypeRef;
 
 /**
  * Index-backed type hierarchy: direct supertypes from {@link TypeEntry#superRef()}
- * / {@link TypeEntry#interfaceRefs()}, and direct subtypes by scanning the index
- * under the active classpath. Locations come from a backend-supplied locator so
- * both javac and ECJ reuse the same inheritance walk.
+ * / {@link TypeEntry#interfaceRefs()}, and direct subtypes by probing identifier
+ * bloom filters then decoding only candidate resources under the active classpath.
+ * Locations come from a backend-supplied locator so both javac and ECJ reuse the
+ * same inheritance walk.
  */
 public final class TypeHierarchySupport {
 
@@ -120,7 +124,18 @@ public final class TypeHierarchySupport {
             itemFor(subtype, locator).ifPresent(out::add);
         }
 
-        for (TypeEntry candidate : winners(index, classpath)) {
+        String simple = simpleName(targetJvm);
+        Set<String> candidateUris = new LinkedHashSet<>();
+        for (Map.Entry<String, IdentifierBloomFilter> bloom : index.bloomFilters().entrySet()) {
+            if (bloom.getValue().mightContain(simple)) {
+                candidateUris.add(bloom.getKey());
+            }
+        }
+        if (candidateUris.isEmpty()) return out;
+
+        for (TypeEntry candidate : winners(index.all((sourceUri, resourcePath) ->
+                candidateUris.contains(ResourceUris.resolve(sourceUri, resourcePath))),
+                index, classpath)) {
             if (Objects.equals(candidate.jvmOwnerName(), targetJvm)) continue;
             if (seen.contains(candidate.jvmOwnerName())) continue;
             if (!directSuperJvmNames(candidate, index, classpath).contains(targetJvm)) continue;
@@ -332,13 +347,14 @@ public final class TypeHierarchySupport {
     }
 
     /**
-     * Classpath-visible type winners, deduplicated by JVM name (first pick wins
-     * so nested duplicates from {@link Index#all()} are not revisited).
+     * Classpath-visible type winners among {@code entries}, deduplicated by JVM
+     * name (first pick wins so nested duplicates are not revisited).
      */
-    private static List<TypeEntry> winners(Index index, ClasspathOrder classpath) {
+    private static List<TypeEntry> winners(
+            Collection<TypeEntry> entries, Index index, ClasspathOrder classpath) {
         ClasspathOrder order = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
         Map<String, TypeEntry> byJvm = new java.util.LinkedHashMap<>();
-        for (TypeEntry entry : index.all()) {
+        for (TypeEntry entry : entries) {
             byJvm.computeIfAbsent(entry.jvmOwnerName(),
                     jvm -> order.pick(index.getAll(jvm), TypeEntry::sourceUri));
         }

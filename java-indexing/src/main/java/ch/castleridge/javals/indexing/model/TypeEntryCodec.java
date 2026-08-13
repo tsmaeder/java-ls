@@ -13,12 +13,21 @@ import java.util.Set;
  * Structural {@link Type} shapes are rebuilt through the existing factories
  * ({@link TypeRef#resolved}, {@link Type#array}, …). Decode always returns
  * the concrete record types consumers pattern-match on.
+ *
+ * <p>Wire layout of each blob:
+ * <pre>
+ *   [sourceUri: uvarint StringTable id]
+ *   [resourcePath: uvarint StringTable id]
+ *   [kind: u8]
+ *   [rest: jvmOwnerName, modifiers, hierarchy, members, …]
+ * </pre>
+ * The leading two ids can be peeked without a full decode so the index can
+ * filter blobs by identity before reconstructing the {@link TypeEntry}.
  */
 public final class TypeEntryCodec {
 
     private static final byte KIND_SOURCE = 0;
     private static final byte KIND_CLASSFILE = 1;
-
     // Type tags
     private static final byte T_NULL = 0;
     private static final byte T_PRIMITIVE = 1;
@@ -59,11 +68,13 @@ public final class TypeEntryCodec {
         }
         Writer w = new Writer();
         if (entry instanceof SourceTypeEntry source) {
+            // Identity prefix: always store the compact effective path so the
+            // index can resolve resourceUri from a peek without reading the rest.
+            w.writeString(source.sourceUri());
+            w.writeString(source.resourcePath());
             w.writeByte(KIND_SOURCE);
             writeCommon(w,
-                    ResourcePaths.forStorage(source.resourcePath(), source.jvmOwnerName(),
-                            ResourcePaths.Kind.SOURCE),
-                    source.sourceUri(), source.jvmOwnerName(),
+                    source.jvmOwnerName(),
                     source.modifiers(), source.superRef(), source.interfaceRefs(),
                     source.typeParams(), source.fields(), source.methods(),
                     source.innerTypeJvmNames(), source.permittedSubclasses(),
@@ -71,11 +82,11 @@ public final class TypeEntryCodec {
             w.writeByte((byte) source.declKind().ordinal());
             writeHints(w, source.hints());
         } else if (entry instanceof ClassFileTypeEntry classFile) {
+            w.writeString(classFile.sourceUri());
+            w.writeString(classFile.resourcePath());
             w.writeByte(KIND_CLASSFILE);
             writeCommon(w,
-                    ResourcePaths.forStorage(classFile.resourcePath(), classFile.jvmOwnerName(),
-                            ResourcePaths.Kind.CLASSFILE),
-                    classFile.sourceUri(), classFile.jvmOwnerName(),
+                    classFile.jvmOwnerName(),
                     classFile.modifiers(), classFile.superRef(), classFile.interfaceRefs(),
                     classFile.typeParams(), classFile.fields(), classFile.methods(),
                     classFile.innerTypeJvmNames(), classFile.permittedSubclasses(),
@@ -86,14 +97,38 @@ public final class TypeEntryCodec {
         return w.toByteArray();
     }
 
+    /**
+     * Peek {@code sourceUri} from the blob prefix without decoding the rest.
+     */
+    public static String peekSourceUri(byte[] blob) {
+        Reader r = new Reader(requireBlob(blob));
+        return r.readString();
+    }
+
+    /**
+     * Peek {@code resourcePath} from the blob prefix without decoding the rest.
+     */
+    public static String peekResourcePath(byte[] blob) {
+        Reader r = new Reader(requireBlob(blob));
+        r.readString(); // sourceUri
+        return r.readString();
+    }
+
+    /**
+     * Peek both identity strings from the blob prefix. Prefer this over
+     * calling {@link #peekSourceUri} and {@link #peekResourcePath} separately
+     * when both are needed (single pass over the leading varints).
+     */
+    public static String[] peekIdentity(byte[] blob) {
+        Reader r = new Reader(requireBlob(blob));
+        return new String[]{r.readString(), r.readString()};
+    }
+
     public static TypeEntry decode(byte[] blob) {
-        if (blob == null || blob.length == 0) {
-            throw new IllegalArgumentException("blob must be non-empty");
-        }
-        Reader r = new Reader(blob);
-        byte kind = r.readByte();
-        String resourcePath = r.readString();
+        Reader r = new Reader(requireBlob(blob));
         String sourceUri = r.readString();
+        String resourcePath = r.readString();
+        byte kind = r.readByte();
         String jvmOwnerName = r.readString();
         int modifiers = r.readVarInt();
         Type superRef = readType(r);
@@ -107,8 +142,6 @@ public final class TypeEntryCodec {
         AnnotationRef[] annotations = readAnnotations(r);
         return switch (kind) {
             case KIND_SOURCE -> {
-                resourcePath = ResourcePaths.effective(
-                        resourcePath, jvmOwnerName, ResourcePaths.Kind.SOURCE);
                 TypeDeclKind declKind = TypeDeclKind.values()[r.readByte() & 0xFF];
                 SourceResolutionHints hints = readHints(r);
                 yield new SourceTypeEntry(
@@ -117,22 +150,23 @@ public final class TypeEntryCodec {
                         innerTypeJvmNames, permittedSubclasses, recordComponents,
                         annotations, hints);
             }
-            case KIND_CLASSFILE -> {
-                resourcePath = ResourcePaths.effective(
-                        resourcePath, jvmOwnerName, ResourcePaths.Kind.CLASSFILE);
-                yield new ClassFileTypeEntry(
-                        resourcePath, sourceUri, jvmOwnerName, modifiers,
-                        superRef, interfaceRefs, typeParams, fields, methods,
-                        innerTypeJvmNames, permittedSubclasses, recordComponents, annotations);
-            }
+            case KIND_CLASSFILE -> new ClassFileTypeEntry(
+                    resourcePath, sourceUri, jvmOwnerName, modifiers,
+                    superRef, interfaceRefs, typeParams, fields, methods,
+                    innerTypeJvmNames, permittedSubclasses, recordComponents, annotations);
             default -> throw new IllegalArgumentException("unknown TypeEntry kind: " + kind);
         };
     }
 
+    private static byte[] requireBlob(byte[] blob) {
+        if (blob == null || blob.length == 0) {
+            throw new IllegalArgumentException("blob must be non-empty");
+        }
+        return blob;
+    }
+
     private static void writeCommon(
             Writer w,
-            String resourcePath,
-            String sourceUri,
             String jvmOwnerName,
             int modifiers,
             Type superRef,
@@ -144,8 +178,6 @@ public final class TypeEntryCodec {
             TypeRef[] permittedSubclasses,
             RecordComponentEntry[] recordComponents,
             AnnotationRef[] annotations) {
-        w.writeString(resourcePath);
-        w.writeString(sourceUri);
         w.writeString(jvmOwnerName);
         w.writeVarInt(modifiers);
         writeType(w, superRef);

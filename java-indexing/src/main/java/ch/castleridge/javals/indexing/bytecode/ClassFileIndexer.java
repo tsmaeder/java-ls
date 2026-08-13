@@ -4,8 +4,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import org.objectweb.asm.AnnotationVisitor;
@@ -19,6 +21,7 @@ import org.objectweb.asm.RecordComponentVisitor;
 import org.objectweb.asm.TypePath;
 import org.objectweb.asm.TypeReference;
 
+import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.AccessVisibility;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
@@ -31,6 +34,7 @@ import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.ParameterEntry;
 import ch.castleridge.javals.indexing.model.RecordComponentEntry;
+import ch.castleridge.javals.indexing.model.ResourceUris;
 import ch.castleridge.javals.indexing.model.SignatureRefs;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
@@ -100,7 +104,39 @@ public final class ClassFileIndexer {
         TypeEntry entry = visitor.toTypeEntry();
         if (entry != null) {
             into.add(entry);
+            String resourceUri = ResourceUris.resolve(sourceUri, resourcePath);
+            if (resourceUri != null) {
+                into.registerBloom(resourceUri, IdentifierBloomFilter.create(
+                        simpleNamesFromConstantPool(reader)));
+            }
         }
+    }
+
+    /**
+     * Collect simple names of every {@code CONSTANT_Class} entry in the
+     * classfile constant pool. Covers superclass, interfaces, descriptor
+     * types, and types referenced from code (the pool is complete even when
+     * method bodies are skipped via {@link ClassReader#SKIP_CODE}).
+     */
+    static Set<String> simpleNamesFromConstantPool(ClassReader reader) {
+        Set<String> names = new HashSet<>();
+        char[] buf = new char[reader.getMaxStringLength()];
+        int itemCount = reader.getItemCount();
+        for (int i = 1; i < itemCount; i++) {
+            int itemOffset = reader.getItem(i);
+            int tag = reader.readByte(itemOffset - 1);
+            // Long / Double occupy two constant-pool slots.
+            if (tag == 5 || tag == 6) {
+                i++;
+                continue;
+            }
+            if (tag != 7) continue; // CONSTANT_Class
+            String internal = reader.readUTF8(itemOffset, buf);
+            if (internal == null || internal.isEmpty() || internal.charAt(0) == '[') continue;
+            int cut = Math.max(internal.lastIndexOf('/'), internal.lastIndexOf('$'));
+            names.add(cut < 0 ? internal : internal.substring(cut + 1));
+        }
+        return names;
     }
 
     private static final class CollectingVisitor extends ClassVisitor {
