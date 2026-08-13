@@ -6,6 +6,7 @@ import java.util.Optional;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.Position;
+import org.eclipse.lsp4j.TypeHierarchyItem;
 
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
@@ -38,6 +39,23 @@ public interface AnalysisSession {
     List<Location> findReferencesTo(SymbolIdentity identity);
 
     Optional<Location> definitionOf(ResolvedSymbol symbol);
+
+    /**
+     * Root type hierarchy item for the type at {@code position}, if any.
+     */
+    Optional<TypeHierarchyItem> prepareTypeHierarchy(Position position);
+
+    /**
+     * Direct supertypes of {@code item} (extends / implements / implicit
+     * Object-Enum-Record), located through attached sources when available.
+     */
+    List<TypeHierarchyItem> typeHierarchySupertypes(TypeHierarchyItem item);
+
+    /**
+     * Direct subtypes of {@code item} visible on this session's classpath,
+     * discovered by scanning the index (and sealed {@code permits}).
+     */
+    List<TypeHierarchyItem> typeHierarchySubtypes(TypeHierarchyItem item);
 
     /**
      * True when the session has a usable attributed AST.

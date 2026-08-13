@@ -8,6 +8,8 @@ import java.util.Optional;
 import java.util.Set;
 
 import javax.lang.model.element.Element;
+import javax.lang.model.element.ElementKind;
+import javax.lang.model.element.TypeElement;
 import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
@@ -18,6 +20,8 @@ import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
+import org.eclipse.lsp4j.SymbolKind;
+import org.eclipse.lsp4j.TypeHierarchyItem;
 
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.LineMap;
@@ -28,8 +32,10 @@ import ch.castleridge.javals.analysis.AnalysisSession;
 import ch.castleridge.javals.analysis.PublishedDiagnostic;
 import ch.castleridge.javals.analysis.ResolvedSymbol;
 import ch.castleridge.javals.analysis.SymbolIdentity;
+import ch.castleridge.javals.analysis.TypeHierarchySupport;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**
  * javac-backed {@link AnalysisSession} wrapping a {@link JavacWorkspaceCompiler.Result}.
@@ -40,15 +46,21 @@ public final class JavacAnalysisSession implements AnalysisSession {
     private final String docUri;
     private final SymbolLocator symbolLocator;
     private final Map<String, String> sourceJarByBinaryJar;
+    private final Index index;
+    private final ClasspathOrder classpath;
 
     public JavacAnalysisSession(JavacWorkspaceCompiler.Result result,
                                 String docUri,
                                 SymbolLocator symbolLocator,
-                                Map<String, String> sourceJarByBinaryJar) {
+                                Map<String, String> sourceJarByBinaryJar,
+                                Index index,
+                                ClasspathOrder classpath) {
         this.result = result;
         this.docUri = docUri;
         this.symbolLocator = symbolLocator;
-        this.sourceJarByBinaryJar = sourceJarByBinaryJar;
+        this.sourceJarByBinaryJar = sourceJarByBinaryJar == null ? Map.of() : sourceJarByBinaryJar;
+        this.index = index;
+        this.classpath = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
     }
 
     JavacWorkspaceCompiler.Result result() {
@@ -141,6 +153,49 @@ public final class JavacAnalysisSession implements AnalysisSession {
         }
         return symbolLocator.locate(
                 jrs.element(), result.trees(), result.cu(), docUri, sourceJarByBinaryJar);
+    }
+
+    @Override
+    public Optional<TypeHierarchyItem> prepareTypeHierarchy(Position position) {
+        Optional<ResolvedSymbol> resolved = resolveAt(position);
+        if (resolved.isEmpty() || !(resolved.get() instanceof JavacResolvedSymbol jrs)) {
+            return Optional.empty();
+        }
+        Element element = jrs.element();
+        if (!(element instanceof TypeElement type) || !isTypeKind(type.getKind())) {
+            return Optional.empty();
+        }
+        Optional<Location> location = definitionOf(jrs);
+        if (location.isEmpty()) return Optional.empty();
+        return TypeHierarchySupport.itemForResolved(jrs, location.get(), symbolKind(type));
+    }
+
+    @Override
+    public List<TypeHierarchyItem> typeHierarchySupertypes(TypeHierarchyItem item) {
+        if (index == null) return List.of();
+        return TypeHierarchySupport.directSupertypes(item, index, classpath, this::locateTypeEntry);
+    }
+
+    @Override
+    public List<TypeHierarchyItem> typeHierarchySubtypes(TypeHierarchyItem item) {
+        if (index == null) return List.of();
+        return TypeHierarchySupport.directSubtypes(item, index, classpath, this::locateTypeEntry);
+    }
+
+    private Optional<Location> locateTypeEntry(TypeEntry entry) {
+        return symbolLocator.locateType(entry, sourceJarByBinaryJar);
+    }
+
+    private static boolean isTypeKind(ElementKind kind) {
+        return kind != null && (kind.isClass() || kind.isInterface());
+    }
+
+    private static SymbolKind symbolKind(TypeElement type) {
+        return switch (type.getKind()) {
+            case INTERFACE, ANNOTATION_TYPE -> SymbolKind.Interface;
+            case ENUM -> SymbolKind.Enum;
+            default -> SymbolKind.Class;
+        };
     }
 
     private List<Location> findWithKey(SymbolIdentity identity, Element targetElement) {

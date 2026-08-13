@@ -91,6 +91,26 @@ public final class EcjDeclarationLocator {
         return Optional.of(location(sourceUri.get(), parsed.text(), declaredName(type, binding)));
     }
 
+    /**
+     * Declaration of an indexed type in its attached source. Used by type
+     * hierarchy when walking parents/children that are not the open buffer.
+     */
+    public Optional<Location> locateType(TypeEntry owner, Map<String, String> sourceJarByBinaryJar) {
+        if (owner == null) return Optional.empty();
+        Optional<String> sourceUri =
+                AttachedSource.javaUri(owner.resourceUri(), owner.sourceUri(), sourceJarByBinaryJar);
+        if (sourceUri.isEmpty()) return Optional.empty();
+
+        ParsedSource parsed = parse(sourceUri.get());
+        if (parsed == null) return Optional.empty();
+
+        TypeDeclaration type = findType(parsed.unit(), owner.jvmOwnerName());
+        if (type == null) return Optional.empty();
+
+        return Optional.of(location(sourceUri.get(), parsed.text(),
+                new DeclaredName(type.name, type.sourceStart, type.declarationSourceStart)));
+    }
+
     /** Drop the cached parse of {@code uri}, whose content changed. */
     public void invalidate(String uri) {
         if (uri != null) cache.remove(uri);

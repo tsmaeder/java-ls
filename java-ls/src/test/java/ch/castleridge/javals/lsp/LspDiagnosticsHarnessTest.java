@@ -13,6 +13,7 @@ import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.Position;
+import org.eclipse.lsp4j.TypeHierarchyItem;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.io.TempDir;
@@ -738,6 +739,65 @@ class LspDiagnosticsHarnessTest {
             assertEquals(greeterFile.toUri().toString(), greeterDefs.get(0).getUri());
             assertEquals(new Position(2, "public class ".length()),
                     greeterDefs.get(0).getRange().getStart());
+        }
+    }
+
+    /**
+     * A type hierarchy request goes through the wire twice: the item the client
+     * gets from {@code prepare} is sent back verbatim on {@code supertypes}, so
+     * whatever the server stamped on it has to survive JSON.
+     */
+    @Test
+    void typeHierarchyResolvesJdkSupertypeAcrossTheWire(@TempDir Path workspace) throws Exception {
+        Path srcZip = Path.of(System.getProperty("java.home")).resolve("lib/src.zip");
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                Files.isRegularFile(srcZip), "JDK src.zip not present");
+
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+
+        Path exceptionFile = sourceDir.resolve("DemoException.java");
+        Files.writeString(exceptionFile, """
+                package com.example;
+
+                public class DemoException extends RuntimeException {
+                    public DemoException(String message) {
+                        super(message);
+                    }
+                }
+                """);
+
+        Path subclassFile = sourceDir.resolve("SpecificException.java");
+        Files.writeString(subclassFile, """
+                package com.example;
+
+                public class SpecificException extends DemoException {
+                    public SpecificException(String message) {
+                        super(message);
+                    }
+                }
+                """);
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(TIMEOUT);
+            harness.openAndAwaitDiagnostics(exceptionFile, TIMEOUT);
+
+            List<String> lines = Files.readAllLines(exceptionFile);
+            int declLine = lineContaining(lines, "public class DemoException");
+            List<TypeHierarchyItem> prepared = harness.prepareTypeHierarchyAt(
+                    exceptionFile.toUri(),
+                    new Position(declLine, lines.get(declLine).indexOf("DemoException")));
+            assertEquals(1, prepared.size(), () -> "expected one root item, got: " + prepared);
+            assertEquals("DemoException", prepared.get(0).getName());
+
+            List<TypeHierarchyItem> supertypes = harness.supertypesOf(prepared.get(0));
+            assertTrue(supertypes.stream().anyMatch(i -> "RuntimeException".equals(i.getName())),
+                    () -> "expected RuntimeException supertype, got: " + supertypes);
+
+            List<TypeHierarchyItem> subtypes = harness.subtypesOf(prepared.get(0));
+            assertTrue(subtypes.stream().anyMatch(i -> "SpecificException".equals(i.getName())),
+                    () -> "expected SpecificException subtype, got: " + subtypes);
         }
     }
 

@@ -43,11 +43,14 @@ import org.eclipse.lsp4j.CompletionItemKind;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
+import org.eclipse.lsp4j.SymbolKind;
+import org.eclipse.lsp4j.TypeHierarchyItem;
 
 import ch.castleridge.javals.analysis.AnalysisSession;
 import ch.castleridge.javals.analysis.PublishedDiagnostic;
 import ch.castleridge.javals.analysis.ResolvedSymbol;
 import ch.castleridge.javals.analysis.SymbolIdentity;
+import ch.castleridge.javals.analysis.TypeHierarchySupport;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.FieldEntry;
@@ -162,6 +165,48 @@ final class EcjAnalysisSession implements AnalysisSession {
             return definitionFor(ecj.binding());
         }
         return Optional.empty();
+    }
+
+    @Override
+    public Optional<TypeHierarchyItem> prepareTypeHierarchy(Position position) {
+        Optional<ResolvedSymbol> resolved = resolveAt(position);
+        if (resolved.isEmpty() || !(resolved.get() instanceof EcjResolvedSymbol ecj)) {
+            return Optional.empty();
+        }
+        Binding binding = ecj.binding();
+        if (!(binding instanceof ReferenceBinding reference) || !isNamedType(reference)) {
+            return Optional.empty();
+        }
+        Optional<Location> location = definitionOf(ecj);
+        if (location.isEmpty()) return Optional.empty();
+        return TypeHierarchySupport.itemForResolved(ecj, location.get(), symbolKind(reference));
+    }
+
+    @Override
+    public List<TypeHierarchyItem> typeHierarchySupertypes(TypeHierarchyItem item) {
+        if (index == null) return List.of();
+        return TypeHierarchySupport.directSupertypes(item, index, classpath, this::locateTypeEntry);
+    }
+
+    @Override
+    public List<TypeHierarchyItem> typeHierarchySubtypes(TypeHierarchyItem item) {
+        if (index == null) return List.of();
+        return TypeHierarchySupport.directSubtypes(item, index, classpath, this::locateTypeEntry);
+    }
+
+    private Optional<Location> locateTypeEntry(TypeEntry entry) {
+        if (declarationLocator == null) return Optional.empty();
+        return declarationLocator.locateType(entry, sourceJarByBinaryJar);
+    }
+
+    private static boolean isNamedType(ReferenceBinding binding) {
+        return binding.isClass() || binding.isInterface() || binding.isEnum() || binding.isRecord();
+    }
+
+    private static SymbolKind symbolKind(ReferenceBinding binding) {
+        if (binding.isAnnotationType() || binding.isInterface()) return SymbolKind.Interface;
+        if (binding.isEnum()) return SymbolKind.Enum;
+        return SymbolKind.Class;
     }
 
     @Override

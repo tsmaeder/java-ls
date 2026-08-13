@@ -36,6 +36,10 @@ import org.eclipse.lsp4j.ReferenceParams;
 import org.eclipse.lsp4j.ShowMessageRequestParams;
 import org.eclipse.lsp4j.TextDocumentItem;
 import org.eclipse.lsp4j.TextDocumentIdentifier;
+import org.eclipse.lsp4j.TypeHierarchyItem;
+import org.eclipse.lsp4j.TypeHierarchyPrepareParams;
+import org.eclipse.lsp4j.TypeHierarchySubtypesParams;
+import org.eclipse.lsp4j.TypeHierarchySupertypesParams;
 import org.eclipse.lsp4j.WorkspaceFolder;
 import org.eclipse.lsp4j.jsonrpc.Launcher;
 import org.eclipse.lsp4j.launch.LSPLauncher;
@@ -260,6 +264,32 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
         List<? extends Location> refs = server.getTextDocumentService().references(params)
                 .get(120, TimeUnit.SECONDS);
         return refs == null ? List.of() : List.copyOf(refs);
+    }
+
+    /**
+     * Prepare a type hierarchy at {@code position} in an already-open document.
+     */
+    public List<TypeHierarchyItem> prepareTypeHierarchyAt(URI uri, Position position) throws Exception {
+        TypeHierarchyPrepareParams params = new TypeHierarchyPrepareParams();
+        params.setTextDocument(new TextDocumentIdentifier(uri.toString()));
+        params.setPosition(position);
+        List<TypeHierarchyItem> items = server.getTextDocumentService()
+                .prepareTypeHierarchy(params).get(30, TimeUnit.SECONDS);
+        return items == null ? List.of() : List.copyOf(items);
+    }
+
+    public List<TypeHierarchyItem> supertypesOf(TypeHierarchyItem item) throws Exception {
+        List<TypeHierarchyItem> items = server.getTextDocumentService()
+                .typeHierarchySupertypes(new TypeHierarchySupertypesParams(item))
+                .get(60, TimeUnit.SECONDS);
+        return items == null ? List.of() : List.copyOf(items);
+    }
+
+    public List<TypeHierarchyItem> subtypesOf(TypeHierarchyItem item) throws Exception {
+        List<TypeHierarchyItem> items = server.getTextDocumentService()
+                .typeHierarchySubtypes(new TypeHierarchySubtypesParams(item))
+                .get(60, TimeUnit.SECONDS);
+        return items == null ? List.of() : List.copyOf(items);
     }
 
     /**

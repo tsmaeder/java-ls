@@ -72,6 +72,9 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
         
         // References support
         capabilities.setReferencesProvider(true);
+
+        // Type hierarchy (prepare + subtypes + supertypes)
+        capabilities.setTypeHierarchyProvider(true);
         
         // Document symbol support
         capabilities.setDocumentSymbolProvider(true);

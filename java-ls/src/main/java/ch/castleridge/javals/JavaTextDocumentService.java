@@ -425,6 +425,77 @@ public class JavaTextDocumentService implements TextDocumentService {
         return finalizeReferences(locations, includeDeclaration, session, resolved);
     }
 
+    @Override
+    public CompletableFuture<List<TypeHierarchyItem>> prepareTypeHierarchy(TypeHierarchyPrepareParams params) {
+        String uri = UriCoding.decode(params.getTextDocument().getUri());
+        Position position = params.getPosition();
+        return CompletableFuture.supplyAsync(() -> computePrepareTypeHierarchy(uri, position));
+    }
+
+    @Override
+    public CompletableFuture<List<TypeHierarchyItem>> typeHierarchySupertypes(TypeHierarchySupertypesParams params) {
+        TypeHierarchyItem item = params.getItem();
+        return CompletableFuture.supplyAsync(() -> computeTypeHierarchySupertypes(item));
+    }
+
+    @Override
+    public CompletableFuture<List<TypeHierarchyItem>> typeHierarchySubtypes(TypeHierarchySubtypesParams params) {
+        TypeHierarchyItem item = params.getItem();
+        return CompletableFuture.supplyAsync(() -> computeTypeHierarchySubtypes(item));
+    }
+
+    private List<TypeHierarchyItem> computePrepareTypeHierarchy(String uri, Position position) {
+        CachedCompile cached = compileCache.get(uri);
+        if (cached == null || cached.session() == null || !cached.session().isUsable()) {
+            return List.of();
+        }
+        return cached.session().prepareTypeHierarchy(position).map(List::of).orElse(List.of());
+    }
+
+    private List<TypeHierarchyItem> computeTypeHierarchySupertypes(TypeHierarchyItem item) {
+        if (item == null) return List.of();
+        AnalysisSession session = sessionForHierarchyItem(item);
+        if (session == null) return List.of();
+        return session.typeHierarchySupertypes(item);
+    }
+
+    private List<TypeHierarchyItem> computeTypeHierarchySubtypes(TypeHierarchyItem item) {
+        if (item == null) return List.of();
+        AnalysisSession session = sessionForHierarchyItem(item);
+        if (session == null) return List.of();
+        return session.typeHierarchySubtypes(item);
+    }
+
+    /**
+     * Prefer an open document's session so locators share parse caches; otherwise
+     * synthesize a session against the item's URI so index walks still work.
+     */
+    private AnalysisSession sessionForHierarchyItem(TypeHierarchyItem item) {
+        String uri = item.getUri() == null ? null : UriCoding.decode(item.getUri());
+        if (uri != null) {
+            CachedCompile cached = compileCache.get(uri);
+            if (cached != null && cached.session() != null && cached.session().isUsable()) {
+                return cached.session();
+            }
+        }
+        // Any usable open session carries the same index; fall back to the first.
+        for (CachedCompile cached : compileCache.values()) {
+            if (cached != null && cached.session() != null && cached.session().isUsable()) {
+                return cached.session();
+            }
+        }
+        Optional<Index> indexOpt = indexService.index();
+        if (indexOpt.isEmpty() || uri == null) return null;
+        String text = textForUri(uri);
+        if (text == null) text = "";
+        try {
+            return workspaceCompiler.analyze(URI.create(uri), text, indexOpt.get(), indexService.classPathFor(uri));
+        } catch (RuntimeException e) {
+            server.logMessage(MessageType.Error, "Type hierarchy session failed for " + uri + ": " + describe(e));
+            return null;
+        }
+    }
+
     private List<Location> finalizeReferences(Set<Location> locations,
             boolean includeDeclaration,
             AnalysisSession session,

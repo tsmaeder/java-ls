@@ -60,7 +60,7 @@ public final class JavacWorkspaceCompiler implements WorkspaceCompiler {
     public AnalysisSession analyze(URI uri, CharSequence text, Index index, ClasspathOrder classpath) {
         Result result = compile(uri, text, index, classpath);
         String docUri = uri == null ? "" : uri.toString();
-        return new JavacAnalysisSession(result, docUri, symbolLocator, sourceJarByBinaryJar);
+        return new JavacAnalysisSession(result, docUri, symbolLocator, sourceJarByBinaryJar, index, classpath);
     }
 
     /**

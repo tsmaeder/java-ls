@@ -118,6 +118,29 @@ public final class SymbolLocator {
         return locateThroughIndex(element, sourceJarByBinaryJar, null);
     }
 
+    /**
+     * Declaration of an indexed type in its attached source. Used by type
+     * hierarchy when walking parents/children that are not the open buffer.
+     */
+    public Optional<Location> locateType(ch.castleridge.javals.indexing.model.TypeEntry entry,
+                                         Map<String, String> sourceJarByBinaryJar) {
+        if (entry == null) return Optional.empty();
+        Optional<String> sourceUriOpt =
+                AttachedSource.javaUri(entry.resourceUri(), entry.sourceUri(), sourceJarByBinaryJar);
+        if (sourceUriOpt.isEmpty()) return Optional.empty();
+        String sourceUri = sourceUriOpt.get();
+
+        Optional<SourceCache.ParsedSource> parsedOpt = sourceCache.parse(sourceUri);
+        if (parsedOpt.isEmpty()) return Optional.empty();
+        SourceCache.ParsedSource parsed = parsedOpt.get();
+
+        ClassTree owningClass = findClassByJvmName(parsed.cu(), entry.jvmOwnerName());
+        if (owningClass == null) return Optional.empty();
+
+        return rangeFor(owningClass, parsed.cu(), parsed.positions())
+                .map(r -> new Location(sourceUri, r));
+    }
+
     private static JavaFileObject ownerSourceFile(ClassSymbol enclosing) {
         if (enclosing == null) return null;
         if (enclosing.sourcefile != null) return enclosing.sourcefile;
