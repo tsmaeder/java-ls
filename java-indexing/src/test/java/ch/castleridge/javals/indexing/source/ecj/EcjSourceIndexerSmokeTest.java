@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.objectweb.asm.Opcodes;
 
 import ch.castleridge.javals.indexing.IndexTestUtils;
+import ch.castleridge.javals.indexing.bloom.BloomEntry;
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.index.Index;
@@ -54,7 +55,13 @@ class EcjSourceIndexerSmokeTest {
         assertTrue(java.util.Arrays.stream(hello.fields()).anyMatch(f -> f.name().equals("value")));
         assertTrue(java.util.Arrays.stream(hello.methods()).anyMatch(m -> m.name().equals("greet")));
 
-        IdentifierBloomFilter bloom = index.bloomFilters().get(RESOURCE_URI);
+        IdentifierBloomFilter bloom = null;
+        for (BloomEntry entry : index.bloomFilters()) {
+            if (RESOURCE_URI.equals(entry.resourceUri()) || RESOURCE_URI.equals(entry.resourcePath())) {
+                bloom = entry.filter();
+                break;
+            }
+        }
         assertNotNull(bloom);
         assertTrue(bloom.mightContain("println"));
         assertTrue(bloom.mightContain("value"));

@@ -14,6 +14,7 @@ import ch.castleridge.javals.indexing.source.javac.JavacSourceIndexer;
 
 import org.junit.jupiter.api.Test;
 
+import ch.castleridge.javals.indexing.bloom.BloomEntry;
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
@@ -42,7 +43,7 @@ class SourceIndexerBloomTest {
                 }
                 """, index);
 
-        IdentifierBloomFilter bloom = index.bloomFilters().get(RESOURCE_URI);
+        IdentifierBloomFilter bloom = findBloom(index, RESOURCE_URI);
         assertNotNull(bloom);
         assertTrue(bloom.mightContain("Refs"));
         assertTrue(bloom.mightContain("count"));
@@ -51,5 +52,14 @@ class SourceIndexerBloomTest {
         assertTrue(bloom.mightContain("items"));
         assertTrue(bloom.mightContain("size"));
         assertFalse(bloom.mightContain("definitelyNotInThisFile"));
+    }
+
+    private static IdentifierBloomFilter findBloom(Index index, String resourceUri) {
+        for (BloomEntry entry : index.bloomFilters()) {
+            if (resourceUri.equals(entry.resourceUri()) || resourceUri.equals(entry.resourcePath())) {
+                return entry.filter();
+            }
+        }
+        return null;
     }
 }

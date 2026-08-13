@@ -15,8 +15,11 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.BiPredicate;
 import java.util.function.Supplier;
 
+import ch.castleridge.javals.indexing.bloom.BloomEntry;
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
+import ch.castleridge.javals.indexing.model.ResourceUris;
+import ch.castleridge.javals.indexing.model.StringTable;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeEntryCodec;
 
@@ -81,7 +84,8 @@ public final class InMemoryIndex implements Index {
     // duplicates across classpath sources are resolved by classpath
     // ordering at lookup time (mirroring the TypeEntry bucket strategy).
     private final Map<String, List<ModuleEntry>> byModuleName = new HashMap<>();
-    private final Map<String, IdentifierBloomFilter> bloomByResourceUri = new HashMap<>();
+    /** Compact bloom slots addressed by StringTable ids for {@code (sourceUri, resourcePath)}. */
+    private final List<BloomSlot> blooms = new ArrayList<>();
     // Observer list is touched once per merge and rarely mutated; guard it
     // with the same lock and iterate a snapshot taken outside it.
     private final List<Runnable> changedListeners = new ArrayList<>();
@@ -116,25 +120,42 @@ public final class InMemoryIndex implements Index {
     }
 
     @Override
-    public void registerBloom(String resourceUri, IdentifierBloomFilter filter) {
-        if (resourceUri == null || filter == null) return;
+    public void registerBloom(String sourceUri, String resourcePath, IdentifierBloomFilter filter) {
+        if (filter == null) return;
+        if (sourceUri == null && resourcePath == null) return;
         rwLock.writeLock().lock();
         try {
-            registerBloomLocked(resourceUri, filter);
+            registerBloomLocked(sourceUri, resourcePath, filter);
         } finally {
             rwLock.writeLock().unlock();
         }
     }
 
     /** Caller must hold the write lock. */
-    private void registerBloomLocked(String resourceUri, IdentifierBloomFilter filter) {
-        if (resourceUri == null || filter == null) return;
-        bloomByResourceUri.put(resourceUri, filter);
+    private void registerBloomLocked(String sourceUri, String resourcePath, IdentifierBloomFilter filter) {
+        if (filter == null) return;
+        if (sourceUri == null && resourcePath == null) return;
+        // Same compaction TypeEntry applies so hierarchy can match pairs directly.
+        String compactedPath = ResourceUris.compact(resourcePath, sourceUri);
+        blooms.add(new BloomSlot(
+                StringTable.intern(sourceUri),
+                StringTable.intern(compactedPath),
+                filter));
     }
 
     @Override
-    public Map<String, IdentifierBloomFilter> bloomFilters() {
-        return read(() -> Map.copyOf(bloomByResourceUri));
+    public List<BloomEntry> bloomFilters() {
+        return read(() -> {
+            BloomEntry[] out = new BloomEntry[blooms.size()];
+            for (int i = 0; i < blooms.size(); i++) {
+                BloomSlot slot = blooms.get(i);
+                out[i] = new BloomEntry(
+                        StringTable.get(slot.sourceUriId()),
+                        StringTable.get(slot.resourcePathId()),
+                        slot.filter());
+            }
+            return List.of(out);
+        });
     }
 
     @Override
@@ -180,7 +201,7 @@ public final class InMemoryIndex implements Index {
         // source's own lock); then apply the whole batch at once.
         TypeStoreSnapshot snapshot = other.snapshotTypeStore();
         Collection<ModuleEntry> modules = other.allModules();
-        Map<String, IdentifierBloomFilter> blooms = other.bloomFilters();
+        List<BloomEntry> otherBlooms = other.bloomFilters();
 
         rwLock.writeLock().lock();
         try {
@@ -193,7 +214,9 @@ public final class InMemoryIndex implements Index {
             mergeIdMap(byPackage, snapshot.byPackage, baseOffset);
             knownPackages.addAll(snapshot.knownPackages);
             for (ModuleEntry m : modules) addModuleLocked(m);
-            blooms.forEach(this::registerBloomLocked);
+            for (BloomEntry bloom : otherBlooms) {
+                registerBloomLocked(bloom.sourceUri(), bloom.resourcePath(), bloom.filter());
+            }
         } finally {
             rwLock.writeLock().unlock();
         }
@@ -208,7 +231,7 @@ public final class InMemoryIndex implements Index {
     private void addAllGeneric(Index other) {
         Collection<TypeEntry> types = other.all();
         Collection<ModuleEntry> modules = other.allModules();
-        Map<String, IdentifierBloomFilter> blooms = other.bloomFilters();
+        List<BloomEntry> otherBlooms = other.bloomFilters();
 
         List<EncodedType> encoded = new ArrayList<>(types.size());
         for (TypeEntry entry : types) {
@@ -228,7 +251,9 @@ public final class InMemoryIndex implements Index {
                 registerPackageAncestorsLocked(e.pkg);
             }
             for (ModuleEntry m : modules) addModuleLocked(m);
-            blooms.forEach(this::registerBloomLocked);
+            for (BloomEntry bloom : otherBlooms) {
+                registerBloomLocked(bloom.sourceUri(), bloom.resourcePath(), bloom.filter());
+            }
         } finally {
             rwLock.writeLock().unlock();
         }
@@ -295,7 +320,7 @@ public final class InMemoryIndex implements Index {
     public boolean isEmpty() {
         return read(() -> typeCount == 0
                 && byModuleName.isEmpty()
-                && bloomByResourceUri.isEmpty());
+                && blooms.isEmpty());
     }
 
     /** Caller must hold the write lock. Appends {@code id} to the bucket for {@code key}. */
@@ -523,4 +548,6 @@ public final class InMemoryIndex implements Index {
             Map<String, IntList> byJvmName,
             Map<String, IntList> byPackage,
             Set<String> knownPackages) {}
+
+    private record BloomSlot(int sourceUriId, int resourcePathId, IdentifierBloomFilter filter) {}
 }

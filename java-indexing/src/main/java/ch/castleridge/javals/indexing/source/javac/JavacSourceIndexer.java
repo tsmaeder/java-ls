@@ -118,7 +118,7 @@ public final class JavacSourceIndexer {
                 indexCompilationUnit(resourcePath, sourceUriStr, cu, into);
                 if (resourceUriStr != null) {
                     try {
-                        into.registerBloom(resourceUriStr, IdentifierCollector.collectAndBuild(cu));
+                        into.registerBloom(sourceUriStr, resourcePath, IdentifierCollector.collectAndBuild(cu));
                     } catch (RuntimeException | StackOverflowError e) {
                         System.err.println("Failed to build identifier bloom filter for " + resourceUriStr
                                 + ": " + e.getClass().getSimpleName() + ": " + e.getMessage());

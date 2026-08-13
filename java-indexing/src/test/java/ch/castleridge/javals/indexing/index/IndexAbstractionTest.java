@@ -17,14 +17,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
 
 import org.junit.jupiter.api.Test;
 
+import ch.castleridge.javals.indexing.bloom.BloomEntry;
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.EmptyArrays;
@@ -86,7 +85,7 @@ class IndexAbstractionTest {
                 EmptyArrays.STRING,
                 null));
         IdentifierBloomFilter bloom = IdentifierBloomFilter.create(List.of("Bar"));
-        foreign.registerBloom("file:///com/example/Bar.java", bloom);
+        foreign.registerBloom("file:///", "com/example/Bar.java", bloom);
 
         InMemoryIndex target = new InMemoryIndex();
         AtomicInteger notifications = new AtomicInteger();
@@ -98,7 +97,14 @@ class IndexAbstractionTest {
         assertEquals("com/example/Bar",
                 ch.castleridge.javals.indexing.IndexTestUtils.get(target, "com/example/Bar").jvmOwnerName());
         assertEquals("com.example.mod", target.getModule("com.example.mod").name());
-        assertSame(bloom, target.bloomFilters().get("file:///com/example/Bar.java"));
+        IdentifierBloomFilter merged = null;
+        for (BloomEntry entry : target.bloomFilters()) {
+            if ("file:///com/example/Bar.java".equals(entry.resourceUri())) {
+                merged = entry.filter();
+                break;
+            }
+        }
+        assertSame(bloom, merged);
     }
 
     @Test
@@ -230,19 +236,19 @@ class IndexAbstractionTest {
     private static final class ListIndex implements Index {
         private final List<TypeEntry> types = new ArrayList<>();
         private final List<ModuleEntry> modules = new ArrayList<>();
-        private final Map<String, IdentifierBloomFilter> blooms = new HashMap<>();
+        private final List<BloomEntry> blooms = new ArrayList<>();
 
         @Override
         public void addChangedListener(Runnable listener) {}
 
         @Override
-        public void registerBloom(String resourceUri, IdentifierBloomFilter filter) {
-            blooms.put(resourceUri, filter);
+        public void registerBloom(String sourceUri, String resourcePath, IdentifierBloomFilter filter) {
+            blooms.add(new BloomEntry(sourceUri, resourcePath, filter));
         }
 
         @Override
-        public Map<String, IdentifierBloomFilter> bloomFilters() {
-            return Map.copyOf(blooms);
+        public List<BloomEntry> bloomFilters() {
+            return List.copyOf(blooms);
         }
 
         @Override

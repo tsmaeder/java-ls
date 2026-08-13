@@ -114,9 +114,8 @@ public final class ClassFileIndexer {
         TypeEntry entry = visitor.toTypeEntry();
         if (entry != null) {
             into.add(entry);
-            String resourceUri = ResourceUris.resolve(sourceUri, resourcePath);
-            if (resourceUri != null) {
-                into.registerBloom(resourceUri, IdentifierBloomFilter.create(
+            if (resourcePath != null || sourceUri != null) {
+                into.registerBloom(sourceUri, resourcePath, IdentifierBloomFilter.create(
                         simpleNamesFromConstantPool(reader)));
             }
         }

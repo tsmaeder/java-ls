@@ -12,9 +12,9 @@ package ch.castleridge.javals.indexing.index;
 
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 import java.util.function.BiPredicate;
 
+import ch.castleridge.javals.indexing.bloom.BloomEntry;
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -48,18 +48,18 @@ public interface Index {
     void addChangedListener(Runnable listener);
 
     /**
-     * Register a per-source-file identifier bloom filter keyed by the
-     * file's resource URI (e.g. {@code file:///.../Foo.java}).
+     * Register a per-resource identifier bloom filter addressed by the
+     * same {@code (sourceUri, resourcePath)} pair used for type entries.
      * Does not fire change listeners — bloom filters are consulted on demand.
      */
-    void registerBloom(String resourceUri, IdentifierBloomFilter filter);
+    void registerBloom(String sourceUri, String resourcePath, IdentifierBloomFilter filter);
 
     /**
-     * Snapshot of every registered identifier bloom filter, keyed by
-     * resource URI. Returns an immutable copy so callers can iterate it
-     * without holding implementation locks.
+     * Snapshot of every registered identifier bloom filter. Returns an
+     * immutable copy so callers can iterate it without holding
+     * implementation locks.
      */
-    Map<String, IdentifierBloomFilter> bloomFilters();
+    List<BloomEntry> bloomFilters();
 
     void add(TypeEntry entry);
 

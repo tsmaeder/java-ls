@@ -37,7 +37,7 @@ import ch.castleridge.javals.analysis.ecj.EcjDeclarationLocator;
 import ch.castleridge.javals.analysis.javac.SourceCache;
 import ch.castleridge.javals.analysis.javac.SymbolLocator;
 import ch.castleridge.javals.classpath.ClasspathOrder;
-import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
+import ch.castleridge.javals.indexing.bloom.BloomEntry;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.UriCoding;
 
@@ -360,12 +360,16 @@ public class JavaTextDocumentService implements TextDocumentService {
         Optional<Index> indexOpt = indexService.index();
         if (indexOpt.isPresent()) {
             String simpleName = identity.simpleName();
-            for (Map.Entry<String, IdentifierBloomFilter> entry : indexOpt.get().bloomFilters().entrySet()) {
+            for (BloomEntry entry : indexOpt.get().bloomFilters()) {
                 // Only source blooms can yield source reference locations.
                 // Classfile-keyed blooms (jar/jrt *.class) would otherwise be
                 // read as text and compiled as garbage, so skip them here.
-                if (entry.getKey().endsWith(".java") && entry.getValue().mightContain(simpleName)) {
-                    bloomCandidates.add(entry.getKey());
+                String path = entry.resourcePath();
+                if (path != null && path.endsWith(".java") && entry.filter().mightContain(simpleName)) {
+                    String candidateUri = entry.resourceUri();
+                    if (candidateUri != null) {
+                        bloomCandidates.add(candidateUri);
+                    }
                 }
             }
         }

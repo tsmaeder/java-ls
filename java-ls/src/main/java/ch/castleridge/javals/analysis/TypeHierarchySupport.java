@@ -27,9 +27,8 @@ import org.objectweb.asm.Opcodes;
 import com.google.gson.JsonElement;
 
 import ch.castleridge.javals.classpath.ClasspathOrder;
-import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
+import ch.castleridge.javals.indexing.bloom.BloomEntry;
 import ch.castleridge.javals.indexing.index.Index;
-import ch.castleridge.javals.indexing.model.ResourceUris;
 import ch.castleridge.javals.indexing.model.SourceResolutionHints;
 import ch.castleridge.javals.indexing.model.SourceTypeEntry;
 import ch.castleridge.javals.indexing.model.Type;
@@ -135,16 +134,16 @@ public final class TypeHierarchySupport {
         }
 
         String simple = simpleName(targetJvm);
-        Set<String> candidateUris = new LinkedHashSet<>();
-        for (Map.Entry<String, IdentifierBloomFilter> bloom : index.bloomFilters().entrySet()) {
-            if (bloom.getValue().mightContain(simple)) {
-                candidateUris.add(bloom.getKey());
+        Set<ResourceIdentity> candidates = new LinkedHashSet<>();
+        for (BloomEntry bloom : index.bloomFilters()) {
+            if (bloom.filter().mightContain(simple)) {
+                candidates.add(new ResourceIdentity(bloom.sourceUri(), bloom.resourcePath()));
             }
         }
-        if (candidateUris.isEmpty()) return out;
+        if (candidates.isEmpty()) return out;
 
         for (TypeEntry candidate : winners(index.all((sourceUri, resourcePath) ->
-                candidateUris.contains(ResourceUris.resolve(sourceUri, resourcePath))),
+                candidates.contains(new ResourceIdentity(sourceUri, resourcePath))),
                 index, classpath)) {
             if (Objects.equals(candidate.jvmOwnerName(), targetJvm)) continue;
             if (seen.contains(candidate.jvmOwnerName())) continue;
@@ -355,6 +354,9 @@ public final class TypeHierarchySupport {
         int cut = Math.max(jvmOwnerName.lastIndexOf('/'), jvmOwnerName.lastIndexOf('$'));
         return cut < 0 ? jvmOwnerName : jvmOwnerName.substring(cut + 1);
     }
+
+    /** Match key for bloom hits against type-entry identity fields. */
+    private record ResourceIdentity(String sourceUri, String resourcePath) {}
 
     /**
      * Classpath-visible type winners among {@code entries}, deduplicated by JVM

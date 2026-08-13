@@ -144,7 +144,7 @@ final class EcjSourceIndexerEngine {
 
         if (resourceUriStr != null) {
             try {
-                into.registerBloom(resourceUriStr, EcjIdentifierCollector.collectAndBuild(unit));
+                into.registerBloom(sourceUri, resourcePath, EcjIdentifierCollector.collectAndBuild(unit));
             } catch (RuntimeException | StackOverflowError e) {
                 System.err.println("Failed to build identifier bloom filter for " + resourceUriStr
                         + ": " + e.getClass().getSimpleName() + ": " + e.getMessage());

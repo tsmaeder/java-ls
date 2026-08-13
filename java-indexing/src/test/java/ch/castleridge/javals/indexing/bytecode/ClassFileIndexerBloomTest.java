@@ -19,7 +19,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
@@ -30,9 +29,9 @@ import javax.tools.ToolProvider;
 
 import org.junit.jupiter.api.Test;
 
+import ch.castleridge.javals.indexing.bloom.BloomEntry;
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
-import ch.castleridge.javals.indexing.model.ResourceUris;
 
 class ClassFileIndexerBloomTest {
 
@@ -66,10 +65,14 @@ class ClassFileIndexerBloomTest {
                     Files.readAllBytes(outDir.resolve("p").resolve("Dog.class")),
                     index);
 
-            String resourceUri = ResourceUris.resolve(sourceUri, dogPath);
-            Map<String, IdentifierBloomFilter> blooms = index.bloomFilters();
-            IdentifierBloomFilter bloom = blooms.get(resourceUri);
-            assertNotNull(bloom, "expected bloom keyed by " + resourceUri);
+            IdentifierBloomFilter bloom = null;
+            for (BloomEntry entry : index.bloomFilters()) {
+                if (sourceUri.equals(entry.sourceUri()) && dogPath.equals(entry.resourcePath())) {
+                    bloom = entry.filter();
+                    break;
+                }
+            }
+            assertNotNull(bloom, "expected bloom for " + sourceUri + " + " + dogPath);
             assertTrue(bloom.mightContain("Animal"));
             assertTrue(bloom.mightContain("Runnable"));
             assertFalse(bloom.mightContain("DefinitelyNotInThisClass"));

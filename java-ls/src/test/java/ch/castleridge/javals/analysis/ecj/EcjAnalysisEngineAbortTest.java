@@ -17,7 +17,6 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
@@ -31,6 +30,7 @@ import ch.castleridge.javals.analysis.AnalysisSession;
 import ch.castleridge.javals.analysis.ResolvedSymbol;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
+import ch.castleridge.javals.indexing.bloom.BloomEntry;
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.index.Index;
@@ -111,12 +111,12 @@ class EcjAnalysisEngineAbortTest {
         }
 
         @Override
-        public void registerBloom(String resourceUri, IdentifierBloomFilter filter) {
-            delegate.registerBloom(resourceUri, filter);
+        public void registerBloom(String sourceUri, String resourcePath, IdentifierBloomFilter filter) {
+            delegate.registerBloom(sourceUri, resourcePath, filter);
         }
 
         @Override
-        public Map<String, IdentifierBloomFilter> bloomFilters() {
+        public List<BloomEntry> bloomFilters() {
             return delegate.bloomFilters();
         }
 
