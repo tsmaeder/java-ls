@@ -53,6 +53,21 @@ final class IntList {
     }
 
     /**
+     * Remove the first occurrence of {@code value} via swap-with-last.
+     * Returns {@code true} when a value was removed.
+     */
+    boolean removeValue(int value) {
+        for (int i = 0; i < size; i++) {
+            if (data[i] == value) {
+                data[i] = data[size - 1];
+                size--;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Append every value from {@code other} after adding {@code offset}
      * (used when remapping source-index IDs into a target index).
      */

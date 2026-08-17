@@ -69,6 +69,14 @@ public interface Index {
      */
     void addAll(Index other);
 
+    /**
+     * Replace every type entry and bloom filter for
+     * {@code (sourceUri, resourcePath)}. {@code replacement} may be
+     * {@code null} or empty (delete-only). Fires a single change
+     * notification when the index mutates.
+     */
+    void putResource(String sourceUri, String resourcePath, Index replacement);
+
     boolean isEmpty();
 
     /**

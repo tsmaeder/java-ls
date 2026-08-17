@@ -47,6 +47,13 @@ final class DecodedTypeCache {
         };
     }
 
+    /** Drop a cached decode for {@code id} (e.g. after the blob is tombstoned). */
+    void invalidate(int id) {
+        synchronized (this) {
+            cache.remove(id);
+        }
+    }
+
     /**
      * Return the decoded entry for {@code id}, decoding {@code blob} on a
      * miss. {@code blob} must be the canonical encoding stored under

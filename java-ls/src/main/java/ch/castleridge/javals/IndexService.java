@@ -14,12 +14,15 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
 import ch.castleridge.javals.indexing.cli.HeapSizeEstimator;
@@ -29,12 +32,15 @@ import ch.castleridge.javals.indexing.scan.Scanner;
 import ch.castleridge.javals.classpath.ClasspathEntry;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
+import org.eclipse.lsp4j.FileChangeType;
+import org.eclipse.lsp4j.FileEvent;
 import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.MessageType;
 import org.eclipse.lsp4j.WorkspaceFolder;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
+import ch.castleridge.javals.indexing.index.UriCoding;
 
 /**
  * Bootstraps the workspace {@link Index} by locating an {@code mbt.json}
@@ -51,6 +57,11 @@ public final class IndexService {
     private final JavaLanguageServer server;
     private final AtomicReference<State> state = new AtomicReference<>(State.empty());
     private final List<Runnable> indexChangedListeners = new CopyOnWriteArrayList<>();
+    private final ExecutorService watchExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "java-ls-index-watch");
+        t.setDaemon(true);
+        return t;
+    });
     private volatile ch.castleridge.javals.indexing.source.SourceIndexer sourceIndexer =
             ch.castleridge.javals.indexing.source.SourceIndexer.javac();
 
@@ -75,6 +86,89 @@ public final class IndexService {
 
     public Map<String, String> sourceJarByBinaryJar() {
         return state.get().sourceJarByBinaryJar;
+    }
+
+    /** Directory source-root URIs discovered from {@code mbt.json} (empty before/without index). */
+    public List<String> sourceRootUris() {
+        return state.get().sourceRoots.stream().map(SourceRoot::sourceUri).toList();
+    }
+
+    /**
+     * Apply LSP {@code workspace/didChangeWatchedFiles} events: reindex or
+     * drop {@code .java} files that fall under a known mbt source root.
+     * Returns a future that completes when the batch has been applied.
+     */
+    public CompletableFuture<Void> onWatchedFilesChanged(List<FileEvent> changes) {
+        if (changes == null || changes.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        if (state.get().index == null || state.get().sourceRoots.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        List<FileEvent> snapshot = List.copyOf(changes);
+        return CompletableFuture.runAsync(() -> applyWatchedFiles(snapshot), watchExecutor);
+    }
+
+    private void applyWatchedFiles(List<FileEvent> changes) {
+        State current = state.get();
+        Index index = current.index;
+        if (index == null || current.sourceRoots.isEmpty()) return;
+
+        for (FileEvent event : changes) {
+            if (event == null || event.getUri() == null) continue;
+            try {
+                applyOneWatchedFile(index, current.sourceRoots, event);
+            } catch (RuntimeException e) {
+                log(MessageType.Error, "Failed to update index for " + event.getUri() + ": " + e.getMessage());
+            }
+        }
+    }
+
+    private void applyOneWatchedFile(Index index, List<SourceRoot> sourceRoots, FileEvent event) {
+        Path file = pathFromClientString(UriCoding.decode(event.getUri()));
+        if (file == null) return;
+        file = file.toAbsolutePath().normalize();
+        String fileName = file.getFileName() == null ? "" : file.getFileName().toString();
+        if (!fileName.endsWith(".java") || Index.isSkippedFileName(fileName)) return;
+
+        ResolvedResource resolved = resolveUnderSourceRoots(file, sourceRoots);
+        if (resolved == null) return;
+
+        boolean delete = event.getType() == FileChangeType.Deleted || !Files.isRegularFile(file);
+        if (delete) {
+            index.putResource(resolved.sourceUri(), resolved.relativePath(), new InMemoryIndex());
+            log(MessageType.Log, "Index removed " + resolved.relativePath());
+            return;
+        }
+
+        String content;
+        try {
+            content = Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            log(MessageType.Warning, "Could not read " + file + " for reindex: " + e.getMessage());
+            return;
+        }
+        InMemoryIndex replacement = new InMemoryIndex();
+        sourceIndexer.index(resolved.relativePath(), resolved.sourceUri(), content, replacement);
+        index.putResource(resolved.sourceUri(), resolved.relativePath(), replacement);
+        log(MessageType.Log, "Index updated " + resolved.relativePath()
+                + " (" + replacement.entryCount() + " types)");
+    }
+
+    static ResolvedResource resolveUnderSourceRoots(Path file, List<SourceRoot> sourceRoots) {
+        if (file == null || sourceRoots == null || sourceRoots.isEmpty()) return null;
+        Path abs = file.toAbsolutePath().normalize();
+        SourceRoot best = null;
+        for (SourceRoot root : sourceRoots) {
+            if (abs.startsWith(root.path())
+                    && (best == null || root.path().getNameCount() > best.path().getNameCount())) {
+                best = root;
+            }
+        }
+        if (best == null) return null;
+        String relative = best.path().relativize(abs).toString().replace('\\', '/');
+        if (relative.isEmpty() || relative.startsWith("..")) return null;
+        return new ResolvedResource(best.sourceUri(), relative);
     }
 
     /**
@@ -143,7 +237,8 @@ public final class IndexService {
             }
             Index index = new InMemoryIndex();
             index.addChangedListener(this::notifyIndexChanged);
-            state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar));
+            List<SourceRoot> sourceRoots = collectSourceRoots(sources);
+            state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar, sourceRoots));
             notifyIndexChanged();
             Scanner scanner = new Scanner(sourceIndexer);
             long t0 = System.nanoTime();
@@ -182,6 +277,9 @@ public final class IndexService {
                 f.printStackTrace(new PrintWriter(writer));
                 log(MessageType.Error, "Indexing failure: " + writer.toString());
             });
+            if (server != null && !sourceRoots.isEmpty()) {
+                server.registerSourceFileWatchers(sourceRootUris());
+            }
         } catch (IOException e) {
             log(MessageType.Error, "Failed to load mbt.json " + mbt + ": " + e.getMessage());
         } catch (RuntimeException e) {
@@ -189,6 +287,16 @@ public final class IndexService {
             e.printStackTrace(new PrintWriter(writer));
             log(MessageType.Error, "Indexing failed for " + mbt + ": " + writer);
         }
+    }
+
+    private static List<SourceRoot> collectSourceRoots(Map<String, InputSource> sources) {
+        List<SourceRoot> roots = new ArrayList<>();
+        for (InputSource src : sources.values()) {
+            if (src instanceof DirInput dir) {
+                roots.add(new SourceRoot(dir.root().toAbsolutePath().normalize(), dir.sourceUri()));
+            }
+        }
+        return List.copyOf(roots);
     }
 
     private void extractInfo(MbtInfo info, Path workspacePath, Map<String, String> sourceJarByBinaryJar,
@@ -449,9 +557,14 @@ public final class IndexService {
         }
     }
     private record State(Index index, Map<String, ClasspathOrder> classpathsByNamespace,
-                         Map<String, String> sourceJarByBinaryJar) {
+                         Map<String, String> sourceJarByBinaryJar,
+                         List<SourceRoot> sourceRoots) {
         static State empty() {
-            return new State(null, Map.of(), Map.of());
+            return new State(null, Map.of(), Map.of(), List.of());
         }
     }
+
+    record SourceRoot(Path path, String sourceUri) {}
+
+    record ResolvedResource(String sourceUri, String relativePath) {}
 }

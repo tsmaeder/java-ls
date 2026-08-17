@@ -11,7 +11,11 @@
 package ch.castleridge.javals;
 
 import org.eclipse.lsp4j.*;
+import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.services.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -26,6 +30,7 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     private LanguageClient client;
     private int errorCode = 1;
     private volatile String compilerBackend = "javac";
+    private volatile boolean watchedFilesDynamicRegistration;
 
     public JavaLanguageServer() {
         this.indexService = new IndexService(this);
@@ -51,6 +56,7 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
         InitializationOptions.Backend backend = InitializationOptions.backend(params);
         this.compilerBackend = backend.compiler();
+        this.watchedFilesDynamicRegistration = supportsWatchedFilesDynamicRegistration(params);
         indexService.setSourceIndexer(
                 ch.castleridge.javals.indexing.source.SourceIndexer.of(backend.indexer()));
         rebindWorkspaceCompiler();
@@ -110,6 +116,46 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
 
         InitializeResult result = new InitializeResult(capabilities);
         return CompletableFuture.completedFuture(result);
+    }
+
+    /**
+     * Dynamically register {@code workspace/didChangeWatchedFiles} watchers for
+     * {@code **}/{@code *.java} under each mbt source root, when the client supports it.
+     */
+    public void registerSourceFileWatchers(List<String> sourceRootUris) {
+        if (!watchedFilesDynamicRegistration || client == null
+                || sourceRootUris == null || sourceRootUris.isEmpty()) {
+            return;
+        }
+        List<FileSystemWatcher> watchers = new ArrayList<>(sourceRootUris.size());
+        int kind = WatchKind.Create + WatchKind.Change + WatchKind.Delete;
+        for (String sourceUri : sourceRootUris) {
+            if (sourceUri == null || sourceUri.isBlank()) continue;
+            RelativePattern pattern = new RelativePattern(Either.forRight(sourceUri), "**/*.java");
+            watchers.add(new FileSystemWatcher(Either.forRight(pattern), kind));
+        }
+        if (watchers.isEmpty()) return;
+        DidChangeWatchedFilesRegistrationOptions options =
+                new DidChangeWatchedFilesRegistrationOptions(watchers);
+        Registration registration = new Registration(
+                UUID.randomUUID().toString(),
+                "workspace/didChangeWatchedFiles",
+                options);
+        try {
+            client.registerCapability(new RegistrationParams(List.of(registration)));
+            logMessage(MessageType.Info,
+                    "Registered file watchers for " + watchers.size() + " source root(s)");
+        } catch (RuntimeException e) {
+            logMessage(MessageType.Warning,
+                    "Could not register source file watchers: " + e.getMessage());
+        }
+    }
+
+    private static boolean supportsWatchedFilesDynamicRegistration(InitializeParams params) {
+        if (params == null || params.getCapabilities() == null) return false;
+        WorkspaceClientCapabilities workspace = params.getCapabilities().getWorkspace();
+        if (workspace == null || workspace.getDidChangeWatchedFiles() == null) return false;
+        return Boolean.TRUE.equals(workspace.getDidChangeWatchedFiles().getDynamicRegistration());
     }
 
     @Override

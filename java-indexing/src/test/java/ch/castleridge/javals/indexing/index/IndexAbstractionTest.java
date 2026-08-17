@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
 
@@ -209,6 +210,103 @@ class IndexAbstractionTest {
         assertTrue(target.listPackage("demo", false).isEmpty());
     }
 
+    @Test
+    void putResourceReplacesTypesAndBloomsWithOneNotification() {
+        InMemoryIndex index = new InMemoryIndex();
+        AtomicInteger notifications = new AtomicInteger();
+        index.addChangedListener(notifications::incrementAndGet);
+
+        String sourceUri = "file:///src/";
+        index.add(sourceTypeAt(sourceUri, "com/example/Foo.java", "com/example/Foo"));
+        index.registerBloom(sourceUri, "com/example/Foo.java",
+                IdentifierBloomFilter.create(List.of("Foo")));
+        index.add(sourceTypeAt(sourceUri, "com/example/Other.java", "com/example/Other"));
+        notifications.set(0);
+
+        InMemoryIndex replacement = indexWithExplicitPath(sourceUri, "com/example/Foo.java", "com/example/FooV2");
+        replacement.registerBloom(sourceUri, "com/example/Foo.java",
+                IdentifierBloomFilter.create(List.of("FooV2")));
+
+        index.putResource(sourceUri, "com/example/Foo.java", replacement);
+
+        assertEquals(1, notifications.get());
+        assertFalse(index.contains("com/example/Foo"));
+        assertTrue(index.contains("com/example/FooV2"));
+        assertTrue(index.contains("com/example/Other"));
+        assertEquals(1, index.getAll("com/example/FooV2").size());
+
+        boolean foundFooBloom = false;
+        for (BloomEntry entry : index.bloomFilters()) {
+            if ("com/example/Foo.java".equals(entry.resourcePath())) {
+                foundFooBloom = true;
+                assertTrue(entry.filter().mightContain("FooV2"));
+                break;
+            }
+        }
+        assertTrue(foundFooBloom);
+    }
+
+    @Test
+    void putResourceEmptyDeletesTypesAndBlooms() {
+        InMemoryIndex index = new InMemoryIndex();
+        String sourceUri = "file:///src/";
+        index.add(sourceTypeAt(sourceUri, "com/example/Foo.java", "com/example/Foo"));
+        index.registerBloom(sourceUri, "com/example/Foo.java",
+                IdentifierBloomFilter.create(List.of("Foo")));
+        index.add(sourceTypeAt(sourceUri, "com/example/Bar.java", "com/example/Bar"));
+
+        AtomicInteger notifications = new AtomicInteger();
+        index.addChangedListener(notifications::incrementAndGet);
+
+        index.putResource(sourceUri, "com/example/Foo.java", new InMemoryIndex());
+
+        assertEquals(1, notifications.get());
+        assertFalse(index.contains("com/example/Foo"));
+        assertTrue(index.contains("com/example/Bar"));
+        assertEquals(1, index.entryCount());
+        assertTrue(index.bloomFilters().stream().noneMatch(b ->
+                "com/example/Foo.java".equals(b.resourcePath())));
+    }
+
+    @Test
+    void putResourceTombstonesAreInvisibleToLookups() {
+        InMemoryIndex index = new InMemoryIndex();
+        String sourceUri = "file:///src/";
+        index.add(sourceTypeAt(sourceUri, "com/example/Foo.java", "com/example/Foo"));
+        index.putResource(sourceUri, "com/example/Foo.java", new InMemoryIndex());
+
+        assertTrue(index.all().isEmpty());
+        assertTrue(index.getAll("com/example/Foo").isEmpty());
+        assertTrue(index.listPackage("com/example", false).isEmpty());
+        assertTrue(index.searchTypesBySimpleNamePrefix("Foo", 10).isEmpty());
+        assertTrue(index.isEmpty());
+    }
+
+    private static InMemoryIndex indexWithExplicitPath(String sourceUri, String resourcePath, String jvm) {
+        InMemoryIndex index = new InMemoryIndex();
+        index.add(sourceTypeAt(sourceUri, resourcePath, jvm));
+        return index;
+    }
+
+    private static SourceTypeEntry sourceTypeAt(String sourceUri, String resourcePath, String jvmOwnerName) {
+        return new SourceTypeEntry(
+                resourcePath,
+                sourceUri,
+                jvmOwnerName,
+                0,
+                TypeDeclKind.CLASS,
+                null,
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.TYPE_REF,
+                EmptyArrays.RECORD_COMPONENT,
+                EmptyArrays.ANNOTATION_REF,
+                null);
+    }
+
     private static SourceTypeEntry sourceType(String jvmOwnerName) {
         return sourceType(jvmOwnerName, "file:///" + jvmOwnerName + ".java");
     }
@@ -259,6 +357,26 @@ class IndexAbstractionTest {
         @Override
         public void addAll(Index other) {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void putResource(String sourceUri, String resourcePath, Index replacement) {
+            String compacted = ch.castleridge.javals.indexing.model.ResourceUris.compact(resourcePath, sourceUri);
+            types.removeIf(t -> {
+                String path = switch (t) {
+                    case SourceTypeEntry s -> s.resourcePath();
+                    case ClassFileTypeEntry c -> c.resourcePath();
+                };
+                return Objects.equals(sourceUri, t.sourceUri()) && Objects.equals(compacted, path);
+            });
+            blooms.removeIf(b -> Objects.equals(sourceUri, b.sourceUri())
+                    && Objects.equals(compacted, ch.castleridge.javals.indexing.model.ResourceUris.compact(
+                            b.resourcePath(), b.sourceUri())));
+            if (replacement != null && !replacement.isEmpty()) {
+                types.addAll(replacement.all());
+                modules.addAll(replacement.allModules());
+                blooms.addAll(replacement.bloomFilters());
+            }
         }
 
         @Override

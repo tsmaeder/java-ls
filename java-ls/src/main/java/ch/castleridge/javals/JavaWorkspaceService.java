@@ -36,10 +36,10 @@ public class JavaWorkspaceService implements WorkspaceService {
 
     @Override
     public void didChangeWatchedFiles(DidChangeWatchedFilesParams params) {
-        for (FileEvent event : params.getChanges()) {
-            server.logMessage(MessageType.Log, "File changed: " + event.getUri() + 
-                " (type: " + event.getType() + ")");
+        if (params == null || params.getChanges() == null || params.getChanges().isEmpty()) {
+            return;
         }
+        server.getIndexService().onWatchedFilesChanged(params.getChanges());
     }
 
     @Override

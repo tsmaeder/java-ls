@@ -75,6 +75,11 @@ public final class InMemoryIndex implements Index {
     /** Package → type IDs (leaf packages that directly own types only). */
     private final Map<String, IntList> byPackage = new HashMap<>();
     /**
+     * {@code (sourceUri, compactedResourcePath)} → type IDs for O(file)
+     * removal via {@link #putResource}.
+     */
+    private final Map<String, IntList> byResource = new HashMap<>();
+    /**
      * Every package name that {@link #hasPackage} should accept, including
      * intermediate parents of leaf packages (e.g. {@code java} when only
      * {@code java/lang} has types). Populated at write time so lookups stay O(1).
@@ -86,6 +91,8 @@ public final class InMemoryIndex implements Index {
     private final Map<String, List<ModuleEntry>> byModuleName = new HashMap<>();
     /** Compact bloom slots addressed by StringTable ids for {@code (sourceUri, resourcePath)}. */
     private final List<BloomSlot> blooms = new ArrayList<>();
+    /** Live (non-tombstoned) type entries; {@link #typeCount} is the ID high-water mark. */
+    private int liveTypeCount = 0;
     // Observer list is touched once per merge and rarely mutated; guard it
     // with the same lock and iterate a snapshot taken outside it.
     private final List<Runnable> changedListeners = new ArrayList<>();
@@ -169,10 +176,7 @@ public final class InMemoryIndex implements Index {
         String pkg = entry.packageJvm();
         rwLock.writeLock().lock();
         try {
-            int id = appendTypeBlobLocked(blob);
-            appendId(byJvmName, jvm, id);
-            appendId(byPackage, pkg, id);
-            registerPackageAncestorsLocked(pkg);
+            appendEncodedTypeLocked(jvm, pkg, blob);
         } finally {
             rwLock.writeLock().unlock();
         }
@@ -196,6 +200,69 @@ public final class InMemoryIndex implements Index {
         }
     }
 
+    @Override
+    public void putResource(String sourceUri, String resourcePath, Index replacement) {
+        String compacted = ResourceUris.compact(resourcePath, sourceUri);
+        List<EncodedType> encoded = List.of();
+        Collection<ModuleEntry> modules = List.of();
+        List<BloomEntry> bloomsToAdd = List.of();
+        if (replacement != null && !replacement.isEmpty()) {
+            if (replacement instanceof InMemoryIndex mem) {
+                TypeStoreSnapshot snapshot = mem.snapshotTypeStore();
+                modules = mem.allModules();
+                bloomsToAdd = mem.bloomFilters();
+                List<EncodedType> fromSnap = new ArrayList<>(snapshot.blobs.length);
+                for (byte[] blob : snapshot.blobs) {
+                    if (blob == null) continue;
+                    String[] identity = TypeEntryCodec.peekIdentity(blob);
+                    String jvm = peekJvmOwnerName(blob);
+                    if (Index.isSkippedJvmName(jvm)) continue;
+                    fromSnap.add(new EncodedType(jvm, packageOf(jvm), blob,
+                            identity[0], identity[1]));
+                }
+                encoded = fromSnap;
+            } else {
+                Collection<TypeEntry> types = replacement.all();
+                modules = replacement.allModules();
+                bloomsToAdd = replacement.bloomFilters();
+                List<EncodedType> prepared = new ArrayList<>(types.size());
+                for (TypeEntry entry : types) {
+                    if (entry == null) continue;
+                    String jvm = entry.jvmOwnerName();
+                    if (Index.isSkippedJvmName(jvm)) continue;
+                    byte[] blob = TypeEntryCodec.encode(entry);
+                    String[] identity = TypeEntryCodec.peekIdentity(blob);
+                    prepared.add(new EncodedType(jvm, entry.packageJvm(), blob,
+                            identity[0], identity[1]));
+                }
+                encoded = prepared;
+            }
+        }
+
+        boolean changed;
+        rwLock.writeLock().lock();
+        try {
+            changed = removeResourceLocked(sourceUri, compacted);
+            if (!encoded.isEmpty() || !modules.isEmpty() || !bloomsToAdd.isEmpty()) {
+                ensureTypeBlobCapacity(typeCount + encoded.size());
+                for (EncodedType e : encoded) {
+                    appendEncodedTypeLocked(e.jvm, e.pkg, e.blob);
+                }
+                for (ModuleEntry m : modules) {
+                    if (addModuleLocked(m)) changed = true;
+                }
+                for (BloomEntry bloom : bloomsToAdd) {
+                    registerBloomLocked(bloom.sourceUri(), bloom.resourcePath(), bloom.filter());
+                    changed = true;
+                }
+                if (!encoded.isEmpty()) changed = true;
+            }
+        } finally {
+            rwLock.writeLock().unlock();
+        }
+        if (changed) notifyChanged();
+    }
+
     private void addAllInMemory(InMemoryIndex other) {
         // Snapshot the source outside our lock (each call takes the
         // source's own lock); then apply the whole batch at once.
@@ -205,14 +272,14 @@ public final class InMemoryIndex implements Index {
 
         rwLock.writeLock().lock();
         try {
-            int baseOffset = typeCount;
             ensureTypeBlobCapacity(typeCount + snapshot.blobs.length);
+            knownPackages.addAll(snapshot.knownPackages());
             for (byte[] blob : snapshot.blobs) {
-                typeBlobs[typeCount++] = blob;
+                if (blob == null) continue;
+                String jvm = peekJvmOwnerName(blob);
+                if (Index.isSkippedJvmName(jvm)) continue;
+                appendEncodedTypeLocked(jvm, packageOf(jvm), blob);
             }
-            mergeIdMap(byJvmName, snapshot.byJvmName, baseOffset);
-            mergeIdMap(byPackage, snapshot.byPackage, baseOffset);
-            knownPackages.addAll(snapshot.knownPackages);
             for (ModuleEntry m : modules) addModuleLocked(m);
             for (BloomEntry bloom : otherBlooms) {
                 registerBloomLocked(bloom.sourceUri(), bloom.resourcePath(), bloom.filter());
@@ -238,17 +305,17 @@ public final class InMemoryIndex implements Index {
             if (entry == null) continue;
             String jvm = entry.jvmOwnerName();
             if (Index.isSkippedJvmName(jvm)) continue;
-            encoded.add(new EncodedType(jvm, entry.packageJvm(), TypeEntryCodec.encode(entry)));
+            byte[] blob = TypeEntryCodec.encode(entry);
+            String[] identity = TypeEntryCodec.peekIdentity(blob);
+            encoded.add(new EncodedType(jvm, entry.packageJvm(), blob,
+                    identity[0], identity[1]));
         }
 
         rwLock.writeLock().lock();
         try {
             ensureTypeBlobCapacity(typeCount + encoded.size());
             for (EncodedType e : encoded) {
-                int id = appendTypeBlobLocked(e.blob);
-                appendId(byJvmName, e.jvm, id);
-                appendId(byPackage, e.pkg, id);
-                registerPackageAncestorsLocked(e.pkg);
+                appendEncodedTypeLocked(e.jvm, e.pkg, e.blob);
             }
             for (ModuleEntry m : modules) addModuleLocked(m);
             for (BloomEntry bloom : otherBlooms) {
@@ -260,22 +327,30 @@ public final class InMemoryIndex implements Index {
         notifyChanged();
     }
 
-    private record EncodedType(String jvm, String pkg, byte[] blob) {}
+    private record EncodedType(String jvm, String pkg, byte[] blob, String sourceUri, String resourcePath) {
+        EncodedType(String jvm, String pkg, byte[] blob) {
+            this(jvm, pkg, blob, null, null);
+        }
+    }
 
     /**
-     * Consistent shallow snapshot of the type store, ID indexes, and
-     * known package names (including parents). Blob array elements are
-     * shared by reference (no re-encode); IntLists / sets are copied so
-     * the source index can keep mutating.
+     * Consistent shallow snapshot of live type blobs and known package
+     * names. Tombstoned slots are omitted so remapped ID indexes stay dense.
+     * Blob array elements are shared by reference (no re-encode).
      */
     TypeStoreSnapshot snapshotTypeStore() {
         return read(() -> {
-            byte[][] blobs = Arrays.copyOf(typeBlobs, typeCount);
-            return new TypeStoreSnapshot(
-                    blobs,
-                    copyIdMap(byJvmName),
-                    copyIdMap(byPackage),
-                    Set.copyOf(knownPackages));
+            byte[][] blobs = new byte[liveTypeCount][];
+            int n = 0;
+            for (int id = 0; id < typeCount; id++) {
+                byte[] blob = typeBlobs[id];
+                if (blob == null) continue;
+                blobs[n++] = blob;
+            }
+            if (n != liveTypeCount) {
+                blobs = Arrays.copyOf(blobs, n);
+            }
+            return new TypeStoreSnapshot(blobs, Set.copyOf(knownPackages));
         });
     }
 
@@ -293,32 +368,80 @@ public final class InMemoryIndex implements Index {
         }
     }
 
-    private static Map<String, IntList> copyIdMap(Map<String, IntList> source) {
-        Map<String, IntList> copy = new HashMap<>(source.size());
-        for (Map.Entry<String, IntList> e : source.entrySet()) {
-            copy.put(e.getKey(), e.getValue().copy());
-        }
-        return copy;
+    /** Caller must hold the write lock. Appends blob and all secondary indexes. */
+    private int appendEncodedTypeLocked(String jvm, String pkg, byte[] blob) {
+        int id = appendTypeBlobLocked(blob);
+        appendId(byJvmName, jvm, id);
+        appendId(byPackage, pkg, id);
+        String[] identity = TypeEntryCodec.peekIdentity(blob);
+        appendId(byResource, resourceKey(identity[0], identity[1]), id);
+        registerPackageAncestorsLocked(pkg);
+        liveTypeCount++;
+        return id;
     }
 
     /**
-     * Caller must hold the write lock. Merges remapped source IDs
-     * ({@code sourceId + baseOffset}) into {@code target}, pre-sizing each
-     * bucket so a bulk merge does not thrash mid-bucket copies.
+     * Caller must hold the write lock. Tombstones every type and bloom for
+     * the resource. Returns {@code true} if anything was removed.
      */
-    private static void mergeIdMap(Map<String, IntList> target, Map<String, IntList> incoming, int baseOffset) {
-        for (Map.Entry<String, IntList> e : incoming.entrySet()) {
-            IntList src = e.getValue();
-            if (src == null || src.isEmpty()) continue;
-            IntList dest = target.computeIfAbsent(e.getKey(), k -> new IntList(src.size()));
-            dest.ensureCapacity(dest.size() + src.size());
-            dest.addAllRemapped(src, baseOffset);
+    private boolean removeResourceLocked(String sourceUri, String compactedPath) {
+        boolean changed = false;
+        String key = resourceKey(sourceUri, compactedPath);
+        IntList ids = byResource.remove(key);
+        if (ids != null && !ids.isEmpty()) {
+            changed = true;
+            for (int i = 0; i < ids.size(); i++) {
+                int id = ids.get(i);
+                byte[] blob = typeBlobs[id];
+                if (blob == null) continue;
+                String jvm = peekJvmOwnerName(blob);
+                String pkg = packageOf(jvm);
+                removeId(byJvmName, jvm, id);
+                removeId(byPackage, pkg, id);
+                typeBlobs[id] = null;
+                liveTypeCount--;
+                decodedCache.invalidate(id);
+            }
         }
+        int sourceUriId = StringTable.intern(sourceUri);
+        int pathId = StringTable.intern(compactedPath);
+        for (int i = blooms.size() - 1; i >= 0; i--) {
+            BloomSlot slot = blooms.get(i);
+            if (slot.sourceUriId() == sourceUriId && slot.resourcePathId() == pathId) {
+                blooms.remove(i);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private static String resourceKey(String sourceUri, String compactedPath) {
+        return (sourceUri == null ? "" : sourceUri) + '\0'
+                + (compactedPath == null ? "" : compactedPath);
+    }
+
+    /** Peek jvmOwnerName via a full decode (rare: remove / merge paths only). */
+    private static String peekJvmOwnerName(byte[] blob) {
+        return TypeEntryCodec.decode(blob).jvmOwnerName();
+    }
+
+    private static String packageOf(String jvmOwnerName) {
+        if (jvmOwnerName == null) return "";
+        int slash = jvmOwnerName.lastIndexOf('/');
+        return slash < 0 ? "" : jvmOwnerName.substring(0, slash);
+    }
+
+    /** Caller must hold the write lock. Removes {@code id} from the bucket; drops empty buckets. */
+    private static void removeId(Map<String, IntList> map, String key, int id) {
+        IntList bucket = map.get(key);
+        if (bucket == null) return;
+        bucket.removeValue(id);
+        if (bucket.isEmpty()) map.remove(key);
     }
 
     @Override
     public boolean isEmpty() {
-        return read(() -> typeCount == 0
+        return read(() -> liveTypeCount == 0
                 && byModuleName.isEmpty()
                 && blooms.isEmpty());
     }
@@ -407,7 +530,9 @@ public final class InMemoryIndex implements Index {
                 if (!simpleNameMatchesPrefix(jvmOwnerName, prefix)) continue;
                 IntList ids = mapEntry.getValue();
                 for (int i = 0; i < ids.size(); i++) {
-                    out.add(decode(ids.get(i)));
+                    TypeEntry entry = decode(ids.get(i));
+                    if (entry == null) continue;
+                    out.add(entry);
                     if (limit > 0 && out.size() >= limit) return out;
                 }
             }
@@ -435,8 +560,9 @@ public final class InMemoryIndex implements Index {
     public Collection<TypeEntry> all(BiPredicate<String, String> filter) {
         return read(() -> {
             if (filter == null) {
-                List<TypeEntry> out = new ArrayList<>(typeCount);
+                List<TypeEntry> out = new ArrayList<>(liveTypeCount);
                 for (int id = 0; id < typeCount; id++) {
+                    if (typeBlobs[id] == null) continue;
                     out.add(decode(id));
                 }
                 return Collections.unmodifiableCollection(out);
@@ -444,6 +570,7 @@ public final class InMemoryIndex implements Index {
             List<TypeEntry> out = new ArrayList<>();
             for (int id = 0; id < typeCount; id++) {
                 byte[] blob = typeBlobs[id];
+                if (blob == null) continue;
                 String[] identity = TypeEntryCodec.peekIdentity(blob);
                 if (!filter.test(identity[0], identity[1])) continue;
                 out.add(decode(id));
@@ -459,7 +586,7 @@ public final class InMemoryIndex implements Index {
 
     @Override
     public int entryCount() {
-        return read(() -> typeCount);
+        return read(() -> liveTypeCount);
     }
 
     private static <T> List<T> toImmutableList(List<T> bucket) {
@@ -473,22 +600,26 @@ public final class InMemoryIndex implements Index {
 
     /** Caller must hold a lock. */
     private TypeEntry decode(int id) {
-        return decodedCache.get(id, typeBlobs[id]);
+        byte[] blob = typeBlobs[id];
+        if (blob == null) return null;
+        return decodedCache.get(id, blob);
     }
 
     private List<TypeEntry> toList(IntList bucket) {
         if (bucket == null || bucket.isEmpty()) return List.of();
-        TypeEntry[] decoded = new TypeEntry[bucket.size()];
+        List<TypeEntry> decoded = new ArrayList<>(bucket.size());
         for (int i = 0; i < bucket.size(); i++) {
-            decoded[i] = decode(bucket.get(i));
+            TypeEntry entry = decode(bucket.get(i));
+            if (entry != null) decoded.add(entry);
         }
-        return List.of(decoded);
+        return List.copyOf(decoded);
     }
 
     private void addBucketTo(IntList bucket, List<TypeEntry> out) {
         if (bucket == null) return;
         for (int i = 0; i < bucket.size(); i++) {
-            out.add(decode(bucket.get(i)));
+            TypeEntry entry = decode(bucket.get(i));
+            if (entry != null) out.add(entry);
         }
     }
 
@@ -542,11 +673,9 @@ public final class InMemoryIndex implements Index {
         return read(byModuleName::size);
     }
 
-    /** Snapshot of canonical blobs, secondary ID indexes, and known packages. */
+    /** Snapshot of live canonical blobs and known packages. */
     record TypeStoreSnapshot(
             byte[][] blobs,
-            Map<String, IntList> byJvmName,
-            Map<String, IntList> byPackage,
             Set<String> knownPackages) {}
 
     private record BloomSlot(int sourceUriId, int resourcePathId, IdentifierBloomFilter filter) {}
