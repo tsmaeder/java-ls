@@ -12,8 +12,6 @@ package ch.castleridge.javals.classpath;
 
 import java.util.Collection;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
 
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -42,7 +40,6 @@ public final class ClasspathOrder {
 
     private final List<ClasspathEntry> entries;
     private final boolean unrestricted;
-    private final ConcurrentMap<String, Integer> rankCache = new ConcurrentHashMap<>();
 
     public ClasspathOrder(List<ClasspathEntry> entries, boolean unrestricted) {
         this.entries = entries;
@@ -58,10 +55,6 @@ public final class ClasspathOrder {
     public int rank(String sourceUri) {
         if (unrestricted) return sourceUri == null ? -1 : 0;
         if (sourceUri == null) return -1;
-        return rankCache.computeIfAbsent(sourceUri, this::computeRank);
-    }
-
-    private int computeRank(String sourceUri) {
         for (int i = 0; i < entries.size(); i++) {
             if (entries.get(i).contains(sourceUri)) {
                 return i;
