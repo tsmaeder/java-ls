@@ -19,19 +19,24 @@ import java.util.function.Function;
  *
  * <p>The map uses open addressing: a key's hash determines its first search
  * position and collisions are resolved by scanning subsequent slots. Null keys
- * and values are not supported because a null key marks an unused slot.
+ * and values are not supported; a null key marks an unused slot and deleted
+ * entries leave a tombstone so probe sequences stay intact.
  */
 public final class CompactConcurrentHashMap<K, V> {
 
     private static final int DEFAULT_CAPACITY = 16;
     private static final int MAXIMUM_CAPACITY = 1 << 30;
     private static final float LOAD_FACTOR = 0.65f;
+    private static final Object TOMBSTONE = new Object();
 
     private final StampedLock lock = new StampedLock();
 
     private Object[] keys;
     private Object[] values;
+    /** Live mappings. */
     private int size;
+    /** Live mappings plus tombstones; drives resize. */
+    private int occupied;
     private int resizeThreshold;
 
     public CompactConcurrentHashMap() {
@@ -74,17 +79,12 @@ public final class CompactConcurrentHashMap<K, V> {
 
         long stamp = lock.writeLock();
         try {
-            int slot = findSlot(key, keys);
-            if (keys[slot] != null) {
+            int slot = findInsertSlot(key, keys);
+            Object existing = keys[slot];
+            if (isLive(existing)) {
                 return valueAt(slot, values);
             }
-            if (size == resizeThreshold) {
-                resize();
-                slot = findSlot(key, keys);
-            }
-            keys[slot] = key;
-            values[slot] = value;
-            size++;
+            insertAt(slot, key, value, existing == TOMBSTONE);
             return null;
         } finally {
             lock.unlockWrite(stamp);
@@ -101,19 +101,37 @@ public final class CompactConcurrentHashMap<K, V> {
 
         long stamp = lock.writeLock();
         try {
-            int slot = findSlot(key, keys);
-            if (keys[slot] != null) {
-                return valueAt(slot, values);
-            }
-            if (size == resizeThreshold) {
-                resize();
-                slot = findSlot(key, keys);
+            int existing = findExistingSlot(key, keys);
+            if (existing >= 0) {
+                return valueAt(existing, values);
             }
             V value = Objects.requireNonNull(factory.apply(key), "factory result");
-            keys[slot] = key;
-            values[slot] = value;
-            size++;
+            int slot = findInsertSlot(key, keys);
+            insertAt(slot, key, value, keys[slot] == TOMBSTONE);
             return value;
+        } finally {
+            lock.unlockWrite(stamp);
+        }
+    }
+
+    /**
+     * Removes the mapping for {@code key}, returning the previous value or
+     * {@code null} if absent.
+     */
+    public V remove(K key) {
+        Objects.requireNonNull(key, "key");
+
+        long stamp = lock.writeLock();
+        try {
+            int slot = findExistingSlot(key, keys);
+            if (slot < 0) {
+                return null;
+            }
+            V prior = valueAt(slot, values);
+            keys[slot] = TOMBSTONE;
+            values[slot] = null;
+            size--;
+            return prior;
         } finally {
             lock.unlockWrite(stamp);
         }
@@ -134,6 +152,22 @@ public final class CompactConcurrentHashMap<K, V> {
         }
     }
 
+    private void insertAt(int slot, K key, V value, boolean reusingTombstone) {
+        if (!reusingTombstone) {
+            if (occupied == resizeThreshold) {
+                resize();
+                slot = findInsertSlot(key, keys);
+                reusingTombstone = keys[slot] == TOMBSTONE;
+            }
+            if (!reusingTombstone) {
+                occupied++;
+            }
+        }
+        keys[slot] = key;
+        values[slot] = value;
+        size++;
+    }
+
     private void resize() {
         int oldCapacity = keys.length;
         if (oldCapacity == MAXIMUM_CAPACITY) {
@@ -145,35 +179,74 @@ public final class CompactConcurrentHashMap<K, V> {
         Object[] newKeys = new Object[oldCapacity << 1];
         Object[] newValues = new Object[newKeys.length];
 
+        int live = 0;
         for (int i = 0; i < oldCapacity; i++) {
             Object key = oldKeys[i];
-            if (key != null) {
-                int slot = findSlot(key, newKeys);
+            if (isLive(key)) {
+                int slot = findInsertSlot(key, newKeys);
                 newKeys[slot] = key;
                 newValues[slot] = oldValues[i];
+                live++;
             }
         }
 
         keys = newKeys;
         values = newValues;
+        occupied = live;
         resizeThreshold = resizeThreshold(newKeys.length);
     }
 
-    private static int findSlot(Object key, Object[] table) {
+    private static boolean isLive(Object key) {
+        return key != null && key != TOMBSTONE;
+    }
+
+    /**
+     * Returns the slot holding {@code key}, or {@code -1} if absent.
+     */
+    private static int findExistingSlot(Object key, Object[] table) {
         int mask = table.length - 1;
         int slot = spread(key.hashCode()) & mask;
+        int start = slot;
+        do {
+            Object candidate = table[slot];
+            if (candidate == null) {
+                return -1;
+            }
+            if (candidate != TOMBSTONE && key.equals(candidate)) {
+                return slot;
+            }
+            slot = (slot + 1) & mask;
+        } while (slot != start);
+        return -1;
+    }
+
+    /**
+     * Returns the slot for an existing key, or the first reusable tombstone /
+     * empty slot along the probe sequence.
+     */
+    private static int findInsertSlot(Object key, Object[] table) {
+        int mask = table.length - 1;
+        int slot = spread(key.hashCode()) & mask;
+        int firstTombstone = -1;
         while (true) {
             Object candidate = table[slot];
-            if (candidate == null || key.equals(candidate)) {
+            if (candidate == null) {
+                return firstTombstone >= 0 ? firstTombstone : slot;
+            }
+            if (candidate == TOMBSTONE) {
+                if (firstTombstone < 0) {
+                    firstTombstone = slot;
+                }
+            } else if (key.equals(candidate)) {
                 return slot;
             }
             slot = (slot + 1) & mask;
         }
     }
 
-    private static <K, V> V getFromTables(K key, Object[] keys, Object[] values) {
-        int slot = findSlot(key, keys);
-        return keys[slot] == null ? null : valueAt(slot, values);
+    private static <V> V getFromTables(Object key, Object[] keys, Object[] values) {
+        int slot = findExistingSlot(key, keys);
+        return slot < 0 ? null : valueAt(slot, values);
     }
 
     @SuppressWarnings("unchecked")
