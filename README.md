@@ -1,6 +1,39 @@
 # java-ls
 
-A prototype Java language server that indexes sources and class files without resolving against a classpath, then uses that index (plus a per-file compile classpath) for LSP features such as go-to-definition, references, and diagnostics.
+java-ls is a proof-of-concept language server that is based on the idea of keeping an index of type declarations in source- and
+classfiles in workspace and using that index to feed type analysis in the compiler. Computing this index is completely
+dependency-free, meaning we can look at every source or class file in parallel and updating the index for a source file only affects the single
+index entry for that file. This index can be made quite reasonable in size (400mb total heap for the Trino source workspace)
+and grows linearly with workspace size (sources and jars). The index could also be precomputed and read from a file.
+
+When we implement language server features like "go-to-definition" or "type hierarchy", we need to fully resolve the types in
+the concerned source files. We do this analysis at runtime, but modify the compiler to directly build the resolved type objects
+from the index instead of reading them from source or class files. It turns out this is really fast. The type analysis uses
+the correct compile classpath for each file when resolving types, so references will be precise even with classpath shadowing.
+
+java-ls can support different indexer and LSP feature set implementations. We currently support both javac as well as the Eclipse
+compiler. The Eclipse compiler is generally around 50% faster at both indexing and analysis.
+
+We also keep a Bloom filter index for each indexed file. When we need to do cross-referencing (like "find all references" to a
+method), we compute a set of candidate files from the Bloom index then analyze all candidates using the compiler+index. Computing
+the references to java.lang.String in the Trino source is at least twice as fast as in any other tested language server. Although
+source analysis produces lots of objects, they are only retained while the source file is being analyzed. So the maximum heap requirement is small.
+
+java-ls currently supports "go to declaration", "find references", "super types" and "sub types". A simple implementation of
+code completion is also present, but very early days.
+The code in this repo is very largely written using AI, so there are probably lots of improvements in cleanliness and style
+to be made.
+
+java-ls does not currently have its own build file importer: instead we rely on the "mbt.json" format that has recently been
+introduced as part of the [Metals V2](https://metals-lsp.org/) effort. In order to create an mbt.json file for use with java-ls,
+you can simply open the workspace with metals V2 through the [metals-vscode](https://github.com/scalameta/metals-vscode/) extension
+from your favourite extension marketplace. The mbt.json file describes the structure of the workspace in a general format that
+contains the minimum necessary information to interpret the code correctly.
+
+## A Note of Thanks
+
+This code has been created as a test bed for trying out different ideas during a year-long project on behalf of [Cursor AI](https://cursor.com/) to improve Java support for large code bases. I would like to extend my thanks to Cursor for letting me open-source this
+code under MIT license to make it available to others.
 
 Design notes live in [doc/java-ls.md](doc/java-ls.md).
 
@@ -87,7 +120,7 @@ Settings are passed by the client in LSP `initialize` → `initializationOptions
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `workspacePath` | string | first workspace folder (else parent of `mbt.json`) | Root used to resolve relative paths from `mbt.json` |
-| `referencesCandidateCap` | number | uncapped (`≤ 0` or omitted) | Max candidate files scanned for find-references after bloom filtering; open documents and the origin file are always included |
+| `referencesCandidateCap` | number | uncapped (`≤ 0` or omitted) | Max candidate files scanned for find-references after Bloom filtering; open documents and the origin file are always included |
 | `backend.indexer` | `"javac"` \| `"ecj"` | `"javac"` | Compiler used when indexing sources |
 | `backend.compiler` | `"javac"` \| `"ecj"` | `"javac"` | Compiler used when analyzing open files (diagnostics, navigation, etc.) |
 
