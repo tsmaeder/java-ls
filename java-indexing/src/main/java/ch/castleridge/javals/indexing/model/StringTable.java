@@ -10,10 +10,10 @@
  */
 package ch.castleridge.javals.indexing.model;
 
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReferenceArray;
+
+import ch.castleridge.javals.indexing.collections.CompactConcurrentIntHashMap;
 
 /**
  * Process-wide, thread-safe, append-only int↔String arena used by
@@ -31,7 +31,8 @@ public final class StringTable {
     private static final int CHUNK_MASK = CHUNK_SIZE - 1;
     private static final int MAX_CHUNKS = 1 << 14; // up to ~67M strings
 
-    private static final ConcurrentMap<String, Integer> TO_ID = new ConcurrentHashMap<>(1 << 14);
+    private static final CompactConcurrentIntHashMap<String> TO_ID =
+            new CompactConcurrentIntHashMap<>(1 << 14);
     private static final AtomicReferenceArray<String[]> CHUNKS =
             new AtomicReferenceArray<>(MAX_CHUNKS);
     /** Next id to allocate; starts at 1 because 0 means null. */
@@ -51,20 +52,14 @@ public final class StringTable {
      */
     public static int intern(String s) {
         if (s == null) return 0;
-        Integer existing = TO_ID.get(s);
-        if (existing != null) return existing;
-        int id = NEXT_ID.getAndIncrement();
-        Integer prior = TO_ID.putIfAbsent(s, id);
-        if (prior != null) {
-            // Lost the race; the allocated id is unused (append-only, so
-            // we just leave a hole in the reverse table).
-            return prior;
-        }
-        store(id, s);
-        return id;
+        return TO_ID.computeIfAbsent(s, value -> {
+            int id = NEXT_ID.getAndIncrement();
+            store(id, value);
+            return id;
+        });
     }
 
-    /** Reverse lookup; id {@code 0} (and any unused hole) returns {@code null}. */
+    /** Reverse lookup; id {@code 0} returns {@code null}. */
     public static String get(int id) {
         if (id <= 0) return null;
         int chunkIndex = id >>> CHUNK_BITS;
