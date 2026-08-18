@@ -241,9 +241,8 @@ public final class IndexService {
             state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar, sourceRoots));
             notifyIndexChanged();
             Scanner scanner = new Scanner(sourceIndexer);
-            long t0 = System.nanoTime();
-            List<Throwable> failures = scanner.scanAll(sources.values(), index);
-            long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+            ScanResult scan = scanner.scan(sources.values(), index);
+            List<Throwable> failures = scan.failures();
             ScanStats stats = collector.snapshot();
 
             int jarCount = 0;
@@ -261,7 +260,9 @@ public final class IndexService {
 
             log(MessageType.Info, "Indexed " + index.size() + " types ("
                     + index.entryCount() + " entries) from " + sources.size()
-                    + " sources in " + elapsedMs + " ms"
+                    + " sources in " + scan.elapsedMs() + " ms"
+                    + " (class files: " + scan.classFilesMs() + " ms, source files: "
+                    + scan.sourceFilesMs() + " ms)"
                     + (failures.isEmpty() ? "" : "; " + failures.size() + " failures"));
             log(MessageType.Info, "Index stats: " + stats.sourceFileCount() + " source files, "
                     + jarCount + " jars (" + HeapSizeEstimator.formatBytes(jarBytes) + "); class files "

@@ -41,6 +41,11 @@ import ch.castleridge.javals.indexing.source.SourceIndexer;
  * work - ASM parsing, javac tree analysis - is dispatched from the walker
  * onto a separate {@link ForkJoinPool} which can saturate every CPU.
  *
+ * <p>{@link #scan} partitions inputs into class-file sources
+ * ({@link JarInput}, {@link JrtInput}, …) and source-directory inputs
+ * ({@link DirInput}), scanning each phase sequentially so callers can
+ * report separate wall-clock timings.
+ *
  * <p>Individual file failures are swallowed and collected so a single bad
  * class file cannot stop the scan.
  *
@@ -77,8 +82,52 @@ public final class Scanner {
         this.sourceIndexer = sourceIndexer == null ? SourceIndexer.javac() : sourceIndexer;
     }
 
+    /** Indexes {@code sources} into {@code into}; see {@link #scan}. */
     public List<Throwable> scanAll(Collection<InputSource> sources, Index into) {
+        return scan(sources, into).failures();
+    }
+
+    /**
+     * Indexes {@code sources} into {@code into}, scanning class-file
+     * inputs first and source directories second so the returned
+     * {@link ScanResult} carries separate wall-clock timings.
+     */
+    public ScanResult scan(Collection<InputSource> sources, Index into) {
+        List<InputSource> classSources = new ArrayList<>();
+        List<InputSource> sourceDirs = new ArrayList<>();
+        for (InputSource src : sources) {
+            if (src instanceof DirInput) {
+                sourceDirs.add(src);
+            } else {
+                classSources.add(src);
+            }
+        }
+
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
+        long t0 = System.nanoTime();
+        long classFilesMs;
+        long sourceFilesMs;
+        try {
+            long c0 = System.nanoTime();
+            driveAll(classSources, into, failures);
+            classFilesMs = (System.nanoTime() - c0) / 1_000_000L;
+
+            long s0 = System.nanoTime();
+            driveAll(sourceDirs, into, failures);
+            sourceFilesMs = (System.nanoTime() - s0) / 1_000_000L;
+        } finally {
+            if (ownsPool) {
+                pool.shutdown();
+            }
+        }
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+        return new ScanResult(List.copyOf(failures), classFilesMs, sourceFilesMs, elapsedMs);
+    }
+
+    private void driveAll(Collection<InputSource> sources, Index into, List<Throwable> failures) {
+        if (sources.isEmpty()) {
+            return;
+        }
         // Bound walker concurrency so we never hold more than a handful of
         // JarFiles open at once. Indexing itself is still parallel up to
         // every CPU via the shared ForkJoinPool.
@@ -106,11 +155,7 @@ public final class Scanner {
             }
         } finally {
             driverPool.shutdown();
-            if (ownsPool) {
-                pool.shutdown();
-            }
         }
-        return failures;
     }
 
     private void scanOneSource(InputSource src, Index into, List<Throwable> failures) {

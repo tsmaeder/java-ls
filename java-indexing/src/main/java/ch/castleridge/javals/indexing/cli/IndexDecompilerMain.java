@@ -27,6 +27,7 @@ import ch.castleridge.javals.indexing.scan.DirInput;
 import ch.castleridge.javals.indexing.scan.InputSource;
 import ch.castleridge.javals.indexing.scan.JarInput;
 import ch.castleridge.javals.indexing.scan.JrtInput;
+import ch.castleridge.javals.indexing.scan.ScanResult;
 import ch.castleridge.javals.indexing.scan.Scanner;
 
 /**
@@ -40,7 +41,7 @@ import ch.castleridge.javals.indexing.scan.Scanner;
  * </pre>
  *
  * After the scan finishes, prints the number of indexed types, any walker
- * errors, and the wall-clock time.
+ * errors, and wall-clock time (total plus class-file vs source-file phases).
  */
 public final class IndexDecompilerMain {
 
@@ -56,9 +57,8 @@ public final class IndexDecompilerMain {
 
         Index index = new InMemoryIndex();
         Scanner scanner = new Scanner();
-        long t0 = System.nanoTime();
-        List<Throwable> failures = scanner.scanAll(sources, index);
-        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+        ScanResult scan = scanner.scan(sources, index);
+        List<Throwable> failures = scan.failures();
 
         long retainedBytes = sampleUsedHeapBytes();
         long peakBytes = peakUsedHeapBytes();
@@ -68,7 +68,9 @@ public final class IndexDecompilerMain {
 
         System.out.println("Indexed types: " + types);
         System.out.println("Indexed entries: " + entries);
-        System.out.println("Elapsed: " + elapsedMs + " ms");
+        System.out.println("Elapsed: " + scan.elapsedMs() + " ms"
+                + " (class files: " + scan.classFilesMs() + " ms, source files: "
+                + scan.sourceFilesMs() + " ms)");
         System.out.println("Memory (heap, JVM delta):");
         System.out.println("  baseline:  " + formatBytes(baselineBytes));
         System.out.println("  retained:  " + formatBytes(retainedBytes)
