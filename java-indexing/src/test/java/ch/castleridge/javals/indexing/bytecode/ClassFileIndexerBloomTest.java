@@ -19,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Stream;
 
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
@@ -27,7 +28,8 @@ import javax.tools.StandardJavaFileManager;
 import javax.tools.StandardLocation;
 import javax.tools.ToolProvider;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import ch.castleridge.javals.indexing.bloom.BloomEntry;
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
@@ -35,8 +37,13 @@ import ch.castleridge.javals.indexing.index.InMemoryIndex;
 
 class ClassFileIndexerBloomTest {
 
-    @Test
-    void registersBloomWithSuperclassSimpleNameFromConstantPool() throws Exception {
+    static Stream<BytecodeIndexer> indexers() {
+        return Stream.of(BytecodeIndexer.asm(), BytecodeIndexer.turbine());
+    }
+
+    @ParameterizedTest
+    @MethodSource("indexers")
+    void registersBloomWithSuperclassSimpleNameFromConstantPool(BytecodeIndexer indexer) throws Exception {
         Path outDir = Files.createTempDirectory("classfile-bloom");
         try {
             JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
@@ -59,7 +66,7 @@ class ClassFileIndexerBloomTest {
             InMemoryIndex index = new InMemoryIndex();
             String sourceUri = "file:///lib.jar";
             String dogPath = "p/Dog.class";
-            ClassFileIndexer.index(
+            indexer.index(
                     dogPath,
                     sourceUri,
                     Files.readAllBytes(outDir.resolve("p").resolve("Dog.class")),

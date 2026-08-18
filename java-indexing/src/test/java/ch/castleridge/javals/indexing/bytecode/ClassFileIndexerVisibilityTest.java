@@ -17,6 +17,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Stream;
 
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
@@ -25,7 +26,8 @@ import javax.tools.StandardJavaFileManager;
 import javax.tools.StandardLocation;
 import javax.tools.ToolProvider;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.objectweb.asm.Opcodes;
 
 import ch.castleridge.javals.indexing.index.Index;
@@ -39,8 +41,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClassFileIndexerVisibilityTest {
 
-    @Test
-    void dropsPrivateMembersKeepsPackagePrivateAndPrivateCtor() throws Exception {
+    static Stream<BytecodeIndexer> indexers() {
+        return Stream.of(BytecodeIndexer.asm(), BytecodeIndexer.turbine());
+    }
+
+    @ParameterizedTest
+    @MethodSource("indexers")
+    void dropsPrivateMembersKeepsPackagePrivateAndPrivateCtor(BytecodeIndexer indexer) throws Exception {
         Path outDir = Files.createTempDirectory("visibility-index");
         try {
             JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
@@ -79,7 +86,7 @@ class ClassFileIndexerVisibilityTest {
                     "Visible$NestedPub.class",
                     "Visible$NestedPriv.class")) {
                 Path classFile = outDir.resolve("p").resolve(name);
-                ClassFileIndexer.index(
+                indexer.index(
                         "index:///p/" + name,
                         sourceUri,
                         Files.readAllBytes(classFile),

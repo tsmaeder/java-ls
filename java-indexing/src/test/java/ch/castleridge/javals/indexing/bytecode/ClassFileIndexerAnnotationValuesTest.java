@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Stream;
 
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
@@ -25,7 +26,8 @@ import javax.tools.StandardJavaFileManager;
 import javax.tools.StandardLocation;
 import javax.tools.ToolProvider;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
@@ -42,18 +44,17 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Bytecode-side smoke tests for {@link ClassFileIndexer}'s annotation
- * value capture: string arrays (the {@code @SuppressWarnings} shape),
- * primitive elements with explicit + default values, class literals,
- * enum constants, and annotation defaults via {@code @interface ... default}.
+ * Dual-backend smoke tests for bytecode annotation value capture.
  */
 class ClassFileIndexerAnnotationValuesTest {
 
-    @Test
-    void capturesStringArrayAndPrimitiveAnnotationElements() throws Exception {
-        // Use a CLASS-retention custom annotation so the string array is
-        // preserved through compilation; SuppressWarnings has SOURCE
-        // retention and would be stripped from bytecode.
+    static Stream<BytecodeIndexer> indexers() {
+        return Stream.of(BytecodeIndexer.asm(), BytecodeIndexer.turbine());
+    }
+
+    @ParameterizedTest
+    @MethodSource("indexers")
+    void capturesStringArrayAndPrimitiveAnnotationElements(BytecodeIndexer indexer) throws Exception {
         Path outDir = Files.createTempDirectory("ann-values");
         try {
             compile(outDir, "Strs.java", """
@@ -70,7 +71,7 @@ class ClassFileIndexerAnnotationValuesTest {
                     """);
 
             Index index = new InMemoryIndex();
-            ClassFileIndexer.index(
+            indexer.index(
                     "index:///V.class",
                     "index:///cp/",
                     vBytes,
@@ -102,8 +103,9 @@ class ClassFileIndexerAnnotationValuesTest {
         }
     }
 
-    @Test
-    void capturesClassLiteralAndEnumConstantElements() throws Exception {
+    @ParameterizedTest
+    @MethodSource("indexers")
+    void capturesClassLiteralAndEnumConstantElements(BytecodeIndexer indexer) throws Exception {
         Path outDir = Files.createTempDirectory("ann-values-class-enum");
         try {
             compile(outDir, "Pin.java", """
@@ -120,7 +122,7 @@ class ClassFileIndexerAnnotationValuesTest {
                     """);
 
             Index index = new InMemoryIndex();
-            ClassFileIndexer.index(
+            indexer.index(
                     "index:///Use.class",
                     "index:///cp/",
                     userBytes,
@@ -146,8 +148,9 @@ class ClassFileIndexerAnnotationValuesTest {
         }
     }
 
-    @Test
-    void capturesAnnotationDefaultValueFromBytecode() throws Exception {
+    @ParameterizedTest
+    @MethodSource("indexers")
+    void capturesAnnotationDefaultValueFromBytecode(BytecodeIndexer indexer) throws Exception {
         Path outDir = Files.createTempDirectory("ann-default");
         try {
             byte[] bytes = compile(outDir, "WithDefault.java", """
@@ -159,7 +162,7 @@ class ClassFileIndexerAnnotationValuesTest {
                     """);
 
             Index index = new InMemoryIndex();
-            ClassFileIndexer.index(
+            indexer.index(
                     "index:///WithDefault.class",
                     "index:///cp/",
                     bytes,
@@ -183,12 +186,11 @@ class ClassFileIndexerAnnotationValuesTest {
             assertInstanceOf(AnnotationValue.Arr.class, tags.annotationDefault());
             assertEquals(0, ((AnnotationValue.Arr) tags.annotationDefault()).elements().length);
 
-            // A method on a normal class has no AnnotationDefault.
             byte[] regularBytes = compile(outDir, "Reg.java", """
                     public class Reg { public void noDefault() {} }
                     """);
             Index regIndex = new InMemoryIndex();
-            ClassFileIndexer.index(
+            indexer.index(
                     "index:///Reg.class",
                     "index:///cp/",
                     regularBytes,
@@ -204,11 +206,6 @@ class ClassFileIndexerAnnotationValuesTest {
         return compile(outDir, fileName, null, source);
     }
 
-    /**
-     * Compile {@code source} into {@code outDir} and return the bytes
-     * for the produced class. If {@code classpath} is non-null it is
-     * added as the classpath so cross-source references resolve.
-     */
     private static byte[] compile(Path outDir, String fileName, Path classpath, String source) throws Exception {
         JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
         StandardJavaFileManager fm = compiler.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);

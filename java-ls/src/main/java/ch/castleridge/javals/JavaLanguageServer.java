@@ -58,10 +58,14 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
         this.compilerBackend = backend.compiler();
         this.watchedFilesDynamicRegistration = supportsWatchedFilesDynamicRegistration(params);
         indexService.setSourceIndexer(
-                ch.castleridge.javals.indexing.source.SourceIndexer.of(backend.indexer()));
+                ch.castleridge.javals.indexing.source.SourceIndexer.of(backend.sourceIndexer()));
+        indexService.setBytecodeIndexer(
+                ch.castleridge.javals.indexing.bytecode.BytecodeIndexer.of(backend.classIndexer()));
         rebindWorkspaceCompiler();
         logMessage(MessageType.Info,
-                "Backend: indexer=" + backend.indexer() + ", compiler=" + backend.compiler());
+                "Backend: sourceIndexer=" + backend.sourceIndexer()
+                        + ", classIndexer=" + backend.classIndexer()
+                        + ", compiler=" + backend.compiler());
 
         indexService.initialize(params);
         InitializationOptions.referencesCandidateCap(params)

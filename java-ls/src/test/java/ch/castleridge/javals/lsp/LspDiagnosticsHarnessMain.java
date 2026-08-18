@@ -80,12 +80,17 @@ public final class LspDiagnosticsHarnessMain {
         System.exit(hasErrors ? 1 : 0);
     }
 
-    /** {@code -Dbackend.indexer=ecj -Dbackend.compiler=ecj} select the ECJ backend. */
+    /**
+     * {@code -Dbackend.sourceIndexer=ecj -Dbackend.classIndexer=turbine -Dbackend.compiler=ecj}
+     * select backend implementations.
+     */
     private static Map<String, Object> backendOptions() {
         Map<String, Object> backend = new HashMap<>();
-        String indexer = System.getProperty("backend.indexer");
+        String sourceIndexer = System.getProperty("backend.sourceIndexer");
+        String classIndexer = System.getProperty("backend.classIndexer");
         String compiler = System.getProperty("backend.compiler");
-        if (indexer != null) backend.put("indexer", indexer);
+        if (sourceIndexer != null) backend.put("sourceIndexer", sourceIndexer);
+        if (classIndexer != null) backend.put("classIndexer", classIndexer);
         if (compiler != null) backend.put("compiler", compiler);
         return backend.isEmpty() ? Map.of() : Map.of("backend", backend);
     }

@@ -68,6 +68,8 @@ import ch.castleridge.javals.indexing.model.TypeRef;
  */
 public final class ClassFileIndexer {
 
+    public static final BytecodeIndexer INSTANCE = ClassFileIndexer::index;
+
     private static final int ASM_API = Opcodes.ASM9;
     // Bits carried by InnerClasses entries that materially affect
     // nested-member symbol shape (including ACC_STATIC for member

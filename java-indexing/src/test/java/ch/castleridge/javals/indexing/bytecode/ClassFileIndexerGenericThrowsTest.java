@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Stream;
 
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
@@ -24,7 +25,8 @@ import javax.tools.StandardJavaFileManager;
 import javax.tools.StandardLocation;
 import javax.tools.ToolProvider;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
@@ -40,8 +42,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClassFileIndexerGenericThrowsTest {
 
-    @Test
-    void genericThrowsTypeVariableIndexedFromSignature() throws Exception {
+    static Stream<BytecodeIndexer> indexers() {
+        return Stream.of(BytecodeIndexer.asm(), BytecodeIndexer.turbine());
+    }
+
+    @ParameterizedTest
+    @MethodSource("indexers")
+    void genericThrowsTypeVariableIndexedFromSignature(BytecodeIndexer indexer) throws Exception {
         Path outDir = Files.createTempDirectory("generic-throws-index");
         try {
             JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
@@ -65,7 +72,7 @@ class ClassFileIndexerGenericThrowsTest {
             assertTrue(compiler.getTask(null, fm, d -> {}, List.of(), List.of(), List.of(src)).call());
 
             Index index = new InMemoryIndex();
-            ClassFileIndexer.index(
+            indexer.index(
                     "index:///Sneaky.class",
                     "index:///cp/",
                     Files.readAllBytes(outDir.resolve("Sneaky.class")),
@@ -93,8 +100,9 @@ class ClassFileIndexerGenericThrowsTest {
         }
     }
 
-    @Test
-    void erasedThrowsUsedWhenSignatureHasNoThrowsClause() throws Exception {
+    @ParameterizedTest
+    @MethodSource("indexers")
+    void erasedThrowsUsedWhenSignatureHasNoThrowsClause(BytecodeIndexer indexer) throws Exception {
         Path outDir = Files.createTempDirectory("erased-throws-index");
         try {
             JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
@@ -115,7 +123,7 @@ class ClassFileIndexerGenericThrowsTest {
             assertTrue(compiler.getTask(null, fm, d -> {}, List.of(), List.of(), List.of(src)).call());
 
             Index index = new InMemoryIndex();
-            ClassFileIndexer.index(
+            indexer.index(
                     "index:///Throws.class",
                     "index:///cp/",
                     Files.readAllBytes(outDir.resolve("Throws.class")),

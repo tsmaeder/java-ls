@@ -64,6 +64,8 @@ public final class IndexService {
     });
     private volatile ch.castleridge.javals.indexing.source.SourceIndexer sourceIndexer =
             ch.castleridge.javals.indexing.source.SourceIndexer.javac();
+    private volatile ch.castleridge.javals.indexing.bytecode.BytecodeIndexer bytecodeIndexer =
+            ch.castleridge.javals.indexing.bytecode.BytecodeIndexer.asm();
 
     public IndexService(JavaLanguageServer server) {
         this.server = server;
@@ -73,6 +75,12 @@ public final class IndexService {
         this.sourceIndexer = sourceIndexer == null
                 ? ch.castleridge.javals.indexing.source.SourceIndexer.javac()
                 : sourceIndexer;
+    }
+
+    public void setBytecodeIndexer(ch.castleridge.javals.indexing.bytecode.BytecodeIndexer bytecodeIndexer) {
+        this.bytecodeIndexer = bytecodeIndexer == null
+                ? ch.castleridge.javals.indexing.bytecode.BytecodeIndexer.asm()
+                : bytecodeIndexer;
     }
 
     public void addIndexChangedListener(Runnable listener) {
@@ -240,7 +248,7 @@ public final class IndexService {
             List<SourceRoot> sourceRoots = collectSourceRoots(sources);
             state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar, sourceRoots));
             notifyIndexChanged();
-            Scanner scanner = new Scanner(sourceIndexer);
+            Scanner scanner = new Scanner(sourceIndexer, bytecodeIndexer);
             ScanResult scan = scanner.scan(sources.values(), index);
             List<Throwable> failures = scan.failures();
             ScanStats stats = collector.snapshot();

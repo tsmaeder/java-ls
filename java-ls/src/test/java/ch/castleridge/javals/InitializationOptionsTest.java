@@ -57,26 +57,34 @@ class InitializationOptionsTest {
     }
 
     @Test
-    void backendDefaultsToJavacAndReadsNestedConfig() {
-        assertEquals("javac", InitializationOptions.backend(new InitializeParams()).indexer());
-        assertEquals("javac", InitializationOptions.backend(new InitializeParams()).compiler());
+    void backendDefaultsAndReadsNestedConfig() {
+        InitializationOptions.Backend defaults = InitializationOptions.backend(new InitializeParams());
+        assertEquals("javac", defaults.sourceIndexer());
+        assertEquals("asm", defaults.classIndexer());
+        assertEquals("javac", defaults.compiler());
 
         Map<String, Object> options = new HashMap<>();
-        options.put("backend", Map.of("indexer", "ecj", "compiler", "ECJ"));
+        options.put("backend", Map.of(
+                "sourceIndexer", "ecj",
+                "classIndexer", "turbine",
+                "compiler", "ECJ"));
         InitializeParams params = new InitializeParams();
         params.setInitializationOptions(options);
         InitializationOptions.Backend backend = InitializationOptions.backend(params);
-        assertEquals("ecj", backend.indexer());
+        assertEquals("ecj", backend.sourceIndexer());
+        assertEquals("turbine", backend.classIndexer());
         assertEquals("ecj", backend.compiler());
 
         JsonObject json = new JsonObject();
         JsonObject backendJson = new JsonObject();
-        backendJson.addProperty("indexer", "javac");
+        backendJson.addProperty("sourceIndexer", "javac");
+        backendJson.addProperty("classIndexer", "asm");
         backendJson.addProperty("compiler", "ecj");
         json.add("backend", backendJson);
         params.setInitializationOptions(json);
         backend = InitializationOptions.backend(params);
-        assertEquals("javac", backend.indexer());
+        assertEquals("javac", backend.sourceIndexer());
+        assertEquals("asm", backend.classIndexer());
         assertEquals("ecj", backend.compiler());
     }
 

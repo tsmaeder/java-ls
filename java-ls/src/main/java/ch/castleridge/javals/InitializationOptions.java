@@ -14,6 +14,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.function.UnaryOperator;
 
 import org.eclipse.lsp4j.InitializeParams;
 
@@ -26,8 +27,8 @@ import com.google.gson.JsonPrimitive;
  */
 final class InitializationOptions {
 
-    record Backend(String indexer, String compiler) {
-        static final Backend DEFAULT = new Backend("javac", "javac");
+    record Backend(String sourceIndexer, String classIndexer, String compiler) {
+        static final Backend DEFAULT = new Backend("javac", "asm", "javac");
     }
 
     private InitializationOptions() {}
@@ -63,16 +64,19 @@ final class InitializationOptions {
         if (backend == null) {
             return Backend.DEFAULT;
         }
-        String indexer = Backend.DEFAULT.indexer();
+        String sourceIndexer = Backend.DEFAULT.sourceIndexer();
+        String classIndexer = Backend.DEFAULT.classIndexer();
         String compiler = Backend.DEFAULT.compiler();
         if (backend instanceof Map<?, ?> map) {
-            indexer = readBackendName(map.get("indexer"), indexer);
-            compiler = readBackendName(map.get("compiler"), compiler);
+            sourceIndexer = readBackendName(map.get("sourceIndexer"), sourceIndexer, InitializationOptions::normalizeCompilerBackend);
+            classIndexer = readBackendName(map.get("classIndexer"), classIndexer, InitializationOptions::normalizeClassIndexer);
+            compiler = readBackendName(map.get("compiler"), compiler, InitializationOptions::normalizeCompilerBackend);
         } else if (backend instanceof JsonObject json) {
-            indexer = readBackendName(json.get("indexer"), indexer);
-            compiler = readBackendName(json.get("compiler"), compiler);
+            sourceIndexer = readBackendName(json.get("sourceIndexer"), sourceIndexer, InitializationOptions::normalizeCompilerBackend);
+            classIndexer = readBackendName(json.get("classIndexer"), classIndexer, InitializationOptions::normalizeClassIndexer);
+            compiler = readBackendName(json.get("compiler"), compiler, InitializationOptions::normalizeCompilerBackend);
         }
-        return new Backend(indexer, compiler);
+        return new Backend(sourceIndexer, classIndexer, compiler);
     }
 
     private static Object optionsObject(InitializeParams params) {
@@ -89,27 +93,35 @@ final class InitializationOptions {
         return OptionalInt.empty();
     }
 
-    private static String readBackendName(Object value, String defaultValue) {
+    private static String readBackendName(Object value, String defaultValue, UnaryOperator<String> normalize) {
         if (value == null) return defaultValue;
         if (value instanceof String s) {
-            return normalizeBackend(s, defaultValue);
+            return normalize.apply(s.isBlank() ? defaultValue : s);
         }
         if (value instanceof JsonElement el) {
             if (!el.isJsonPrimitive()) return defaultValue;
             JsonPrimitive p = el.getAsJsonPrimitive();
             if (p.isString()) {
-                return normalizeBackend(p.getAsString(), defaultValue);
+                String s = p.getAsString();
+                return normalize.apply(s == null || s.isBlank() ? defaultValue : s);
             }
         }
         return defaultValue;
     }
 
-    private static String normalizeBackend(String raw, String defaultValue) {
-        if (raw == null || raw.isBlank()) return defaultValue;
+    private static String normalizeCompilerBackend(String raw) {
         String n = raw.trim().toLowerCase(Locale.ROOT);
         return switch (n) {
             case "javac", "ecj" -> n;
-            default -> defaultValue;
+            default -> Backend.DEFAULT.sourceIndexer();
+        };
+    }
+
+    private static String normalizeClassIndexer(String raw) {
+        String n = raw.trim().toLowerCase(Locale.ROOT);
+        return switch (n) {
+            case "asm", "turbine" -> n;
+            default -> Backend.DEFAULT.classIndexer();
         };
     }
 

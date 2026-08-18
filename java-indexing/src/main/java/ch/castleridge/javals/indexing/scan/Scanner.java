@@ -22,7 +22,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.Future;
 
-import ch.castleridge.javals.indexing.bytecode.ClassFileIndexer;
+import ch.castleridge.javals.indexing.bytecode.BytecodeIndexer;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.source.SourceIndexer;
@@ -38,8 +38,8 @@ import ch.castleridge.javals.indexing.source.SourceIndexer;
  * <p>Input sources are walked concurrently across a small driver pool so
  * that sequential {@link java.util.jar.JarFile} iteration does not
  * serialise the wall clock across hundreds of jars. File-level indexing
- * work - ASM parsing, javac tree analysis - is dispatched from the walker
- * onto a separate {@link ForkJoinPool} which can saturate every CPU.
+ * work - class-file parsing, javac tree analysis - is dispatched from the
+ * walker onto a separate {@link ForkJoinPool} which can saturate every CPU.
  *
  * <p>{@link #scan} partitions inputs into class-file sources
  * ({@link JarInput}, {@link JrtInput}, …) and source-directory inputs
@@ -59,27 +59,39 @@ public final class Scanner {
     private final ForkJoinPool pool;
     private final boolean ownsPool;
     private final SourceIndexer sourceIndexer;
+    private final BytecodeIndexer bytecodeIndexer;
 
     public Scanner() {
-        this(SourceIndexer.javac());
+        this(SourceIndexer.javac(), BytecodeIndexer.asm());
     }
 
     public Scanner(SourceIndexer sourceIndexer) {
-        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())), true, sourceIndexer);
+        this(sourceIndexer, BytecodeIndexer.asm());
+    }
+
+    public Scanner(SourceIndexer sourceIndexer, BytecodeIndexer bytecodeIndexer) {
+        this(new ForkJoinPool(Math.max(2, Runtime.getRuntime().availableProcessors())),
+                true, sourceIndexer, bytecodeIndexer);
     }
 
     public Scanner(ForkJoinPool pool) {
-        this(pool, false, SourceIndexer.javac());
+        this(pool, false, SourceIndexer.javac(), BytecodeIndexer.asm());
     }
 
     public Scanner(ForkJoinPool pool, SourceIndexer sourceIndexer) {
-        this(pool, false, sourceIndexer);
+        this(pool, false, sourceIndexer, BytecodeIndexer.asm());
     }
 
-    private Scanner(ForkJoinPool pool, boolean owns, SourceIndexer sourceIndexer) {
+    public Scanner(ForkJoinPool pool, SourceIndexer sourceIndexer, BytecodeIndexer bytecodeIndexer) {
+        this(pool, false, sourceIndexer, bytecodeIndexer);
+    }
+
+    private Scanner(ForkJoinPool pool, boolean owns, SourceIndexer sourceIndexer,
+                    BytecodeIndexer bytecodeIndexer) {
         this.pool = pool;
         this.ownsPool = owns;
         this.sourceIndexer = sourceIndexer == null ? SourceIndexer.javac() : sourceIndexer;
+        this.bytecodeIndexer = bytecodeIndexer == null ? BytecodeIndexer.asm() : bytecodeIndexer;
     }
 
     /** Indexes {@code sources} into {@code into}; see {@link #scan}. */
@@ -166,7 +178,8 @@ public final class Scanner {
             src.walk((relativePath, fileName, bytes) -> {
                 ForkJoinTask<?> task = pool.submit(() -> {
                     try {
-                        indexOne(sourceIndexer, relativePath, srcUri, fileName, bytes.get(), temp);
+                        indexOne(sourceIndexer, bytecodeIndexer, relativePath, srcUri,
+                                fileName, bytes.get(), temp);
                     } catch (Throwable t) {
                         failures.add(t);
                     }
@@ -192,10 +205,11 @@ public final class Scanner {
         into.addAll(temp);
     }
 
-    private static void indexOne(SourceIndexer sourceIndexer, String relativePath, String sourceUri,
+    private static void indexOne(SourceIndexer sourceIndexer, BytecodeIndexer bytecodeIndexer,
+                                 String relativePath, String sourceUri,
                                  String fileName, byte[] content, Index into) {
         if (fileName.endsWith(".class")) {
-            ClassFileIndexer.index(relativePath, sourceUri, content, into);
+            bytecodeIndexer.index(relativePath, sourceUri, content, into);
         } else if (fileName.endsWith(".java")) {
             sourceIndexer.index(relativePath, sourceUri,
                     new String(content, StandardCharsets.UTF_8), into);
