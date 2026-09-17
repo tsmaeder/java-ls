@@ -11,8 +11,7 @@
 package ch.castleridge.javals;
 
 import org.eclipse.lsp4j.jsonrpc.Launcher;
-import org.eclipse.lsp4j.launch.LSPLauncher;
-import org.eclipse.lsp4j.services.LanguageClient;
+import org.eclipse.lsp4j.services.LanguageServer;
 
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -50,15 +49,17 @@ public class App {
         // Create the language server
         JavaLanguageServer server = new JavaLanguageServer();
         
-        // Create the launcher
-        Launcher<LanguageClient> launcher = LSPLauncher.createServerLauncher(
-            server, 
-            in, 
-            out
-        );
-        
+        // Create the launcher with the custom JavaLanguageClient interface
+        // so the server can send java/* custom notifications.
+        Launcher<JavaLanguageClient> launcher = new Launcher.Builder<JavaLanguageClient>()
+            .setLocalService(server)
+            .setRemoteInterface(JavaLanguageClient.class)
+            .setInput(in)
+            .setOutput(out)
+            .create();
+
         // Connect the client proxy to the server
-        LanguageClient client = launcher.getRemoteProxy();
+        JavaLanguageClient client = launcher.getRemoteProxy();
         server.connect(client);
         
         // Start listening

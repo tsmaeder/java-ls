@@ -41,6 +41,7 @@ import org.eclipse.lsp4j.WorkspaceFolder;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.index.UriCoding;
+import ch.castleridge.javals.progress.ProgressMonitor;
 
 /**
  * Bootstraps the workspace {@link Index} by locating an {@code mbt.json}
@@ -230,7 +231,15 @@ public final class IndexService {
 
 
     private void loadFrom(Path mbt, Path workspacePath) {
+        ProgressMonitor monitor = server != null ? server.createProgressMonitor() : null;
         try {
+            if (server != null) {
+                server.setServerStatus(ServerStatus.indexing);
+            }
+            if (monitor != null) {
+                monitor.begin("Indexing Java workspace", "Loading mbt.json...", 0, false);
+            }
+
             MbtInfo info = MbtJson.read(mbt);
             Map<String, String> sourceJarByBinaryJar = new HashMap<>();
             Map<String, ClasspathOrder> classpathsByNamespace = new HashMap<>();
@@ -241,29 +250,53 @@ public final class IndexService {
 
             if (sources.isEmpty()) {
                 log(MessageType.Warning, "mbt.json contained no input sources: " + mbt);
+                if (monitor != null) {
+                    monitor.end("No input sources found.");
+                }
+                if (server != null) {
+                    server.setServerStatus(ServerStatus.ready);
+                }
                 return;
             }
-            Index index = new InMemoryIndex();
-            index.addChangedListener(this::notifyIndexChanged);
-            List<SourceRoot> sourceRoots = collectSourceRoots(sources);
-            state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar, sourceRoots));
-            notifyIndexChanged();
-            Scanner scanner = new Scanner(sourceIndexer, bytecodeIndexer);
-            ScanResult scan = scanner.scan(sources.values(), index);
-            List<Throwable> failures = scan.failures();
-            ScanStats stats = collector.snapshot();
 
             int jarCount = 0;
             long jarBytes = 0L;
+            int sourceCount = 0;
             for (InputSource src : sources.values()) {
                 if (src instanceof JarInput jarInput) {
                     jarCount++;
                     try {
                         jarBytes += Files.size(jarInput.jar());
                     } catch (IOException ignored) {
-                        // leave jarBytes unchanged for unreadable jars
                     }
+                } else if (src instanceof DirInput) {
+                    sourceCount++;
                 }
+            }
+
+            if (monitor != null) {
+                monitor.report("Indexing class files (" + jarCount + " jars)...", 10);
+            }
+
+            Index index = new InMemoryIndex();
+            index.addChangedListener(this::notifyIndexChanged);
+            List<SourceRoot> sourceRoots = collectSourceRoots(sources);
+            state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar, sourceRoots));
+            notifyIndexChanged();
+            Scanner scanner = new Scanner(sourceIndexer, bytecodeIndexer);
+            ScanResult scan = scanner.scan(sources.values(), index, (phase, current, total) -> {
+                if (monitor != null) {
+                    String msg = phase + " " + current + "/" + total;
+                    int pct = total > 0 ? 10 + (int) (80L * current / total) : 50;
+                    monitor.reportAbsolute(msg, pct);
+                }
+            });
+            List<Throwable> failures = scan.failures();
+            ScanStats stats = collector.snapshot();
+
+            if (monitor != null) {
+                monitor.end("Indexed " + index.size() + " types from " + sources.size()
+                        + " sources in " + scan.elapsedMs() + " ms.");
             }
 
             log(MessageType.Info, "Indexed " + index.size() + " types ("
@@ -289,12 +322,27 @@ public final class IndexService {
             if (server != null && !sourceRoots.isEmpty()) {
                 server.registerSourceFileWatchers(sourceRootUris());
             }
+            if (server != null) {
+                server.setServerStatus(ServerStatus.ready);
+            }
         } catch (IOException e) {
             log(MessageType.Error, "Failed to load mbt.json " + mbt + ": " + e.getMessage());
+            if (monitor != null) {
+                monitor.end("Failed to load mbt.json.");
+            }
+            if (server != null) {
+                server.setServerStatus(ServerStatus.ready);
+            }
         } catch (RuntimeException e) {
             StringWriter writer = new StringWriter();
             e.printStackTrace(new PrintWriter(writer));
             log(MessageType.Error, "Indexing failed for " + mbt + ": " + writer);
+            if (monitor != null) {
+                monitor.end("Indexing failed.");
+            }
+            if (server != null) {
+                server.setServerStatus(ServerStatus.ready);
+            }
         }
     }
 

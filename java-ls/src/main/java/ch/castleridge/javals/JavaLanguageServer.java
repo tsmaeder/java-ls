@@ -13,24 +13,30 @@ package ch.castleridge.javals;
 import org.eclipse.lsp4j.*;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.services.*;
+
+import ch.castleridge.javals.progress.ProgressSupport;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 /**
  * Main Language Server implementation for Java LSP
  */
-public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
-    
+public class JavaLanguageServer implements LanguageServer, LanguageClientAware, ProgressSupport {
+
     private final TextDocumentService textDocumentService;
     private final WorkspaceService workspaceService;
     private final IndexService indexService;
-    private LanguageClient client;
+    private JavaLanguageClient client;
     private int errorCode = 1;
     private volatile String compilerBackend = "javac";
     private volatile boolean watchedFilesDynamicRegistration;
+    private volatile boolean workDoneProgressSupported;
+    private final AtomicReference<ServerStatus> serverStatus = new AtomicReference<>(ServerStatus.starting);
 
     public JavaLanguageServer() {
         this.indexService = new IndexService(this);
@@ -57,6 +63,7 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
         InitializationOptions.Backend backend = InitializationOptions.backend(params);
         this.compilerBackend = backend.compiler();
         this.watchedFilesDynamicRegistration = supportsWatchedFilesDynamicRegistration(params);
+        this.workDoneProgressSupported = supportsWorkDoneProgress(params);
         indexService.setSourceIndexer(
                 ch.castleridge.javals.indexing.source.SourceIndexer.of(backend.sourceIndexer()));
         indexService.setBytecodeIndexer(
@@ -162,6 +169,13 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
         return Boolean.TRUE.equals(workspace.getDidChangeWatchedFiles().getDynamicRegistration());
     }
 
+    private static boolean supportsWorkDoneProgress(InitializeParams params) {
+        if (params == null || params.getCapabilities() == null) return false;
+        WindowClientCapabilities window = params.getCapabilities().getWindow();
+        if (window == null || window.getWorkDoneProgress() == null) return false;
+        return Boolean.TRUE.equals(window.getWorkDoneProgress());
+    }
+
     @Override
     public CompletableFuture<Object> shutdown() {
         errorCode = 0;
@@ -185,10 +199,10 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
 
     @Override
     public void connect(LanguageClient client) {
-        this.client = client;
+        this.client = (JavaLanguageClient) client;
     }
 
-    public LanguageClient getClient() {
+    public JavaLanguageClient getClient() {
         return client;
     }
 
@@ -208,6 +222,51 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
             String stackTrace = stringWriter.toString();
             MessageParams params = new MessageParams(MessageType.Error, e.getMessage() + "\n" + stackTrace);
             client.logMessage(params);
+        }
+    }
+
+    // -- ProgressSupport implementation --
+
+    @Override
+    public boolean isWorkDoneProgressSupported() {
+        return workDoneProgressSupported;
+    }
+
+    @Override
+    public CompletableFuture<Void> createProgress(WorkDoneProgressCreateParams params) {
+        if (client != null) {
+            return client.createProgress(params);
+        }
+        return CompletableFuture.completedFuture(null);
+    }
+
+    @Override
+    public void notifyProgress(String progressId, WorkDoneProgressNotification notification) {
+        if (client != null) {
+            ProgressParams params = new ProgressParams(Either.forLeft(progressId), Either.forRight(notification));
+            client.notifyProgress(params);
+        }
+    }
+
+    // -- Server status --
+
+    public ServerStatus getServerStatus() {
+        return serverStatus.get();
+    }
+
+    /**
+     * Updates the server status and sends a {@code java/serverStatus}
+     * notification to the client if the status actually changed.
+     *
+     * @param status the new server status
+     */
+    public void setServerStatus(ServerStatus status) {
+        ServerStatus previous = serverStatus.getAndSet(status);
+        if (previous != status) {
+            logMessage(MessageType.Info, "Server status: " + status);
+            if (client != null) {
+                client.serverStatus(new ServerStatusParams(status));
+            }
         }
     }
 }

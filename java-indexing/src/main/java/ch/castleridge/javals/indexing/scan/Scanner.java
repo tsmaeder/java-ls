@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import ch.castleridge.javals.indexing.bytecode.BytecodeIndexer;
 import ch.castleridge.javals.indexing.index.Index;
@@ -105,6 +106,22 @@ public final class Scanner {
      * {@link ScanResult} carries separate wall-clock timings.
      */
     public ScanResult scan(Collection<InputSource> sources, Index into) {
+        return scan(sources, into, null);
+    }
+
+    /**
+     * Indexes {@code sources} into {@code into} with progress reporting.
+     *
+     * <p>Class-file inputs are scanned first, then source directories.
+     * The optional {@code listener} receives progress updates as each
+     * {@link InputSource} completes.
+     *
+     * @param sources  the input sources to index
+     * @param into     the target index to populate
+     * @param listener optional callback for progress updates; may be {@code null}
+     * @return scan result with timings and any failures
+     */
+    public ScanResult scan(Collection<InputSource> sources, Index into, ScanProgressListener listener) {
         List<InputSource> classSources = new ArrayList<>();
         List<InputSource> sourceDirs = new ArrayList<>();
         for (InputSource src : sources) {
@@ -121,11 +138,11 @@ public final class Scanner {
         long sourceFilesMs;
         try {
             long c0 = System.nanoTime();
-            driveAll(classSources, into, failures);
+            driveAll(classSources, into, failures, "Indexing class files", listener);
             classFilesMs = (System.nanoTime() - c0) / 1_000_000L;
 
             long s0 = System.nanoTime();
-            driveAll(sourceDirs, into, failures);
+            driveAll(sourceDirs, into, failures, "Indexing source files", listener);
             sourceFilesMs = (System.nanoTime() - s0) / 1_000_000L;
         } finally {
             if (ownsPool) {
@@ -136,13 +153,11 @@ public final class Scanner {
         return new ScanResult(List.copyOf(failures), classFilesMs, sourceFilesMs, elapsedMs);
     }
 
-    private void driveAll(Collection<InputSource> sources, Index into, List<Throwable> failures) {
+    private void driveAll(Collection<InputSource> sources, Index into, List<Throwable> failures,
+                          String phase, ScanProgressListener listener) {
         if (sources.isEmpty()) {
             return;
         }
-        // Bound walker concurrency so we never hold more than a handful of
-        // JarFiles open at once. Indexing itself is still parallel up to
-        // every CPU via the shared ForkJoinPool.
         int drivers = Math.max(2, Math.min(8,
                 Math.max(1, Runtime.getRuntime().availableProcessors() / 2)));
         ExecutorService driverPool = Executors.newFixedThreadPool(drivers, r -> {
@@ -151,9 +166,16 @@ public final class Scanner {
             return t;
         });
         try {
-            List<Future<?>> sourceFutures = new ArrayList<>(sources.size());
+            int total = sources.size();
+            AtomicInteger completed = new AtomicInteger();
+            List<Future<?>> sourceFutures = new ArrayList<>(total);
             for (InputSource src : sources) {
-                sourceFutures.add(driverPool.submit(() -> scanOneSource(src, into, failures)));
+                sourceFutures.add(driverPool.submit(() -> {
+                    scanOneSource(src, into, failures);
+                    if (listener != null) {
+                        listener.onProgress(phase, completed.incrementAndGet(), total);
+                    }
+                }));
             }
             for (Future<?> f : sourceFutures) {
                 try {
