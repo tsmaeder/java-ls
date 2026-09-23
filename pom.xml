@@ -13,6 +13,7 @@
 
   <modules>
     <module>java-indexing</module>
+    <module>java-ast</module>
     <module>java-ls</module>
   </modules>
 

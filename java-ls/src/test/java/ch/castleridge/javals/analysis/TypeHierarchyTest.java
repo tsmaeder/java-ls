@@ -29,11 +29,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import ch.castleridge.javals.analysis.ecj.EcjDeclarationLocator;
+import ch.castleridge.javals.analysis.ecj.EcjDietSources;
 import ch.castleridge.javals.analysis.ecj.EcjWorkspaceCompiler;
+import ch.castleridge.javals.analysis.javac.JavacDietSources;
 import ch.castleridge.javals.analysis.javac.JavacWorkspaceCompiler;
-import ch.castleridge.javals.analysis.javac.SourceCache;
-import ch.castleridge.javals.analysis.javac.SymbolLocator;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
@@ -184,8 +183,8 @@ class TypeHierarchyTest {
 
     private AnalysisSession analyze(String backend, URI uri, String source) {
         WorkspaceCompiler compiler = "ecj".equals(backend)
-                ? new EcjWorkspaceCompiler(new EcjDeclarationLocator(), attachedSources)
-                : new JavacWorkspaceCompiler(new SymbolLocator(new SourceCache()), attachedSources);
+                ? new EcjWorkspaceCompiler(new AstDeclarationLocator(EcjDietSources::lower), attachedSources)
+                : new JavacWorkspaceCompiler(new AstDeclarationLocator(JavacDietSources::lower), attachedSources);
         return compiler.analyze(uri, source, index, classpath);
     }
 

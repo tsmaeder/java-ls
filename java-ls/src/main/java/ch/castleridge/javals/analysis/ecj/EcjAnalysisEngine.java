@@ -34,6 +34,9 @@ import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
 
+import ch.castleridge.javals.analysis.AnalysisSession;
+import ch.castleridge.javals.analysis.AstAnalysisSession;
+import ch.castleridge.javals.analysis.AstDeclarationLocator;
 import ch.castleridge.javals.analysis.PublishedDiagnostic;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
@@ -43,15 +46,18 @@ final class EcjAnalysisEngine {
 
     private EcjAnalysisEngine() {}
 
-    static EcjAnalysisSession analyze(URI uri,
-                                      CharSequence text,
-                                      Index index,
-                                      ClasspathOrder classpath,
-                                      EcjDeclarationLocator declarationLocator,
-                                      Map<String, String> sourceJarByBinaryJar) {
-        if (!index.contains(OBJECT_JVM_NAME)) return EcjAnalysisSession.empty();
-
+    static AnalysisSession analyze(URI uri,
+                                   CharSequence text,
+                                   Index index,
+                                   ClasspathOrder classpath,
+                                   AstDeclarationLocator locator,
+                                   Map<String, String> sourceJarByBinaryJar) {
         String source = text == null ? "" : text.toString();
+        if (!index.contains(OBJECT_JVM_NAME)) {
+            ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(null, uri, source, index, classpath);
+            return new AstAnalysisSession(cu, List.of(), index, classpath, locator, sourceJarByBinaryJar);
+        }
+
         String fileName = uri == null ? "Analysis.java" : uri.toString();
         ICompilationUnit input = new CompilationUnit(source.toCharArray(), fileName, "UTF-8");
         List<CategorizedProblem> problems = new ArrayList<>();
@@ -74,19 +80,32 @@ final class EcjAnalysisEngine {
         try {
             compiler.compile(new ICompilationUnit[] { input });
             mergeUnitProblems(compiler.unit, problems);
-            return new EcjAnalysisSession(uri, source, compiler.unit, mapProblems(problems, source),
-                    index, classpath, declarationLocator, sourceJarByBinaryJar);
+            return session(uri, source, compiler.unit, mapProblems(problems, source),
+                    index, classpath, locator, sourceJarByBinaryJar);
         } catch (RuntimeException | Error failure) {
             mergeUnitProblems(compiler.unit, problems);
             List<PublishedDiagnostic> diagnostics = mapProblems(problems, source);
             if (!diagnostics.isEmpty() || compiler.unit != null) {
-                return new EcjAnalysisSession(uri, source, compiler.unit, diagnostics,
-                        index, classpath, declarationLocator, sourceJarByBinaryJar);
+                return session(uri, source, compiler.unit, diagnostics,
+                        index, classpath, locator, sourceJarByBinaryJar);
             }
-            return EcjAnalysisSession.empty();
+            ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(null, uri, source, index, classpath);
+            return new AstAnalysisSession(cu, diagnostics, index, classpath, locator, sourceJarByBinaryJar);
         } finally {
             environment.cleanup();
         }
+    }
+
+    private static AstAnalysisSession session(URI uri,
+                                              String source,
+                                              CompilationUnitDeclaration unit,
+                                              List<PublishedDiagnostic> diagnostics,
+                                              Index index,
+                                              ClasspathOrder classpath,
+                                              AstDeclarationLocator locator,
+                                              Map<String, String> sourceJarByBinaryJar) {
+        ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(unit, uri, source, index, classpath);
+        return new AstAnalysisSession(cu, diagnostics, index, classpath, locator, sourceJarByBinaryJar);
     }
 
     private static void collectProblems(CompilationResult result, List<CategorizedProblem> out) {

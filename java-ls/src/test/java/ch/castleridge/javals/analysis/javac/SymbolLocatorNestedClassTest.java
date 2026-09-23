@@ -10,6 +10,9 @@
  */
 package ch.castleridge.javals.analysis.javac;
 
+import ch.castleridge.javals.analysis.AnalysisSession;
+import ch.castleridge.javals.analysis.AstDeclarationLocator;
+import ch.castleridge.javals.analysis.ResolvedSymbol;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
 
@@ -18,23 +21,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-
-import javax.lang.model.element.Element;
+import java.util.stream.Collectors;
 
 import org.eclipse.lsp4j.Location;
+import org.eclipse.lsp4j.Position;
 import org.junit.jupiter.api.Test;
-
-import com.sun.source.tree.CompilationUnitTree;
-import com.sun.source.tree.LineMap;
-import com.sun.source.util.TreePath;
-import com.sun.source.util.Trees;
-
-import java.util.stream.Collectors;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
-import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.scan.JrtInput;
 import ch.castleridge.javals.indexing.scan.Scanner;
 
@@ -58,9 +52,6 @@ class SymbolLocatorNestedClassTest {
         List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
         assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
 
-        TypeEntry encoder = ch.castleridge.javals.IndexTestUtils.get(index, "java/util/Base64$Encoder");
-        assertNotNull(encoder, "Base64$Encoder must be indexed from jrt");
-
         String source = """
                 import java.util.Base64.Encoder;
 
@@ -71,31 +62,16 @@ class SymbolLocatorNestedClassTest {
         ClasspathOrder cp = new ClasspathOrder(
                 List.of(jrtUri).stream().map(UriClasspathEntry::of).collect(Collectors.toList()),
                 false);
-        JavacWorkspaceCompiler.Result compiled = JavacWorkspaceCompiler.compile(docUri, source, index, cp);
+        Map<String, String> attached = Map.of(jrtUri, srcZip.toUri().toString());
+        AnalysisSession session = new JavacWorkspaceCompiler(
+                new AstDeclarationLocator(JavacDietSources::lower), attached)
+                .analyze(docUri, source, index, cp);
 
-        CompilationUnitTree cu = compiled.cu();
-        assertNotNull(cu);
-        Trees trees = compiled.trees();
-        LineMap lm = cu.getLineMap();
-        long encoderOffset = lm.getPosition(1, "import java.util.Base64.Encoder;".indexOf("Encoder") + 1);
-
-        TreePath path = TreePathLocator.findAt(trees, cu, encoderOffset);
-        assertNotNull(path, "cursor must land on an AST node");
-
-        Element element = trees.getElement(path);
-        if (element == null && path.getParentPath() != null) {
-            element = trees.getElement(path.getParentPath());
-        }
-        assertNotNull(element, "Encoder import must bind to a symbol");
-
-        Map<String, String> sourceJarByBinaryJar = Map.of(jrtUri, srcZip.toUri().toString());
-        SymbolLocator locator = new SymbolLocator(new SourceCache());
-        Optional<Location> location = locator.locate(
-                element, trees, cu, docUri.toString(), sourceJarByBinaryJar);
-
-        assertTrue(location.isPresent(), "go-to-definition for Base64.Encoder must resolve");
-        Location loc = location.get();
-        assertTrue(loc.getUri().contains("Base64.java"),
-                () -> "definition should open Base64.java, got: " + loc.getUri());
+        String importLine = "import java.util.Base64.Encoder;";
+        ResolvedSymbol resolved = session.resolveAt(new Position(0, importLine.indexOf("Encoder"))).orElseThrow();
+        Location location = session.definitionOf(resolved).orElse(null);
+        assertNotNull(location, "go-to-definition for Base64.Encoder must resolve");
+        assertTrue(location.getUri().contains("Base64.java"),
+                () -> "definition should open Base64.java, got: " + location.getUri());
     }
 }

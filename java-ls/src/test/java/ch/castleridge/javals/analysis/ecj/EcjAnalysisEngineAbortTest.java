@@ -79,9 +79,9 @@ class EcjAnalysisEngineAbortTest {
 
         // 'String' in "String field"
         ResolvedSymbol resolved = session.resolveAt(new Position(3, 4)).orElseThrow();
-        assertEquals("String", resolved.identity().simpleName());
+        assertEquals("String", resolved.key().simpleName());
 
-        List<Location> references = session.findReferencesTo(resolved.identity());
+        List<Location> references = session.findReferencesTo(resolved.key());
         Set<Integer> lines = references.stream()
                 .map(loc -> loc.getRange().getStart().getLine())
                 .collect(Collectors.toSet());

@@ -334,10 +334,11 @@ public final class IndexService {
                     // every indexed entry (JarInput.sourceUri() ==
                     // binaryJarPath.toUri()), not the raw mbt.json `jar` string.
                     // The two can differ - e.g. File.toURI() emits `file:/x`
-                    // while Path.toUri() emits `file:///x` - and SymbolLocator
-                    // looks the sources jar up by the entry's stamped sourceUri.
-                    // A mismatch silently disables go-to-definition into a
-                    // dependency's sources jar even though the type resolves.
+                    // while Path.toUri() emits `file:///x` - and the declaration
+                    // locator looks the sources jar up by the entry's stamped
+                    // sourceUri. A mismatch silently disables go-to-definition
+                    // into a dependency's sources jar even though the type
+                    // resolves.
                     sourceJarByBinaryJar.put(binaryJarPath.toUri().toString(), sourceJar);
                 }
             }

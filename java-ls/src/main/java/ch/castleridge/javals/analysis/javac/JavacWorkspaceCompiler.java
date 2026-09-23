@@ -13,6 +13,7 @@ package ch.castleridge.javals.analysis.javac;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -23,6 +24,10 @@ import javax.tools.DiagnosticCollector;
 import javax.tools.JavaFileObject;
 import javax.tools.StandardJavaFileManager;
 
+import org.eclipse.lsp4j.DiagnosticSeverity;
+import org.eclipse.lsp4j.Position;
+import org.eclipse.lsp4j.Range;
+
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.util.JavacTask;
 import com.sun.source.util.Trees;
@@ -30,7 +35,12 @@ import com.sun.tools.javac.api.JavacTool;
 import com.sun.tools.javac.util.Context;
 
 import ch.castleridge.javals.analysis.AnalysisSession;
+import ch.castleridge.javals.analysis.AstAnalysisSession;
+import ch.castleridge.javals.analysis.AstDeclarationLocator;
+import ch.castleridge.javals.analysis.AstPositions;
+import ch.castleridge.javals.analysis.PublishedDiagnostic;
 import ch.castleridge.javals.analysis.WorkspaceCompiler;
+import ch.castleridge.javals.ast.CompilationUnit;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.InMemorySource;
 import ch.castleridge.javals.classpath.ClasspathOrder;
@@ -54,15 +64,15 @@ public final class JavacWorkspaceCompiler implements WorkspaceCompiler {
      */
     private static final List<String> TASK_OPTIONS = List.of("-proc:none", "-classpath", "");
 
-    private final SymbolLocator symbolLocator;
+    private final AstDeclarationLocator locator;
     private final Map<String, String> sourceJarByBinaryJar;
 
     public JavacWorkspaceCompiler() {
-        this(new SymbolLocator(new SourceCache()), Map.of());
+        this(new AstDeclarationLocator(JavacDietSources::lower), Map.of());
     }
 
-    public JavacWorkspaceCompiler(SymbolLocator symbolLocator, Map<String, String> sourceJarByBinaryJar) {
-        this.symbolLocator = symbolLocator;
+    public JavacWorkspaceCompiler(AstDeclarationLocator locator, Map<String, String> sourceJarByBinaryJar) {
+        this.locator = locator == null ? new AstDeclarationLocator(JavacDietSources::lower) : locator;
         this.sourceJarByBinaryJar = sourceJarByBinaryJar == null ? Map.of() : sourceJarByBinaryJar;
     }
 
@@ -70,7 +80,48 @@ public final class JavacWorkspaceCompiler implements WorkspaceCompiler {
     public AnalysisSession analyze(URI uri, CharSequence text, Index index, ClasspathOrder classpath) {
         Result result = compile(uri, text, index, classpath);
         String docUri = uri == null ? "" : uri.toString();
-        return new JavacAnalysisSession(result, docUri, symbolLocator, sourceJarByBinaryJar, index, classpath);
+        CompilationUnit cu = JavacAstLowerer.lower(result, docUri, text);
+        return new AstAnalysisSession(cu, mapDiagnostics(result, cu), index, classpath, locator, sourceJarByBinaryJar);
+    }
+
+    private static List<PublishedDiagnostic> mapDiagnostics(Result result, CompilationUnit cu) {
+        if (result == null || result.diagnostics() == null) return List.of();
+        JavaFileObject compiledSource = result.source();
+        List<PublishedDiagnostic> out = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : result.diagnostics()) {
+            if (compiledSource != null && d.getSource() != null && d.getSource() != compiledSource) continue;
+            String code = d.getCode();
+            out.add(new PublishedDiagnostic(
+                    rangeOf(cu, d),
+                    d.getMessage(Locale.ROOT),
+                    severityOf(d.getKind()),
+                    "javac",
+                    code == null || code.isEmpty() ? null : code));
+        }
+        return List.copyOf(out);
+    }
+
+    private static Range rangeOf(CompilationUnit cu, Diagnostic<? extends JavaFileObject> d) {
+        if (cu == null || cu.source() == null || d.getPosition() == Diagnostic.NOPOS) {
+            Position p = new Position(0, 0);
+            return new Range(p, p);
+        }
+        long start = d.getStartPosition();
+        long end = d.getEndPosition();
+        if (start == Diagnostic.NOPOS) start = d.getPosition();
+        if (end == Diagnostic.NOPOS || end < start) end = start + 1;
+        return new Range(
+                AstPositions.positionAt(cu.source(), (int) start),
+                AstPositions.positionAt(cu.source(), (int) end));
+    }
+
+    private static DiagnosticSeverity severityOf(Diagnostic.Kind kind) {
+        return switch (kind) {
+            case ERROR -> DiagnosticSeverity.Error;
+            case WARNING, MANDATORY_WARNING -> DiagnosticSeverity.Warning;
+            case NOTE -> DiagnosticSeverity.Information;
+            default -> DiagnosticSeverity.Hint;
+        };
     }
 
     /**
@@ -80,11 +131,11 @@ public final class JavacWorkspaceCompiler implements WorkspaceCompiler {
      * cheapest way to get back to {@link javax.lang.model.element.Element}
      * instances and source positions.
      */
-    public record Result(JavacTask task,
-                         CompilationUnitTree cu,
-                         Trees trees,
-                         JavaFileObject source,
-                         List<Diagnostic<? extends JavaFileObject>> diagnostics) {}
+    record Result(JavacTask task,
+                  CompilationUnitTree cu,
+                  Trees trees,
+                  JavaFileObject source,
+                  List<Diagnostic<? extends JavaFileObject>> diagnostics) {}
 
     /**
      * Compile {@code text} as if it lived at {@code uri}. Diagnostics are
@@ -92,7 +143,7 @@ public final class JavacWorkspaceCompiler implements WorkspaceCompiler {
      * diagnostic list. {@code task.analyze()} is invoked so identifiers
      * inside the CU are resolved to their declarations.
      */
-    public static Result compile(URI uri, CharSequence text, Index index, ClasspathOrder classpath) {
+    static Result compile(URI uri, CharSequence text, Index index, ClasspathOrder classpath) {
         // Without java/lang/Object in the index javac cannot establish the
         // root of the type hierarchy and every name resolution fails. Bail
         // out before standing up the task rather than producing a flood of

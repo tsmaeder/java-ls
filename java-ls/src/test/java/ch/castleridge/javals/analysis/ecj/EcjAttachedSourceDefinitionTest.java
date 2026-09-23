@@ -34,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import ch.castleridge.javals.analysis.AnalysisSession;
+import ch.castleridge.javals.analysis.AstDeclarationLocator;
 import ch.castleridge.javals.analysis.ResolvedSymbol;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
@@ -102,7 +103,7 @@ class EcjAttachedSourceDefinitionTest {
                     }
                 }
                 """;
-        AnalysisSession session = new EcjWorkspaceCompiler(new EcjDeclarationLocator(), attached).analyze(
+        AnalysisSession session = new EcjWorkspaceCompiler(new AstDeclarationLocator(EcjDietSources::lower), attached).analyze(
                 URI.create("file:///workspace/demo/Use.java"), source, index, classpath);
         assertTrue(session.isUsable());
 
@@ -145,7 +146,7 @@ class EcjAttachedSourceDefinitionTest {
                     }
                 }
                 """;
-        AnalysisSession session = new EcjWorkspaceCompiler(new EcjDeclarationLocator(), attached).analyze(
+        AnalysisSession session = new EcjWorkspaceCompiler(new AstDeclarationLocator(EcjDietSources::lower), attached).analyze(
                 URI.create("file:///workspace/demo/Use.java"), source, index, classpath);
         assertTrue(session.isUsable());
 
@@ -174,12 +175,12 @@ class EcjAttachedSourceDefinitionTest {
                     Greeter greeter;
                 }
                 """;
-        AnalysisSession session = new EcjWorkspaceCompiler(new EcjDeclarationLocator(), Map.of()).analyze(
+        AnalysisSession session = new EcjWorkspaceCompiler(new AstDeclarationLocator(EcjDietSources::lower), Map.of()).analyze(
                 URI.create("file:///workspace/demo/Use.java"), source, index, classpath);
         assertTrue(session.isUsable());
 
         ResolvedSymbol resolved = session.resolveAt(new Position(5, 4)).orElseThrow();
-        assertEquals("Greeter", resolved.identity().simpleName());
+        assertEquals("Greeter", resolved.key().simpleName());
         assertTrue(session.definitionOf(resolved).isEmpty(),
                 () -> "a class file is not navigable, got " + session.definitionOf(resolved));
     }
@@ -212,7 +213,7 @@ class EcjAttachedSourceDefinitionTest {
                     }
                 }
                 """;
-        AnalysisSession session = new EcjWorkspaceCompiler(new EcjDeclarationLocator(), attached).analyze(
+        AnalysisSession session = new EcjWorkspaceCompiler(new AstDeclarationLocator(EcjDietSources::lower), attached).analyze(
                 URI.create("file:///workspace/demo/Use.java"), source, index, classpath);
         assertTrue(session.isUsable());
 
@@ -253,7 +254,7 @@ class EcjAttachedSourceDefinitionTest {
         ResolvedSymbol resolved = session.resolveAt(cursor).orElseThrow(
                 () -> new AssertionError("nothing resolved at " + cursor));
         return session.definitionOf(resolved).orElseThrow(
-                () -> new AssertionError("no definition for " + resolved.identity().simpleName()));
+                () -> new AssertionError("no definition for " + resolved.key().simpleName()));
     }
 
     /** The reported range must actually spell the declared name. */

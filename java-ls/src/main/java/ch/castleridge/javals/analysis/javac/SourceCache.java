@@ -36,7 +36,7 @@ import ch.castleridge.javals.indexing.index.InMemorySource;
 
 /**
  * Bounded LRU cache of parsed (but not analysed) Java source files, keyed
- * by their resource URI string. Used by {@link SymbolLocator} to turn a
+ * by their resource URI string. Used by {@link JavacDietSources} to turn a
  * {@link ch.castleridge.javals.indexing.model.TypeEntry#resourceUri()}
  * into AST positions without re-parsing on every {@code definition}
  * request.

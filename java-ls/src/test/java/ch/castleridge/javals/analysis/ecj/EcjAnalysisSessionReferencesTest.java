@@ -102,10 +102,10 @@ class EcjAnalysisSessionReferencesTest {
 
         // 'String' in "for (String value : values)"
         ResolvedSymbol resolved = session.resolveAt(new Position(8, 17)).orElseThrow();
-        assertEquals("String", resolved.identity().simpleName());
+        assertEquals("String", resolved.key().simpleName());
         assertFalse(resolved.fileLocal());
 
-        List<Location> references = session.findReferencesTo(resolved.identity());
+        List<Location> references = session.findReferencesTo(resolved.key());
         assertTrue(references.size() >= 4,
                 () -> "expected every String reference in the unit, got " + references);
     }
@@ -134,9 +134,9 @@ class EcjAnalysisSessionReferencesTest {
 
         // 'String' in "String[] field" (0-based col 4 = 'S')
         ResolvedSymbol resolved = session.resolveAt(new Position(3, 4)).orElseThrow();
-        assertEquals("String", resolved.identity().simpleName());
+        assertEquals("String", resolved.key().simpleName());
 
-        List<Location> references = session.findReferencesTo(resolved.identity());
+        List<Location> references = session.findReferencesTo(resolved.key());
         Set<Integer> lines = references.stream()
                 .map(loc -> loc.getRange().getStart().getLine())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
@@ -170,9 +170,9 @@ class EcjAnalysisSessionReferencesTest {
 
         // 'List' in "List<String> field" (0-based col 4 = 'L')
         ResolvedSymbol resolved = session.resolveAt(new Position(5, 4)).orElseThrow();
-        assertEquals("List", resolved.identity().simpleName());
+        assertEquals("List", resolved.key().simpleName());
 
-        List<Location> references = session.findReferencesTo(resolved.identity());
+        List<Location> references = session.findReferencesTo(resolved.key());
         Set<Integer> lines = references.stream()
                 .map(loc -> loc.getRange().getStart().getLine())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
@@ -214,9 +214,9 @@ class EcjAnalysisSessionReferencesTest {
 
         // 'String' in "String field"
         ResolvedSymbol resolved = session.resolveAt(new Position(5, 4)).orElseThrow();
-        assertEquals("String", resolved.identity().simpleName());
+        assertEquals("String", resolved.key().simpleName());
 
-        List<Location> references = session.findReferencesTo(resolved.identity());
+        List<Location> references = session.findReferencesTo(resolved.key());
         Set<Integer> lines = references.stream()
                 .map(loc -> loc.getRange().getStart().getLine())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
@@ -253,9 +253,9 @@ class EcjAnalysisSessionReferencesTest {
 
         // 'String' in the "java.lang.String.format" import qualifier
         ResolvedSymbol resolved = session.resolveAt(new Position(2, 25)).orElseThrow();
-        assertEquals("String", resolved.identity().simpleName());
+        assertEquals("String", resolved.key().simpleName());
 
-        List<Location> references = session.findReferencesTo(resolved.identity());
+        List<Location> references = session.findReferencesTo(resolved.key());
         Set<Integer> lines = references.stream()
                 .map(loc -> loc.getRange().getStart().getLine())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
@@ -264,7 +264,7 @@ class EcjAnalysisSessionReferencesTest {
 
         // An on-demand static import resolves to the type itself
         ResolvedSymbol onDemand = session.resolveAt(new Position(4, 25)).orElseThrow();
-        assertEquals("Integer", onDemand.identity().simpleName());
+        assertEquals("Integer", onDemand.key().simpleName());
     }
 
     private static IndexedClasspath indexJrt() throws Exception {

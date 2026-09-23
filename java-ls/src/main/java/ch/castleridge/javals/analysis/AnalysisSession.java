@@ -18,12 +18,12 @@ import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.TypeHierarchyItem;
 
+import ch.castleridge.javals.ast.SymbolKey;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
 
 /**
- * Result of analyzing a single open buffer. Feature methods are implemented
- * by the selected compiler backend (javac or ECJ).
+ * Result of analyzing a single open buffer against the owned AST.
  */
 public interface AnalysisSession {
 
@@ -43,10 +43,10 @@ public interface AnalysisSession {
     List<Location> referencesInUnit(ResolvedSymbol symbol);
 
     /**
-     * Find references matching a cross-file {@link SymbolIdentity}
+     * Find references matching a cross-file {@link SymbolKey}
      * (non-file-local only).
      */
-    List<Location> findReferencesTo(SymbolIdentity identity);
+    List<Location> findReferencesTo(SymbolKey key);
 
     Optional<Location> definitionOf(ResolvedSymbol symbol);
 

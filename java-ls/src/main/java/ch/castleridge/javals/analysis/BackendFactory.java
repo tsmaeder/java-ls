@@ -12,11 +12,10 @@ package ch.castleridge.javals.analysis;
 
 import java.util.Map;
 
-import ch.castleridge.javals.analysis.ecj.EcjDeclarationLocator;
+import ch.castleridge.javals.analysis.ecj.EcjDietSources;
 import ch.castleridge.javals.analysis.ecj.EcjWorkspaceCompiler;
+import ch.castleridge.javals.analysis.javac.JavacDietSources;
 import ch.castleridge.javals.analysis.javac.JavacWorkspaceCompiler;
-import ch.castleridge.javals.analysis.javac.SourceCache;
-import ch.castleridge.javals.analysis.javac.SymbolLocator;
 
 /**
  * Selects indexer/compiler implementations from configuration names.
@@ -26,8 +25,8 @@ public final class BackendFactory {
     private BackendFactory() {}
 
     public static WorkspaceCompiler workspaceCompiler(String name) {
-        return workspaceCompiler(name, new SymbolLocator(new SourceCache()),
-                new EcjDeclarationLocator(), Map.of());
+        return workspaceCompiler(name, new AstDeclarationLocator(JavacDietSources::lower),
+                new AstDeclarationLocator(EcjDietSources::lower), Map.of());
     }
 
     /**
@@ -35,12 +34,12 @@ public final class BackendFactory {
      * rebinding, which happens on every index change.
      */
     public static WorkspaceCompiler workspaceCompiler(String name,
-                                                      SymbolLocator symbolLocator,
-                                                      EcjDeclarationLocator declarationLocator,
+                                                      AstDeclarationLocator javacLocator,
+                                                      AstDeclarationLocator ecjLocator,
                                                       Map<String, String> sourceJarByBinaryJar) {
         if (name != null && name.trim().equalsIgnoreCase("ecj")) {
-            return new EcjWorkspaceCompiler(declarationLocator, sourceJarByBinaryJar);
+            return new EcjWorkspaceCompiler(ecjLocator, sourceJarByBinaryJar);
         }
-        return new JavacWorkspaceCompiler(symbolLocator, sourceJarByBinaryJar);
+        return new JavacWorkspaceCompiler(javacLocator, sourceJarByBinaryJar);
     }
 }

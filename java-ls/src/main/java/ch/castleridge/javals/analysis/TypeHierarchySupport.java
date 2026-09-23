@@ -77,7 +77,7 @@ public final class TypeHierarchySupport {
     public static Optional<TypeHierarchyItem> itemForResolved(
             ResolvedSymbol symbol, Location location, SymbolKind kind) {
         if (symbol == null || location == null) return Optional.empty();
-        String matchKey = symbol.identity().matchKey();
+        String matchKey = symbol.key().matchKey();
         if (matchKey == null || !matchKey.startsWith("T:")) return Optional.empty();
         Range range = location.getRange();
         if (range == null) {

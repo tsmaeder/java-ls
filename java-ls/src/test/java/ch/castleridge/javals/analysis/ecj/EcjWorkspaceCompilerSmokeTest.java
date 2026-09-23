@@ -71,7 +71,7 @@ class EcjWorkspaceCompilerSmokeTest {
         assertTrue(resolved.isPresent(), "expected to resolve Hello at field type");
         assertFalse(resolved.get().fileLocal());
 
-        var completions = session.complete(source, new org.eclipse.lsp4j.Position(3, 8), index, classpath);
+        var completions = session.complete(source, new org.eclipse.lsp4j.Position(3, 4), index, classpath);
         assertFalse(completions.isEmpty(), "expected some completions");
     }
 }

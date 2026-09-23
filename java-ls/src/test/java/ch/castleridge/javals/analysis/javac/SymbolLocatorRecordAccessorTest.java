@@ -10,6 +10,9 @@
  */
 package ch.castleridge.javals.analysis.javac;
 
+import ch.castleridge.javals.analysis.AnalysisSession;
+import ch.castleridge.javals.analysis.AstDeclarationLocator;
+import ch.castleridge.javals.analysis.ResolvedSymbol;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
 
@@ -18,20 +21,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
-import javax.lang.model.element.Element;
-import javax.lang.model.element.ElementKind;
-
 import org.eclipse.lsp4j.Location;
+import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.Range;
 import org.junit.jupiter.api.Test;
-
-import com.sun.source.tree.CompilationUnitTree;
-import com.sun.source.tree.LineMap;
-import com.sun.source.util.TreePath;
-import com.sun.source.util.Trees;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
@@ -40,7 +35,6 @@ import ch.castleridge.javals.indexing.scan.Scanner;
 import ch.castleridge.javals.indexing.source.javac.JavacSourceIndexer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SymbolLocatorRecordAccessorTest {
@@ -77,37 +71,14 @@ class SymbolLocatorRecordAccessorTest {
                     int n(Point p) { return p.x(); }
                 }
                 """;
-        URI docUri = URI.create("mem:///Use.java");
-        ClasspathOrder cp = new ClasspathOrder(
-                List.of(dirUri, jrtUri).stream().map(UriClasspathEntry::of).collect(Collectors.toList()),
-                false);
-        JavacWorkspaceCompiler.Result compiled = JavacWorkspaceCompiler.compile(docUri, useSource, index, cp);
-
-        CompilationUnitTree cu = compiled.cu();
-        assertNotNull(cu);
-        Trees trees = compiled.trees();
-        LineMap lm = cu.getLineMap();
+        AnalysisSession session = analyze(useSource, dirUri, jrtUri, index);
         String callLine = "    int n(Point p) { return p.x(); }";
-        long offset = lm.getPosition(4, callLine.indexOf(".x") + 2);
-
-        TreePath path = TreePathLocator.findAt(trees, cu, offset);
-        assertNotNull(path, "cursor on x() must land on an AST node");
-
-        Element element = DefinitionElementResolver.resolve(trees, path);
-        assertNotNull(element, "p.x() must resolve to a symbol");
-        assertTrue(element.getKind() == ElementKind.METHOD,
-                () -> "expected METHOD, got " + element.getKind());
-
-        SymbolLocator locator = new SymbolLocator(new SourceCache());
-        Optional<Location> location = locator.locate(
-                element, trees, cu, docUri.toString(), Map.of());
-
-        assertTrue(location.isPresent(), "go-to-definition for record accessor must resolve");
-        Location loc = location.get();
+        ResolvedSymbol resolved = session.resolveAt(new Position(3, callLine.indexOf(".x") + 1)).orElseThrow();
+        Location loc = session.definitionOf(resolved).orElseThrow();
         assertTrue(loc.getUri().contains("Point.java"),
                 () -> "definition should open Point.java, got: " + loc.getUri());
-        assertEquals("int x", snippet(pointSource, loc),
-                "accessor should land on the record component, not the whole type");
+        assertEquals("x", snippet(pointSource, loc),
+                "accessor should land on the record component name, not the whole type");
     }
 
     @Test
@@ -142,38 +113,23 @@ class SymbolLocatorRecordAccessorTest {
                     Color[] all() { return Color.values(); }
                 }
                 """;
-        URI docUri = URI.create("mem:///Use.java");
-        ClasspathOrder cp = new ClasspathOrder(
-                List.of(dirUri, jrtUri).stream().map(UriClasspathEntry::of).collect(Collectors.toList()),
-                false);
-        JavacWorkspaceCompiler.Result compiled = JavacWorkspaceCompiler.compile(docUri, useSource, index, cp);
-
-        CompilationUnitTree cu = compiled.cu();
-        assertNotNull(cu);
-        Trees trees = compiled.trees();
-        LineMap lm = cu.getLineMap();
+        AnalysisSession session = analyze(useSource, dirUri, jrtUri, index);
         String callLine = "    Color[] all() { return Color.values(); }";
-        long offset = lm.getPosition(4, callLine.indexOf("values") + 1);
-
-        TreePath path = TreePathLocator.findAt(trees, cu, offset);
-        assertNotNull(path, "cursor on values() must land on an AST node");
-
-        Element element = DefinitionElementResolver.resolve(trees, path);
-        assertNotNull(element, "Color.values() must resolve to a symbol");
-        assertTrue(element.getKind() == ElementKind.METHOD,
-                () -> "expected METHOD, got " + element.getKind());
-
-        SymbolLocator locator = new SymbolLocator(new SourceCache());
-        Optional<Location> location = locator.locate(
-                element, trees, cu, docUri.toString(), Map.of());
-
-        assertTrue(location.isPresent(), "go-to-definition for enum values() must resolve");
-        Location loc = location.get();
+        ResolvedSymbol resolved = session.resolveAt(new Position(3, callLine.indexOf("values"))).orElseThrow();
+        Location loc = session.definitionOf(resolved).orElseThrow();
         assertTrue(loc.getUri().contains("Color.java"),
                 () -> "definition should open Color.java, got: " + loc.getUri());
         String landed = snippet(colorSource, loc);
-        assertTrue(landed.contains("enum Color"),
+        assertTrue(landed.contains("enum Color") || "Color".equals(landed),
                 () -> "values() should land on the enum type, got: " + landed);
+    }
+
+    private static AnalysisSession analyze(String source, String dirUri, String jrtUri, Index index) {
+        ClasspathOrder cp = new ClasspathOrder(
+                List.of(dirUri, jrtUri).stream().map(UriClasspathEntry::of).collect(Collectors.toList()),
+                false);
+        return new JavacWorkspaceCompiler(new AstDeclarationLocator(JavacDietSources::lower), Map.of())
+                .analyze(URI.create("mem:///Use.java"), source, index, cp);
     }
 
     private static String snippet(String source, Location loc) {

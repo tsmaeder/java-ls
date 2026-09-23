@@ -27,15 +27,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import ch.castleridge.javals.analysis.AnalysisSession;
+import ch.castleridge.javals.analysis.AstDeclarationLocator;
 import ch.castleridge.javals.analysis.BackendFactory;
 import ch.castleridge.javals.analysis.PublishedDiagnostic;
 import ch.castleridge.javals.analysis.ResolvedSymbol;
-import ch.castleridge.javals.analysis.SymbolIdentity;
 import ch.castleridge.javals.analysis.SourceText;
 import ch.castleridge.javals.analysis.WorkspaceCompiler;
-import ch.castleridge.javals.analysis.ecj.EcjDeclarationLocator;
-import ch.castleridge.javals.analysis.javac.SourceCache;
-import ch.castleridge.javals.analysis.javac.SymbolLocator;
+import ch.castleridge.javals.analysis.ecj.EcjDietSources;
+import ch.castleridge.javals.analysis.javac.JavacDietSources;
+import ch.castleridge.javals.ast.SymbolKey;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.bloom.BloomEntry;
 import ch.castleridge.javals.indexing.index.Index;
@@ -51,9 +51,8 @@ public class JavaTextDocumentService implements TextDocumentService {
     private final IndexService indexService;
     private final Map<String, TextDocumentItem> documents = new ConcurrentHashMap<>();
     private final Map<String, CachedCompile> compileCache = new ConcurrentHashMap<>();
-    private final SourceCache sourceCache = new SourceCache();
-    private final SymbolLocator symbolLocator = new SymbolLocator(sourceCache);
-    private final EcjDeclarationLocator declarationLocator = new EcjDeclarationLocator();
+    private final AstDeclarationLocator javacLocator = new AstDeclarationLocator(JavacDietSources::lower);
+    private final AstDeclarationLocator ecjLocator = new AstDeclarationLocator(EcjDietSources::lower);
     private volatile WorkspaceCompiler workspaceCompiler = BackendFactory.workspaceCompiler("javac");
     /** Max files to scan for cross-file references; {@code <= 0} means no cap. */
     private volatile int referencesCandidateCap;
@@ -84,12 +83,12 @@ public class JavaTextDocumentService implements TextDocumentService {
         return referencesCandidateCap;
     }
 
-    SymbolLocator symbolLocator() {
-        return symbolLocator;
+    AstDeclarationLocator javacLocator() {
+        return javacLocator;
     }
 
-    EcjDeclarationLocator declarationLocator() {
-        return declarationLocator;
+    AstDeclarationLocator ecjLocator() {
+        return ecjLocator;
     }
 
     private record CachedCompile(int version, AnalysisSession session) {
@@ -155,8 +154,8 @@ public class JavaTextDocumentService implements TextDocumentService {
      * index saw it, so an edit invalidates those positions.
      */
     private void forgetParsedSource(String uri) {
-        sourceCache.invalidate(uri);
-        declarationLocator.invalidate(uri);
+        javacLocator.invalidate(uri);
+        ecjLocator.invalidate(uri);
     }
 
     private void refreshCompile(String uri) {
@@ -349,7 +348,7 @@ public class JavaTextDocumentService implements TextDocumentService {
 
         AnalysisSession session = cached.session();
         ResolvedSymbol resolved = resolvedOpt.get();
-        SymbolIdentity identity = resolved.identity();
+        SymbolKey key = resolved.key();
 
         if (resolved.fileLocal()) {
             Set<Location> locations = new LinkedHashSet<>(session.referencesInUnit(resolved));
@@ -359,7 +358,7 @@ public class JavaTextDocumentService implements TextDocumentService {
         Set<String> bloomCandidates = new LinkedHashSet<>();
         Optional<Index> indexOpt = indexService.index();
         if (indexOpt.isPresent()) {
-            String simpleName = identity.simpleName();
+            String simpleName = key.simpleName();
             for (BloomEntry entry : indexOpt.get().bloomFilters()) {
                 // Only source blooms can yield source reference locations.
                 // Classfile-keyed blooms (jar/jrt *.class) would otherwise be
@@ -396,7 +395,7 @@ public class JavaTextDocumentService implements TextDocumentService {
         }
 
         server.logMessage(MessageType.Log,
-                "References: '" + identity.simpleName() + "' -> " + candidates.size()
+                "References: '" + key.simpleName() + "' -> " + candidates.size()
                         + " candidates (" + bloomHits + " bloom hits, " + openDocs + " open docs"
                         + capNote
                         + resolved.originResourceUri().map(u -> ", origin " + u).orElse("") + ")");
@@ -431,7 +430,7 @@ public class JavaTextDocumentService implements TextDocumentService {
             }
             if (!candidateSession.isUsable())
                 return;
-            locations.addAll(candidateSession.findReferencesTo(identity));
+            locations.addAll(candidateSession.findReferencesTo(key));
         });
 
         long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;

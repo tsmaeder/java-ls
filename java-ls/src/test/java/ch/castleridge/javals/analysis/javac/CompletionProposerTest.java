@@ -10,6 +10,7 @@
  */
 package ch.castleridge.javals.analysis.javac;
 
+import ch.castleridge.javals.analysis.AnalysisSession;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
 
@@ -20,10 +21,9 @@ import java.util.stream.Collectors;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionItemKind;
 import org.eclipse.lsp4j.InsertTextFormat;
+import org.eclipse.lsp4j.Position;
 import org.eclipse.lsp4j.TextEdit;
 import org.junit.jupiter.api.Test;
-
-import com.sun.source.tree.CompilationUnitTree;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
@@ -40,9 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Exercises {@link CompletionProposer} against small, hand-built
- * {@link Index}es (mirroring {@code IndexCompileTest}'s pattern) rather
- * than a real JRT scan, so tests stay fast and deterministic.
+ * Completions from the shared session against small, hand-built indexes.
  */
 class CompletionProposerTest {
 
@@ -58,22 +56,12 @@ class CompletionProposerTest {
                 public class Use {
                     void run() {
                         Widget w = new Widget();
-                        w.val
+                        w.val;
                     }
                 }
                 """;
-        List<String> lines = List.of(source.split("\n", -1));
 
-        // No trailing ';' - the buffer is exactly as it looks mid-typing,
-        // which is the state completion is actually triggered in. javac's
-        // parser collapses this whole (semicolon-less) statement into a
-        // bare ErroneousTree with no recoverable qualifier, so this also
-        // exercises CompletionProposer's speculativeReparse fallback.
-        JavacWorkspaceCompiler.Result compiled = compile(source, index);
-        long offset = offsetAfter(compiled.cu(), lines, "w.val");
-
-        List<CompletionItem> items = CompletionProposer.propose(
-                compiled, source, offset, index, classPathOf(SOURCE_URI));
+        List<CompletionItem> items = complete(source, index, classPathOf(SOURCE_URI), "w.val");
 
         CompletionItem field = findByLabel(items, "value");
         assertTrue(field != null, () -> "expected 'value' field, got: " + labels(items));
@@ -90,17 +78,12 @@ class CompletionProposerTest {
                 public class Use {
                     void run() {
                         Widget w = new Widget();
-                        w.get
+                        w.get;
                     }
                 }
                 """;
-        List<String> lines = List.of(source.split("\n", -1));
 
-        JavacWorkspaceCompiler.Result compiled = compile(source, index);
-        long offset = offsetAfter(compiled.cu(), lines, "w.get");
-
-        List<CompletionItem> items = CompletionProposer.propose(
-                compiled, source, offset, index, classPathOf(SOURCE_URI));
+        List<CompletionItem> items = complete(source, index, classPathOf(SOURCE_URI), "w.get");
 
         CompletionItem method = findByLabel(items, "getName");
         assertTrue(method != null, () -> "expected 'getName' method, got: " + labels(items));
@@ -121,17 +104,12 @@ class CompletionProposerTest {
 
                     void run() {
                         Widget helperLocal = new Widget();
-                        help
+                        help;
                     }
                 }
                 """;
-        List<String> lines = List.of(source.split("\n", -1));
 
-        JavacWorkspaceCompiler.Result compiled = compile(source, index);
-        long offset = offsetAfter(compiled.cu(), lines, "        help");
-
-        List<CompletionItem> items = CompletionProposer.propose(
-                compiled, source, offset, index, classPathOf(SOURCE_URI));
+        List<CompletionItem> items = complete(source, index, classPathOf(SOURCE_URI), "        help");
 
         assertTrue(findByLabel(items, "helperField") != null,
                 () -> "expected enclosing field, got: " + labels(items));
@@ -147,17 +125,12 @@ class CompletionProposerTest {
 
                 public class Use {
                     void run() {
-                        Constants.MA
+                        Constants.MA;
                     }
                 }
                 """;
-        List<String> lines = List.of(source.split("\n", -1));
 
-        JavacWorkspaceCompiler.Result compiled = compile(source, index);
-        long offset = offsetAfter(compiled.cu(), lines, "Constants.MA");
-
-        List<CompletionItem> items = CompletionProposer.propose(
-                compiled, source, offset, index, classPathOf(SOURCE_URI));
+        List<CompletionItem> items = complete(source, index, classPathOf(SOURCE_URI), "Constants.MA");
 
         CompletionItem field = findByLabel(items, "MAX");
         assertTrue(field != null, () -> "expected static field MAX, got: " + labels(items));
@@ -185,17 +158,12 @@ class CompletionProposerTest {
 
                 public class Use {
                     void run() {
-                        java.util.Ma
+                        java.util.Ma;
                     }
                 }
                 """;
-        List<String> lines = List.of(source.split("\n", -1));
 
-        JavacWorkspaceCompiler.Result compiled = compile(source, index);
-        long offset = offsetAfter(compiled.cu(), lines, "java.util.Ma");
-
-        List<CompletionItem> items = CompletionProposer.propose(
-                compiled, source, offset, index, ClasspathOrder.UNRESTRICTED);
+        List<CompletionItem> items = complete(source, index, ClasspathOrder.UNRESTRICTED, "java.util.Ma");
 
         assertTrue(findByLabel(items, "Map") != null,
                 () -> "expected Map package member, got: " + labels(items));
@@ -209,17 +177,12 @@ class CompletionProposerTest {
 
                 public class Use {
                     void run() {
-                        Zeta
+                        Zeta;
                     }
                 }
                 """;
-        List<String> lines = List.of(source.split("\n", -1));
 
-        JavacWorkspaceCompiler.Result compiled = compile(source, index);
-        long offset = offsetAfter(compiled.cu(), lines, "        Zeta");
-
-        List<CompletionItem> items = CompletionProposer.propose(
-                compiled, source, offset, index, classPathOf(SOURCE_URI));
+        List<CompletionItem> items = complete(source, index, classPathOf(SOURCE_URI), "        Zeta");
 
         CompletionItem fromTypeEntry = findByLabel(items, "ZetaHelper");
         assertTrue(fromTypeEntry != null, () -> "expected ZetaHelper, got: " + labels(items));
@@ -242,17 +205,12 @@ class CompletionProposerTest {
 
                 public class Use {
                     void run() {
-                        Zeta
+                        Zeta;
                     }
                 }
                 """;
-        List<String> lines = List.of(source.split("\n", -1));
 
-        JavacWorkspaceCompiler.Result compiled = compile(source, index);
-        long offset = offsetAfter(compiled.cu(), lines, "        Zeta");
-
-        List<CompletionItem> items = CompletionProposer.propose(
-                compiled, source, offset, index, classPathOf(SOURCE_URI));
+        List<CompletionItem> items = complete(source, index, classPathOf(SOURCE_URI), "        Zeta");
 
         CompletionItem item = findByLabel(items, "ZetaHelper");
         assertTrue(item != null, () -> "expected ZetaHelper, got: " + labels(items));
@@ -270,20 +228,12 @@ class CompletionProposerTest {
 
                 public class Use {
                     void run() {
-                        Zeta
+                        Zeta;
                     }
                 }
                 """;
-        List<String> lines = List.of(source.split("\n", -1));
 
-        // Compile against the unrestricted classpath (so the reference below
-        // still compiles), but ask for completions with a ClasspathOrder that
-        // only admits SOURCE_URI - ZetaRestricted must not be suggested.
-        JavacWorkspaceCompiler.Result compiled = compile(source, index);
-        long offset = offsetAfter(compiled.cu(), lines, "        Zeta");
-
-        List<CompletionItem> items = CompletionProposer.propose(
-                compiled, source, offset, index, classPathOf(SOURCE_URI));
+        List<CompletionItem> items = complete(source, index, classPathOf(SOURCE_URI), "        Zeta");
 
         assertTrue(findByLabel(items, "ZetaHelper") != null,
                 () -> "expected in-classpath ZetaHelper, got: " + labels(items));
@@ -409,25 +359,32 @@ class CompletionProposerTest {
 
     // ---- helpers ----
 
-    private static JavacWorkspaceCompiler.Result compile(String source, Index index) {
-        return JavacWorkspaceCompiler.compile(
+    private static List<CompletionItem> complete(String source, Index index, ClasspathOrder classpath, String marker) {
+        AnalysisSession session = new JavacWorkspaceCompiler().analyze(
                 URI.create("mem:///com/example/Use.java"), source, index, ClasspathOrder.UNRESTRICTED);
+        return session.complete(source, positionAfter(source, marker), index, classpath);
+    }
+
+    private static Position positionAfter(String source, String marker) {
+        int offset = source.indexOf(marker);
+        if (offset < 0) throw new AssertionError("marker not found: " + marker);
+        offset += marker.length();
+        int line = 0;
+        int column = 0;
+        for (int i = 0; i < offset; i++) {
+            if (source.charAt(i) == '\n') {
+                line++;
+                column = 0;
+            } else if (source.charAt(i) != '\r') {
+                column++;
+            }
+        }
+        return new Position(line, column);
     }
 
     private static ClasspathOrder classPathOf(String... uris) {
         return new ClasspathOrder(
                 List.of(uris).stream().map(UriClasspathEntry::of).collect(Collectors.toList()), false);
-    }
-
-    /** Offset right after the last character of {@code marker}'s first occurrence in {@code lines}. */
-    private static long offsetAfter(CompilationUnitTree cu, List<String> lines, String marker) {
-        for (int i = 0; i < lines.size(); i++) {
-            int col = lines.get(i).indexOf(marker);
-            if (col >= 0) {
-                return cu.getLineMap().getPosition(i + 1, col + marker.length() + 1);
-            }
-        }
-        throw new AssertionError("marker not found: " + marker);
     }
 
     private static CompletionItem findByLabel(List<CompletionItem> items, String label) {

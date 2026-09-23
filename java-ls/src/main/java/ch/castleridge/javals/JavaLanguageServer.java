@@ -43,8 +43,8 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
         JavaTextDocumentService tds = (JavaTextDocumentService) textDocumentService;
         tds.setWorkspaceCompiler(ch.castleridge.javals.analysis.BackendFactory.workspaceCompiler(
                 compilerBackend,
-                tds.symbolLocator(),
-                tds.declarationLocator(),
+                tds.javacLocator(),
+                tds.ecjLocator(),
                 indexService.sourceJarByBinaryJar()));
     }
 
