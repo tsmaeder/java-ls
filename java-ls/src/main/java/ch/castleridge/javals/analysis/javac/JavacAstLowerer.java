@@ -208,6 +208,8 @@ import ch.castleridge.javals.ast.VoidTypeNode;
 import ch.castleridge.javals.ast.WhileStmt;
 import ch.castleridge.javals.ast.WildcardTypeNode;
 import ch.castleridge.javals.ast.YieldStmt;
+import ch.castleridge.javals.classpath.ClasspathOrder;
+import ch.castleridge.javals.indexing.index.Index;
 
 final class JavacAstLowerer {
 
@@ -217,22 +219,32 @@ final class JavacAstLowerer {
     private final Types types;
     private final SourcePositions positions;
     private final String source;
+    private final Index index;
+    private final ClasspathOrder classpath;
     private final Map<Element, Symbol> interned = new IdentityHashMap<>();
 
     private JavacAstLowerer(CompilationUnitTree cu,
                             Trees trees,
                             Elements elements,
                             Types types,
-                            String source) {
+                            String source,
+                            Index index,
+                            ClasspathOrder classpath) {
         this.cu = cu;
         this.trees = trees;
         this.elements = elements;
         this.types = types;
         this.positions = trees == null ? null : trees.getSourcePositions();
         this.source = source == null ? "" : source;
+        this.index = index;
+        this.classpath = classpath;
     }
 
-    static CompilationUnit lower(JavacWorkspaceCompiler.Result result, String uri, CharSequence text) {
+    static CompilationUnit lower(JavacWorkspaceCompiler.Result result,
+                                 String uri,
+                                 CharSequence text,
+                                 Index index,
+                                 ClasspathOrder classpath) {
         String source = text == null ? "" : text.toString();
         if (result == null || result.cu() == null) {
             return new CompilationUnit(new SourceFile(uri, source), null, List.of(), List.of(), null,
@@ -240,7 +252,7 @@ final class JavacAstLowerer {
         }
         Elements elements = result.task() == null ? null : result.task().getElements();
         Types typesUtil = result.task() == null ? null : result.task().getTypes();
-        return new JavacAstLowerer(result.cu(), result.trees(), elements, typesUtil, source)
+        return new JavacAstLowerer(result.cu(), result.trees(), elements, typesUtil, source, index, classpath)
                 .lowerUnit(uri);
     }
 
@@ -250,7 +262,7 @@ final class JavacAstLowerer {
             return new CompilationUnit(new SourceFile(uri, source), null, List.of(), List.of(), null,
                     new SourceRange(0, source.length()));
         }
-        return new JavacAstLowerer(cu, trees, null, null, source).lowerUnit(uri);
+        return new JavacAstLowerer(cu, trees, null, null, source, null, null).lowerUnit(uri);
     }
 
     private CompilationUnit lowerUnit(String uri) {
@@ -1251,7 +1263,7 @@ final class JavacAstLowerer {
         if (elements == null || types == null) {
             return SymbolKey.local(element.getSimpleName().toString());
         }
-        return JavacSymbolKeys.of(element, elements, types, trees)
+        return JavacSymbolKeys.of(element, elements, types, trees, index, classpath)
                 .orElseGet(() -> SymbolKey.local(element.getSimpleName().toString()));
     }
 

@@ -24,11 +24,16 @@ import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.JavaFileObject;
 
+import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.util.Trees;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 
+import ch.castleridge.javals.analysis.FileUris;
 import ch.castleridge.javals.ast.SymbolKey;
+import ch.castleridge.javals.classpath.ClasspathOrder;
+import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.IndexedClassRef;
+import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**
  * Builds {@link SymbolKey} values from javac {@link Element}s.
@@ -51,17 +56,23 @@ public final class JavacSymbolKeys {
      * {@code elements}, {@code types}, and {@code trees}. Returns empty
      * when the symbol has no indexed declaration (no {@link IndexedClassRef}
      * and no source path in the current compilation).
+     *
+     * <p>When this compilation declares the type, the origin is the classpath
+     * winner's {@code resourceUri} if that entry is the same file as the
+     * buffer. The stored string is the index spelling, not the editor URI.
      */
     public static Optional<SymbolKey> of(Element element,
                                          Elements elements,
                                          Types types,
-                                         Trees trees) {
+                                         Trees trees,
+                                         Index index,
+                                         ClasspathOrder classpath) {
         if (element == null) return Optional.empty();
         String simpleName = element.getSimpleName().toString();
         if (isFileLocal(element)) {
             return Optional.of(SymbolKey.local(simpleName));
         }
-        Optional<String> origin = originResourceUri(element, trees);
+        Optional<String> origin = originResourceUri(element, trees, index, classpath);
         if (origin.isEmpty()) return Optional.empty();
 
         String originUri = origin.get();
@@ -109,8 +120,17 @@ public final class JavacSymbolKeys {
      * Recover the indexed {@code resourceUri} of the declaration that
      * {@code element} resolves to (workspace {@code .java}, dependency
      * {@code .class}, or {@code jrt:} entries).
+     *
+     * <p>A type loaded from the index keeps that entry's URI. A type declared
+     * in this compilation uses the classpath winner's URI when the winner is
+     * this file, so an editor URI that differs only in spelling (Windows
+     * drive-letter case) still matches uses. A shadowed duplicate that this
+     * unit declares keeps the compilation URI.
      */
-    public static Optional<String> originResourceUri(Element element, Trees trees) {
+    public static Optional<String> originResourceUri(Element element,
+                                                      Trees trees,
+                                                      Index index,
+                                                      ClasspathOrder classpath) {
         ClassSymbol enclosing = enclosingClass(element);
         if (enclosing == null) return Optional.empty();
 
@@ -123,16 +143,33 @@ public final class JavacSymbolKeys {
             }
         }
 
-        if (trees != null) {
-            var path = trees.getPath(enclosing);
-            if (path != null) {
-                var cu = path.getCompilationUnit();
-                if (cu != null && cu.getSourceFile() != null) {
-                    return Optional.of(cu.getSourceFile().toUri().toString());
-                }
-            }
+        String compilationUri = compilationUri(enclosing, trees);
+        String indexed = indexedOrigin(enclosing, index, classpath);
+        boolean declaredHere = compilationUri != null;
+        if (indexed != null && (!declaredHere || FileUris.sameFile(compilationUri, indexed))) {
+            return Optional.of(indexed);
         }
+        if (declaredHere) return Optional.of(compilationUri);
         return Optional.empty();
+    }
+
+    private static String compilationUri(ClassSymbol enclosing, Trees trees) {
+        if (trees == null || enclosing == null) return null;
+        var path = trees.getPath(enclosing);
+        if (path == null) return null;
+        CompilationUnitTree cu = path.getCompilationUnit();
+        if (cu == null || cu.getSourceFile() == null) return null;
+        return cu.getSourceFile().toUri().toString();
+    }
+
+    private static String indexedOrigin(ClassSymbol enclosing, Index index, ClasspathOrder classpath) {
+        if (enclosing == null || index == null || classpath == null) return null;
+        String jvmName = enclosing.flatName().toString().replace('.', '/');
+        TypeEntry entry = classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri);
+        if (entry == null) return null;
+        String resourceUri = entry.resourceUri();
+        if (resourceUri == null || resourceUri.isBlank()) return null;
+        return resourceUri;
     }
 
     private static boolean isFileLocal(Element element) {

@@ -192,6 +192,7 @@ import ch.castleridge.javals.ast.VoidTypeNode;
 import ch.castleridge.javals.ast.WhileStmt;
 import ch.castleridge.javals.ast.WildcardTypeNode;
 import ch.castleridge.javals.ast.YieldStmt;
+import ch.castleridge.javals.analysis.FileUris;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.TypeEntry;
@@ -1083,13 +1084,22 @@ final class EcjAstLowerer {
     }
 
     private Optional<String> origin(String ownerJvm) {
-        if (declares(ownerJvm)) return Optional.of(uri);
-        if (index == null) return Optional.empty();
-        TypeEntry entry = classpath.pick(index.getAll(ownerJvm), TypeEntry::sourceUri);
-        if (entry != null && entry.resourceUri() != null && !entry.resourceUri().isBlank()) {
-            return Optional.of(entry.resourceUri());
+        String indexed = indexedOrigin(ownerJvm);
+        boolean declaredHere = declares(ownerJvm);
+        if (indexed != null && (!declaredHere || FileUris.sameFile(uri, indexed))) {
+            return Optional.of(indexed);
         }
+        if (declaredHere) return Optional.of(uri);
         return Optional.empty();
+    }
+
+    private String indexedOrigin(String ownerJvm) {
+        if (index == null || ownerJvm == null) return null;
+        TypeEntry entry = classpath.pick(index.getAll(ownerJvm), TypeEntry::sourceUri);
+        if (entry == null) return null;
+        String resourceUri = entry.resourceUri();
+        if (resourceUri == null || resourceUri.isBlank()) return null;
+        return resourceUri;
     }
 
     private boolean declares(String ownerJvm) {
