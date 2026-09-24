@@ -12,7 +12,6 @@ package ch.castleridge.javals.analysis.ecj;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.net.URI;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -75,7 +74,7 @@ class EcjIndexedAnnotationTargetTest {
                 """);
 
         AnalysisSession session = new EcjWorkspaceCompiler().analyze(
-                URI.create("file:///workspace/q/Use.java"),
+                "file:///workspace/q/Use.java",
                 """
                         package q;
                         import java.util.List;

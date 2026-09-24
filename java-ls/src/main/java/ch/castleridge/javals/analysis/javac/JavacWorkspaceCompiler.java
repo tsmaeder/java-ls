@@ -77,9 +77,9 @@ public final class JavacWorkspaceCompiler implements WorkspaceCompiler {
     }
 
     @Override
-    public AnalysisSession analyze(URI uri, CharSequence text, Index index, ClasspathOrder classpath) {
+    public AnalysisSession analyze(String uri, CharSequence text, Index index, ClasspathOrder classpath) {
         Result result = compile(uri, text, index, classpath);
-        String docUri = uri == null ? "" : uri.toString();
+        String docUri = uri == null ? "" : uri;
         CompilationUnit cu = JavacAstLowerer.lower(result, docUri, text, index, classpath);
         return new AstAnalysisSession(cu, mapDiagnostics(result, cu), index, classpath, locator, sourceJarByBinaryJar);
     }
@@ -125,7 +125,7 @@ public final class JavacWorkspaceCompiler implements WorkspaceCompiler {
     }
 
     /**
-     * Returned from {@link #compile(URI, CharSequence, Index, ClasspathOrder)}.
+     * Returned from {@link #compile(String, CharSequence, Index, ClasspathOrder)}.
      * The {@link CompilationUnitTree} is the parsed-and-analysed view of
      * the input; {@link Trees} is bound to {@link #task} and is the
      * cheapest way to get back to {@link javax.lang.model.element.Element}
@@ -143,13 +143,17 @@ public final class JavacWorkspaceCompiler implements WorkspaceCompiler {
      * diagnostic list. {@code task.analyze()} is invoked so identifiers
      * inside the CU are resolved to their declarations.
      */
-    static Result compile(URI uri, CharSequence text, Index index, ClasspathOrder classpath) {
+    static Result compile(String uri, CharSequence text, Index index, ClasspathOrder classpath) {
+        URI fileUri = parseFileUri(uri);
         // Without java/lang/Object in the index javac cannot establish the
         // root of the type hierarchy and every name resolution fails. Bail
         // out before standing up the task rather than producing a flood of
-        // misleading "cannot find symbol" diagnostics.
-        if (!index.contains(OBJECT_JVM_NAME)) {
-            JavaFileObject input = new InMemorySource(uri, text);
+        // misleading "cannot find symbol" diagnostics. An illegal document
+        // URI cannot become a JavaFileObject either; a synthetic URI would
+        // poison origin matching, so both cases return an empty result. The
+        // caller still lowers the AST against the original string.
+        if (fileUri == null || !index.contains(OBJECT_JVM_NAME)) {
+            JavaFileObject input = fileUri == null ? null : new InMemorySource(fileUri, text);
             return new Result(null, null, null, input, List.of());
         }
 
@@ -163,7 +167,7 @@ public final class JavacWorkspaceCompiler implements WorkspaceCompiler {
                 d -> {}, Locale.ROOT, StandardCharsets.UTF_8);
         IndexFileManager fm = new IndexFileManager(std, index, classpath);
 
-        JavaFileObject input = new InMemorySource(uri, text);
+        JavaFileObject input = new InMemorySource(fileUri, text);
 
         JavacTask task = (JavacTask) tool.getTask(
                 null,
@@ -180,11 +184,24 @@ public final class JavacWorkspaceCompiler implements WorkspaceCompiler {
             try {
                 task.analyze();
             } catch (RuntimeException | Error e) {
-                throw compileFailed(uri, e, collector);
+                throw compileFailed(fileUri, e, collector);
             }
             return new Result(task, cu, Trees.instance(task), input, List.copyOf(collector.getDiagnostics()));
         } catch (IOException e) {
             return new Result(task, null, Trees.instance(task), input, List.copyOf(collector.getDiagnostics()));
+        }
+    }
+
+    /**
+     * Parsed form of {@code uri} for {@link InMemorySource}. Null when the
+     * string is not a legal URI; callers must not substitute another URI.
+     */
+    private static URI parseFileUri(String uri) {
+        if (uri == null || uri.isBlank()) return null;
+        try {
+            return URI.create(uri);
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 

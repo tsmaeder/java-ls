@@ -13,7 +13,6 @@ package ch.castleridge.javals.analysis;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -52,7 +51,7 @@ class TypeHierarchyTest {
     private ClasspathOrder classpath;
     private Map<String, String> attachedSources;
     private String workspaceUri;
-    private URI useUri;
+    private String useUri;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -107,7 +106,7 @@ class TypeHierarchyTest {
                     HouseDog h;
                 }
                 """);
-        useUri = workspace.resolve("demo/Use.java").toUri();
+        useUri = workspace.resolve("demo/Use.java").toUri().toString();
     }
 
     @ParameterizedTest
@@ -181,7 +180,7 @@ class TypeHierarchyTest {
         return new Position(line, offset - lastBreak - 1);
     }
 
-    private AnalysisSession analyze(String backend, URI uri, String source) {
+    private AnalysisSession analyze(String backend, String uri, String source) {
         WorkspaceCompiler compiler = "ecj".equals(backend)
                 ? new EcjWorkspaceCompiler(new AstDeclarationLocator(EcjDietSources::lower), attachedSources)
                 : new JavacWorkspaceCompiler(new AstDeclarationLocator(JavacDietSources::lower), attachedSources);

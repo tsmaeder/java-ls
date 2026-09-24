@@ -6,7 +6,6 @@
  */
 package ch.castleridge.javals.analysis.ecj;
 
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -220,12 +219,12 @@ final class EcjAstLowerer {
     }
 
     static CompilationUnit lower(CompilationUnitDeclaration unit,
-                                 URI uri,
+                                 String uri,
                                  String source,
                                  Index index,
                                  ClasspathOrder classpath) {
         String text = source == null ? "" : source;
-        String u = uri == null ? "" : uri.toString();
+        String u = uri == null ? "" : uri;
         if (unit == null) {
             return new CompilationUnit(new SourceFile(u, text), null, List.of(), List.of(), null,
                     new SourceRange(0, text.length()));

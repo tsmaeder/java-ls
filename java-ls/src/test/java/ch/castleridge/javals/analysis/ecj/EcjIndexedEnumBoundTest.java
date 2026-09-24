@@ -12,7 +12,6 @@ package ch.castleridge.javals.analysis.ecj;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.net.URI;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -77,7 +76,7 @@ class EcjIndexedEnumBoundTest {
                 """);
 
         AnalysisSession session = new EcjWorkspaceCompiler().analyze(
-                URI.create("file:///workspace/demo/Use.java"),
+                "file:///workspace/demo/Use.java",
                 """
                         package demo;
                         class Use {

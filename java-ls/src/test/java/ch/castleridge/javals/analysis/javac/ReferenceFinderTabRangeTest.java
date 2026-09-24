@@ -15,7 +15,6 @@ import ch.castleridge.javals.analysis.ResolvedSymbol;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
 
-import java.net.URI;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -55,7 +54,7 @@ class ReferenceFinderTabRangeTest {
                 }
                 """.formatted(fieldLine);
 
-        URI docUri = URI.create("mem:///Constants.java");
+        String docUri = "mem:///Constants.java";
         ClasspathOrder cp = new ClasspathOrder(
                 List.of(jrt.sourceUri()).stream().map(UriClasspathEntry::of).collect(Collectors.toList()),
                 false);

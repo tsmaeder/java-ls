@@ -12,7 +12,6 @@ package ch.castleridge.javals.analysis.ecj;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.net.URI;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -57,7 +56,7 @@ class EcjIndexedTypeResolutionTest {
 
     private void assertNoErrors(String source) {
         AnalysisSession session = new EcjWorkspaceCompiler().analyze(
-                URI.create("file:///workspace/demo/Use.java"), source, index, classpath);
+                "file:///workspace/demo/Use.java", source, index, classpath);
         assertTrue(session.isUsable());
         assertTrue(session.diagnostics().stream()
                         .noneMatch(diagnostic -> diagnostic.severity() == DiagnosticSeverity.Error),

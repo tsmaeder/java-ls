@@ -15,7 +15,6 @@ import ch.castleridge.javals.analysis.ResolvedSymbol;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
 
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -105,6 +104,6 @@ class DefinitionElementResolverTest {
         ClasspathOrder cp = new ClasspathOrder(
                 List.of(jrt.sourceUri()).stream().map(UriClasspathEntry::of).collect(Collectors.toList()),
                 false);
-        return new JavacWorkspaceCompiler().analyze(URI.create("mem:///Use.java"), source, index, cp);
+        return new JavacWorkspaceCompiler().analyze("mem:///Use.java", source, index, cp);
     }
 }

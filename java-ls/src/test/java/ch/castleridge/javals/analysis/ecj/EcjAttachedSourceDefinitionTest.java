@@ -11,7 +11,6 @@
 package ch.castleridge.javals.analysis.ecj;
 
 import java.io.OutputStream;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -104,7 +103,7 @@ class EcjAttachedSourceDefinitionTest {
                 }
                 """;
         AnalysisSession session = new EcjWorkspaceCompiler(new AstDeclarationLocator(EcjDietSources::lower), attached).analyze(
-                URI.create("file:///workspace/demo/Use.java"), source, index, classpath);
+                "file:///workspace/demo/Use.java", source, index, classpath);
         assertTrue(session.isUsable());
 
         String expectedUri = "jar:" + dependency.sourcesJar().toUri() + "!/com/example/Greeter.java";
@@ -147,7 +146,7 @@ class EcjAttachedSourceDefinitionTest {
                 }
                 """;
         AnalysisSession session = new EcjWorkspaceCompiler(new AstDeclarationLocator(EcjDietSources::lower), attached).analyze(
-                URI.create("file:///workspace/demo/Use.java"), source, index, classpath);
+                "file:///workspace/demo/Use.java", source, index, classpath);
         assertTrue(session.isUsable());
 
         String expectedUri = "jar:" + dependency.sourcesJar().toUri() + "!/com/example/Greeter.java";
@@ -176,7 +175,7 @@ class EcjAttachedSourceDefinitionTest {
                 }
                 """;
         AnalysisSession session = new EcjWorkspaceCompiler(new AstDeclarationLocator(EcjDietSources::lower), Map.of()).analyze(
-                URI.create("file:///workspace/demo/Use.java"), source, index, classpath);
+                "file:///workspace/demo/Use.java", source, index, classpath);
         assertTrue(session.isUsable());
 
         ResolvedSymbol resolved = session.resolveAt(new Position(5, 4)).orElseThrow();
@@ -214,7 +213,7 @@ class EcjAttachedSourceDefinitionTest {
                 }
                 """;
         AnalysisSession session = new EcjWorkspaceCompiler(new AstDeclarationLocator(EcjDietSources::lower), attached).analyze(
-                URI.create("file:///workspace/demo/Use.java"), source, index, classpath);
+                "file:///workspace/demo/Use.java", source, index, classpath);
         assertTrue(session.isUsable());
 
         String base64Uri = "jar:" + srcZip.toUri() + "!/java.base/java/util/Base64.java";

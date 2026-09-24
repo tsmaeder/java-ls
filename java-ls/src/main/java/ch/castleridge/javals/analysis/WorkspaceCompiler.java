@@ -10,8 +10,6 @@
  */
 package ch.castleridge.javals.analysis;
 
-import java.net.URI;
-
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
 
@@ -21,5 +19,5 @@ import ch.castleridge.javals.indexing.index.Index;
  */
 public interface WorkspaceCompiler {
 
-    AnalysisSession analyze(URI uri, CharSequence text, Index index, ClasspathOrder classpath);
+    AnalysisSession analyze(String uri, CharSequence text, Index index, ClasspathOrder classpath);
 }

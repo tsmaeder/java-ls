@@ -13,7 +13,6 @@ package ch.castleridge.javals.analysis.ecj;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.net.URI;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
@@ -70,7 +69,7 @@ class EcjAnalysisEngineAbortTest {
                 }
                 """;
         AnalysisSession session = new EcjWorkspaceCompiler().analyze(
-                URI.create("file:///workspace/demo/Use.java"), source, poisoned, classpath);
+                "file:///workspace/demo/Use.java", source, poisoned, classpath);
 
         assertTrue(session.isUsable());
         assertTrue(session.diagnostics().stream()

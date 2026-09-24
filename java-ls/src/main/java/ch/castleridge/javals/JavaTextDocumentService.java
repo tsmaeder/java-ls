@@ -16,7 +16,6 @@ import org.eclipse.lsp4j.jsonrpc.messages.Either3;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.TextDocumentService;
 
-import java.net.URI;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -174,17 +173,10 @@ public class JavaTextDocumentService implements TextDocumentService {
             Index index = indexOpt.get();
             ClasspathOrder classpath = indexService.classPathFor(uri);
 
-            URI docUri;
-            try {
-                docUri = URI.create(uri);
-            } catch (IllegalArgumentException e) {
-                return;
-            }
-
             AnalysisSession session;
             long t0 = System.currentTimeMillis();
             try {
-                session = workspaceCompiler.analyze(docUri, text, index, classpath);
+                session = workspaceCompiler.analyze(uri, text, index, classpath);
                 long t1 = System.currentTimeMillis();
                 server.logMessage(MessageType.Log,
                         "Refresh compile took " + (t1 - t0) + "ms for " + uri);
@@ -247,16 +239,9 @@ public class JavaTextDocumentService implements TextDocumentService {
         if (indexOpt.isEmpty())
             return null;
 
-        URI docUri;
-        try {
-            docUri = URI.create(uri);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
-
         ClasspathOrder classpath = indexService.classPathFor(uri);
         try {
-            return workspaceCompiler.analyze(docUri, doc.getText(), indexOpt.get(), classpath);
+            return workspaceCompiler.analyze(uri, doc.getText(), indexOpt.get(), classpath);
         } catch (RuntimeException | Error e) {
             server.logMessage(MessageType.Error, "Completion compile failed for " + uri + ": " + describe(e));
             server.logException(e);
@@ -407,13 +392,6 @@ public class JavaTextDocumentService implements TextDocumentService {
             if (text == null)
                 return;
 
-            URI docUri;
-            try {
-                docUri = URI.create(candidateUri);
-            } catch (IllegalArgumentException e) {
-                return;
-            }
-
             Optional<Index> index = indexService.index();
             if (index.isEmpty())
                 return;
@@ -421,7 +399,7 @@ public class JavaTextDocumentService implements TextDocumentService {
 
             AnalysisSession candidateSession;
             try {
-                candidateSession = workspaceCompiler.analyze(docUri, text, index.get(), classpath);
+                candidateSession = workspaceCompiler.analyze(candidateUri, text, index.get(), classpath);
             } catch (RuntimeException e) {
                 server.logMessage(MessageType.Error,
                         "Error compiling candidate " + candidateUri + ": " + e.getMessage());
@@ -505,7 +483,7 @@ public class JavaTextDocumentService implements TextDocumentService {
         String text = textForUri(uri);
         if (text == null) text = "";
         try {
-            return workspaceCompiler.analyze(URI.create(uri), text, indexOpt.get(), indexService.classPathFor(uri));
+            return workspaceCompiler.analyze(uri, text, indexOpt.get(), indexService.classPathFor(uri));
         } catch (RuntimeException e) {
             server.logMessage(MessageType.Error, "Type hierarchy session failed for " + uri + ": " + describe(e));
             return null;

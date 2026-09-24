@@ -16,7 +16,6 @@ import ch.castleridge.javals.analysis.ResolvedSymbol;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
 
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -129,7 +128,7 @@ class SymbolLocatorRecordAccessorTest {
                 List.of(dirUri, jrtUri).stream().map(UriClasspathEntry::of).collect(Collectors.toList()),
                 false);
         return new JavacWorkspaceCompiler(new AstDeclarationLocator(JavacDietSources::lower), Map.of())
-                .analyze(URI.create("mem:///Use.java"), source, index, cp);
+                .analyze("mem:///Use.java", source, index, cp);
     }
 
     private static String snippet(String source, Location loc) {

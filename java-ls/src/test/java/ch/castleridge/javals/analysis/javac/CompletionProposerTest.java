@@ -14,7 +14,6 @@ import ch.castleridge.javals.analysis.AnalysisSession;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
 
-import java.net.URI;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -361,7 +360,7 @@ class CompletionProposerTest {
 
     private static List<CompletionItem> complete(String source, Index index, ClasspathOrder classpath, String marker) {
         AnalysisSession session = new JavacWorkspaceCompiler().analyze(
-                URI.create("mem:///com/example/Use.java"), source, index, ClasspathOrder.UNRESTRICTED);
+                "mem:///com/example/Use.java", source, index, ClasspathOrder.UNRESTRICTED);
         return session.complete(source, positionAfter(source, marker), index, classpath);
     }
 

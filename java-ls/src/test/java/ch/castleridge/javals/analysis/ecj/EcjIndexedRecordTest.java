@@ -12,7 +12,6 @@ package ch.castleridge.javals.analysis.ecj;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.net.URI;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -56,7 +55,7 @@ class EcjIndexedRecordTest {
 
     private AnalysisSession analyze(String source) {
         return new EcjWorkspaceCompiler().analyze(
-                URI.create("file:///workspace/demo/Use.java"), source, index, classpath);
+                "file:///workspace/demo/Use.java", source, index, classpath);
     }
 
     private static void assertNoErrors(AnalysisSession session) {

@@ -14,7 +14,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.net.URI;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -99,7 +98,7 @@ class EcjAnalysisSessionReferencesTest {
         source.append("}\n");
 
         AnalysisSession session = new EcjWorkspaceCompiler().analyze(
-                URI.create("file:///workspace/demo/Use.java"), source.toString(), env.index(), env.classpath());
+                "file:///workspace/demo/Use.java", source.toString(), env.index(), env.classpath());
         assertTrue(session.isUsable());
 
         // 'String' in "for (String value : values)"
@@ -131,7 +130,7 @@ class EcjAnalysisSessionReferencesTest {
                 }
                 """;
         AnalysisSession session = new EcjWorkspaceCompiler().analyze(
-                URI.create("file:///workspace/demo/Use.java"), source, env.index(), env.classpath());
+                "file:///workspace/demo/Use.java", source, env.index(), env.classpath());
         assertTrue(session.isUsable());
 
         // 'String' in "String[] field" (0-based col 4 = 'S')
@@ -167,7 +166,7 @@ class EcjAnalysisSessionReferencesTest {
                 }
                 """;
         AnalysisSession session = new EcjWorkspaceCompiler().analyze(
-                URI.create("file:///workspace/demo/Use.java"), source, env.index(), env.classpath());
+                "file:///workspace/demo/Use.java", source, env.index(), env.classpath());
         assertTrue(session.isUsable());
 
         // 'List' in "List<String> field" (0-based col 4 = 'L')
@@ -208,7 +207,7 @@ class EcjAnalysisSessionReferencesTest {
                 }
                 """;
         AnalysisSession session = new EcjWorkspaceCompiler().analyze(
-                URI.create("file:///workspace/demo/Use.java"), source, env.index(), env.classpath());
+                "file:///workspace/demo/Use.java", source, env.index(), env.classpath());
         assertTrue(session.isUsable());
         assertTrue(session.diagnostics().stream()
                         .anyMatch(d -> d.severity() == DiagnosticSeverity.Error),
@@ -250,7 +249,7 @@ class EcjAnalysisSessionReferencesTest {
                 }
                 """;
         AnalysisSession session = new EcjWorkspaceCompiler().analyze(
-                URI.create("file:///workspace/demo/Use.java"), source, env.index(), env.classpath());
+                "file:///workspace/demo/Use.java", source, env.index(), env.classpath());
         assertTrue(session.isUsable());
 
         // 'String' in the "java.lang.String.format" import qualifier
@@ -305,9 +304,9 @@ class EcjAnalysisSessionReferencesTest {
                 false);
         String bufferUri = "file:///d:/src/demo/State.java";
         AnalysisSession declaration = new EcjWorkspaceCompiler().analyze(
-                URI.create(bufferUri), stateSource, index, classpath);
+                bufferUri, stateSource, index, classpath);
         AnalysisSession use = new EcjWorkspaceCompiler().analyze(
-                URI.create("file:///D:/src/demo/Use.java"), useSource, index, classpath);
+                "file:///D:/src/demo/Use.java", useSource, index, classpath);
         assertTrue(declaration.isUsable(), () -> "declaration: " + declaration.diagnostics());
         assertTrue(use.isUsable(), () -> "use: " + use.diagnostics());
 

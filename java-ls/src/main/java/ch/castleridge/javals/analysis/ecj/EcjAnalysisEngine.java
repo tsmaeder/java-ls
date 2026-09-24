@@ -10,7 +10,6 @@
  */
 package ch.castleridge.javals.analysis.ecj;
 
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -46,7 +45,7 @@ final class EcjAnalysisEngine {
 
     private EcjAnalysisEngine() {}
 
-    static AnalysisSession analyze(URI uri,
+    static AnalysisSession analyze(String uri,
                                    CharSequence text,
                                    Index index,
                                    ClasspathOrder classpath,
@@ -58,7 +57,7 @@ final class EcjAnalysisEngine {
             return new AstAnalysisSession(cu, List.of(), index, classpath, locator, sourceJarByBinaryJar);
         }
 
-        String fileName = uri == null ? "Analysis.java" : uri.toString();
+        String fileName = uri == null || uri.isBlank() ? "Analysis.java" : uri;
         ICompilationUnit input = new CompilationUnit(source.toCharArray(), fileName, "UTF-8");
         List<CategorizedProblem> problems = new ArrayList<>();
         ICompilerRequestor requestor = result -> collectProblems(result, problems);
@@ -96,7 +95,7 @@ final class EcjAnalysisEngine {
         }
     }
 
-    private static AstAnalysisSession session(URI uri,
+    private static AstAnalysisSession session(String uri,
                                               String source,
                                               CompilationUnitDeclaration unit,
                                               List<PublishedDiagnostic> diagnostics,

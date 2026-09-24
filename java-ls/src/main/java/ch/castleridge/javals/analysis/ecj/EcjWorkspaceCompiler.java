@@ -10,7 +10,6 @@
  */
 package ch.castleridge.javals.analysis.ecj;
 
-import java.net.URI;
 import java.util.Map;
 
 import ch.castleridge.javals.analysis.AnalysisSession;
@@ -45,7 +44,7 @@ public final class EcjWorkspaceCompiler implements WorkspaceCompiler {
     }
 
     @Override
-    public AnalysisSession analyze(URI uri, CharSequence text, Index index, ClasspathOrder classpath) {
+    public AnalysisSession analyze(String uri, CharSequence text, Index index, ClasspathOrder classpath) {
         return EcjAnalysisEngine.analyze(uri, text, index, classpath, locator, sourceJarByBinaryJar);
     }
 }

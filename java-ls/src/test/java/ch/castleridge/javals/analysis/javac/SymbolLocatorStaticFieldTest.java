@@ -16,7 +16,6 @@ import ch.castleridge.javals.analysis.ResolvedSymbol;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
 
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -58,7 +57,7 @@ class SymbolLocatorStaticFieldTest {
                 class Use {
                 }
                 """;
-        URI docUri = URI.create("mem:///Use.java");
+        String docUri = "mem:///Use.java";
         ClasspathOrder cp = new ClasspathOrder(
                 List.of(jrtUri).stream().map(UriClasspathEntry::of).collect(Collectors.toList()),
                 false);

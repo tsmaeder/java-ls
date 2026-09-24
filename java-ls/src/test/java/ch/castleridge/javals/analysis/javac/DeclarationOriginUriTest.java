@@ -13,7 +13,6 @@ package ch.castleridge.javals.analysis.javac;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.net.URI;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -68,9 +67,9 @@ class DeclarationOriginUriTest {
                 false);
         String bufferUri = "file:///d:/src/demo/State.java";
         AnalysisSession declaration = new JavacWorkspaceCompiler().analyze(
-                URI.create(bufferUri), stateSource, index, classpath);
+                bufferUri, stateSource, index, classpath);
         AnalysisSession use = new JavacWorkspaceCompiler().analyze(
-                URI.create("file:///D:/src/demo/Use.java"), useSource, index, classpath);
+                "file:///D:/src/demo/Use.java", useSource, index, classpath);
         assertTrue(declaration.isUsable(), () -> "declaration: " + declaration.diagnostics());
         assertTrue(use.isUsable(), () -> "use: " + use.diagnostics());
 
