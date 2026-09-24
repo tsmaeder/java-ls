@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import ch.castleridge.javals.analysis.AnalysisSession;
 import ch.castleridge.javals.analysis.AstDeclarationLocator;
+import ch.castleridge.javals.analysis.AttachedSource;
 import ch.castleridge.javals.analysis.BackendFactory;
 import ch.castleridge.javals.analysis.PublishedDiagnostic;
 import ch.castleridge.javals.analysis.ResolvedSymbol;
@@ -344,16 +345,20 @@ public class JavaTextDocumentService implements TextDocumentService {
         Optional<Index> indexOpt = indexService.index();
         if (indexOpt.isPresent()) {
             String simpleName = key.simpleName();
+            Map<String, String> sourceJars = indexService.sourceJarByBinaryJar();
             for (BloomEntry entry : indexOpt.get().bloomFilters()) {
-                // Only source blooms can yield source reference locations.
-                // Classfile-keyed blooms (jar/jrt *.class) would otherwise be
-                // read as text and compiled as garbage, so skip them here.
                 String path = entry.resourcePath();
-                if (path != null && path.endsWith(".java") && entry.filter().mightContain(simpleName)) {
+                if (path == null || !entry.filter().mightContain(simpleName)) continue;
+                if (path.endsWith(".java")) {
                     String candidateUri = entry.resourceUri();
-                    if (candidateUri != null) {
-                        bloomCandidates.add(candidateUri);
-                    }
+                    if (candidateUri != null) bloomCandidates.add(candidateUri);
+                } else if (path.endsWith(".class")) {
+                    // Class bytes are not source. When the container has an
+                    // attached sources archive, search that .java instead.
+                    // Nested classes share one compilation unit, so the set
+                    // collapses Outer$Inner.class onto Outer.java.
+                    AttachedSource.javaUri(entry.resourceUri(), entry.sourceUri(), sourceJars)
+                            .ifPresent(bloomCandidates::add);
                 }
             }
         }
@@ -400,7 +405,7 @@ public class JavaTextDocumentService implements TextDocumentService {
             AnalysisSession candidateSession;
             try {
                 candidateSession = workspaceCompiler.analyze(candidateUri, text, index.get(), classpath);
-            } catch (RuntimeException e) {
+            } catch (RuntimeException | Error e) {
                 server.logMessage(MessageType.Error,
                         "Error compiling candidate " + candidateUri + ": " + e.getMessage());
                 server.logException(e);

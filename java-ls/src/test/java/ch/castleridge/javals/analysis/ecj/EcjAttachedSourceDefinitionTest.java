@@ -39,6 +39,7 @@ import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
+import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.scan.JarInput;
 import ch.castleridge.javals.indexing.scan.JrtInput;
 import ch.castleridge.javals.indexing.scan.Scanner;
@@ -153,6 +154,63 @@ class EcjAttachedSourceDefinitionTest {
         assertDefinition(session, new Position(6, 24), expectedUri, "greet", 10, 18);
     }
 
+    /**
+     * A declaration opened from the sources jar must share the workspace use's
+     * symbol key, which is the indexed {@code .class} URI.
+     */
+    @Test
+    void attachedSourceDeclarationKeyMatchesWorkspaceUse(@TempDir Path workspace) throws Exception {
+        Dependency dependency = buildDependency(workspace);
+        Index index = new InMemoryIndex();
+        JarInput jar = new JarInput(dependency.binaryJar());
+        JrtInput jrt = new JrtInput(Path.of(System.getProperty("java.home")));
+        assertTrue(new Scanner().scanAll(List.of(jar, jrt), index).isEmpty());
+
+        ClasspathOrder classpath = new ClasspathOrder(List.of(
+                UriClasspathEntry.of(jar.sourceUri()),
+                UriClasspathEntry.of(jrt.sourceUri())), false);
+        Map<String, String> attached = Map.of(jar.sourceUri(), dependency.sourcesJar().toUri().toString());
+        EcjWorkspaceCompiler compiler =
+                new EcjWorkspaceCompiler(new AstDeclarationLocator(EcjDietSources::lower), attached);
+
+        String attachedUri = "jar:" + dependency.sourcesJar().toUri() + "!/com/example/Greeter.java";
+        String useSource = """
+                package demo;
+
+                import com.example.Greeter;
+
+                class Use {
+                    String m(Greeter greeter) {
+                        return greeter.greet("x");
+                    }
+                }
+                """;
+        AnalysisSession declaration = compiler.analyze(attachedUri, GREETER_SOURCE, index, classpath);
+        AnalysisSession use = compiler.analyze("file:///workspace/demo/Use.java", useSource, index, classpath);
+        assertTrue(declaration.isUsable(), () -> "declaration: " + declaration.diagnostics());
+        assertTrue(use.isUsable(), () -> "use: " + use.diagnostics());
+
+        TypeEntry greeter = index.getAll("com/example/Greeter").stream().findFirst().orElseThrow();
+        Position declAt = tokenAt(GREETER_SOURCE, "greet(");
+        Position dot = tokenAt(useSource, ".greet(");
+        Position useAt = new Position(dot.getLine(), dot.getCharacter() + 1);
+        ResolvedSymbol fromDeclaration = declaration.resolveAt(declAt).orElseThrow(
+                () -> new AssertionError("no symbol at declaration, diagnostics: " + declaration.diagnostics()));
+        ResolvedSymbol fromUse = use.resolveAt(useAt).orElseThrow(
+                () -> new AssertionError("no symbol at use, diagnostics: " + use.diagnostics()));
+        assertEquals("greet", fromDeclaration.key().simpleName());
+        assertEquals(greeter.resourceUri(), fromDeclaration.originResourceUri().orElseThrow());
+        assertTrue(fromDeclaration.key().matches(fromUse.key()),
+                () -> "declaration " + fromDeclaration.key() + " vs use " + fromUse.key());
+
+        assertTrue(declaration.findReferencesTo(fromUse.key()).stream()
+                        .anyMatch(loc -> loc.getRange().getStart().getLine() == declAt.getLine()),
+                () -> "use key should find the declaration, got " + declaration.findReferencesTo(fromUse.key()));
+        assertTrue(use.findReferencesTo(fromDeclaration.key()).stream()
+                        .anyMatch(loc -> loc.getRange().getStart().getLine() == useAt.getLine()),
+                () -> "declaration key should find the use, got " + use.findReferencesTo(fromDeclaration.key()));
+    }
+
     @Test
     void classFileWithoutAttachedSourcesIsNotANavigationTarget(@TempDir Path workspace) throws Exception {
         Dependency dependency = buildDependency(workspace);
@@ -232,6 +290,21 @@ class EcjAttachedSourceDefinitionTest {
         Location encodeToString = definitionAt(session, new Position(8, 24));
         assertEquals(base64Uri, encodeToString.getUri());
         assertNameAt(encodeToString, "encodeToString", srcZip, "java.base/java/util/Base64.java");
+    }
+
+    private static Position tokenAt(String source, String token) {
+        int offset = source.indexOf(token);
+        int line = 0;
+        int column = 0;
+        for (int i = 0; i < offset; i++) {
+            if (source.charAt(i) == '\n') {
+                line++;
+                column = 0;
+            } else {
+                column++;
+            }
+        }
+        return new Position(line, column);
     }
 
     private static void assertDefinition(AnalysisSession session,

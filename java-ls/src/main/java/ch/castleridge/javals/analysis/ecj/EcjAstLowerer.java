@@ -191,6 +191,7 @@ import ch.castleridge.javals.ast.VoidTypeNode;
 import ch.castleridge.javals.ast.WhileStmt;
 import ch.castleridge.javals.ast.WildcardTypeNode;
 import ch.castleridge.javals.ast.YieldStmt;
+import ch.castleridge.javals.analysis.AttachedSource;
 import ch.castleridge.javals.analysis.FileUris;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
@@ -203,6 +204,7 @@ final class EcjAstLowerer {
     private final String source;
     private final Index index;
     private final ClasspathOrder classpath;
+    private final Map<String, String> sourceJarByBinaryJar;
     private final Map<Binding, Symbol> interned = new IdentityHashMap<>();
     private final Map<String, TypeSymbol> typesByJvm = new HashMap<>();
 
@@ -210,30 +212,34 @@ final class EcjAstLowerer {
                           String uri,
                           String source,
                           Index index,
-                          ClasspathOrder classpath) {
+                          ClasspathOrder classpath,
+                          Map<String, String> sourceJarByBinaryJar) {
         this.unit = unit;
         this.uri = uri == null ? "" : uri;
         this.source = source == null ? "" : source;
         this.index = index;
         this.classpath = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
+        this.sourceJarByBinaryJar = sourceJarByBinaryJar == null ? Map.of() : sourceJarByBinaryJar;
     }
 
     static CompilationUnit lower(CompilationUnitDeclaration unit,
                                  String uri,
                                  String source,
                                  Index index,
-                                 ClasspathOrder classpath) {
+                                 ClasspathOrder classpath,
+                                 Map<String, String> sourceJarByBinaryJar) {
         String text = source == null ? "" : source;
         String u = uri == null ? "" : uri;
         if (unit == null) {
             return new CompilationUnit(new SourceFile(u, text), null, List.of(), List.of(), null,
                     new SourceRange(0, text.length()));
         }
-        return new EcjAstLowerer(unit, u, text, index, classpath).lowerUnit();
+        return new EcjAstLowerer(unit, u, text, index, classpath, sourceJarByBinaryJar).lowerUnit();
     }
 
     static CompilationUnit diet(CompilationUnitDeclaration unit, String uri, String source) {
-        return new EcjAstLowerer(unit, uri == null ? "" : uri, source, null, ClasspathOrder.UNRESTRICTED).lowerUnit();
+        return new EcjAstLowerer(unit, uri == null ? "" : uri, source, null,
+                ClasspathOrder.UNRESTRICTED, Map.of()).lowerUnit();
     }
 
     private CompilationUnit lowerUnit() {
@@ -1083,18 +1089,35 @@ final class EcjAstLowerer {
     }
 
     private Optional<String> origin(String ownerJvm) {
-        String indexed = indexedOrigin(ownerJvm);
+        TypeEntry entry = indexedEntry(ownerJvm);
+        String indexed = indexedOrigin(entry);
         boolean declaredHere = declares(ownerJvm);
-        if (indexed != null && (!declaredHere || FileUris.sameFile(uri, indexed))) {
+        if (indexed != null && (!declaredHere || sameDeclaration(indexed, entry))) {
             return Optional.of(indexed);
         }
         if (declaredHere) return Optional.of(uri);
         return Optional.empty();
     }
 
-    private String indexedOrigin(String ownerJvm) {
+    /**
+     * The buffer is the indexed declaration when it is that resource, or the
+     * attached {@code .java} companion of an indexed {@code .class}. A
+     * workspace file that only shadows the binary name keeps its own URI.
+     */
+    private boolean sameDeclaration(String indexed, TypeEntry entry) {
+        if (FileUris.sameFile(uri, indexed)) return true;
+        if (entry == null) return false;
+        return AttachedSource.javaUri(indexed, entry.sourceUri(), sourceJarByBinaryJar)
+                .filter(javaUri -> FileUris.sameFile(uri, javaUri))
+                .isPresent();
+    }
+
+    private TypeEntry indexedEntry(String ownerJvm) {
         if (index == null || ownerJvm == null) return null;
-        TypeEntry entry = classpath.pick(index.getAll(ownerJvm), TypeEntry::sourceUri);
+        return classpath.pick(index.getAll(ownerJvm), TypeEntry::sourceUri);
+    }
+
+    private static String indexedOrigin(TypeEntry entry) {
         if (entry == null) return null;
         String resourceUri = entry.resourceUri();
         if (resourceUri == null || resourceUri.isBlank()) return null;

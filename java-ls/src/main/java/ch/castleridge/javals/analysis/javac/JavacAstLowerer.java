@@ -221,6 +221,7 @@ final class JavacAstLowerer {
     private final String source;
     private final Index index;
     private final ClasspathOrder classpath;
+    private final Map<String, String> sourceJarByBinaryJar;
     private final Map<Element, Symbol> interned = new IdentityHashMap<>();
 
     private JavacAstLowerer(CompilationUnitTree cu,
@@ -229,7 +230,8 @@ final class JavacAstLowerer {
                             Types types,
                             String source,
                             Index index,
-                            ClasspathOrder classpath) {
+                            ClasspathOrder classpath,
+                            Map<String, String> sourceJarByBinaryJar) {
         this.cu = cu;
         this.trees = trees;
         this.elements = elements;
@@ -238,13 +240,15 @@ final class JavacAstLowerer {
         this.source = source == null ? "" : source;
         this.index = index;
         this.classpath = classpath;
+        this.sourceJarByBinaryJar = sourceJarByBinaryJar == null ? Map.of() : sourceJarByBinaryJar;
     }
 
     static CompilationUnit lower(JavacWorkspaceCompiler.Result result,
                                  String uri,
                                  CharSequence text,
                                  Index index,
-                                 ClasspathOrder classpath) {
+                                 ClasspathOrder classpath,
+                                 Map<String, String> sourceJarByBinaryJar) {
         String source = text == null ? "" : text.toString();
         if (result == null || result.cu() == null) {
             return new CompilationUnit(new SourceFile(uri, source), null, List.of(), List.of(), null,
@@ -252,8 +256,8 @@ final class JavacAstLowerer {
         }
         Elements elements = result.task() == null ? null : result.task().getElements();
         Types typesUtil = result.task() == null ? null : result.task().getTypes();
-        return new JavacAstLowerer(result.cu(), result.trees(), elements, typesUtil, source, index, classpath)
-                .lowerUnit(uri);
+        return new JavacAstLowerer(result.cu(), result.trees(), elements, typesUtil, source, index, classpath,
+                sourceJarByBinaryJar).lowerUnit(uri);
     }
 
     static CompilationUnit diet(String uri, String text, CompilationUnitTree cu, Trees trees) {
@@ -262,7 +266,7 @@ final class JavacAstLowerer {
             return new CompilationUnit(new SourceFile(uri, source), null, List.of(), List.of(), null,
                     new SourceRange(0, source.length()));
         }
-        return new JavacAstLowerer(cu, trees, null, null, source, null, null).lowerUnit(uri);
+        return new JavacAstLowerer(cu, trees, null, null, source, null, null, Map.of()).lowerUnit(uri);
     }
 
     private CompilationUnit lowerUnit(String uri) {
@@ -843,9 +847,7 @@ final class JavacAstLowerer {
         if (tree == null) return null;
         SourceRange range = range(tree);
         TypeNode lowered = switch (tree) {
-            case com.sun.source.tree.PrimitiveTypeTree primitive -> primitive.getPrimitiveTypeKind() == TypeKind.VOID
-                    ? new VoidTypeNode(range)
-                    : new PrimitiveTypeNode(primitiveKind(primitive.getPrimitiveTypeKind()), range);
+            case com.sun.source.tree.PrimitiveTypeTree primitive -> lowerPrimitive(primitive, range);
             case IdentifierTree ident -> typeName(List.of(ident(ident.getName().toString(), range, symbolOf(elementOf(ident)))), range);
             case MemberSelectTree select -> typeName(typeNameIdents(select), range);
             case com.sun.source.tree.ParameterizedTypeTree parameterized -> {
@@ -1263,7 +1265,7 @@ final class JavacAstLowerer {
         if (elements == null || types == null) {
             return SymbolKey.local(element.getSimpleName().toString());
         }
-        return JavacSymbolKeys.of(element, elements, types, trees, index, classpath)
+        return JavacSymbolKeys.of(element, elements, types, trees, index, classpath, sourceJarByBinaryJar)
                 .orElseGet(() -> SymbolKey.local(element.getSimpleName().toString()));
     }
 
@@ -1314,6 +1316,24 @@ final class JavacAstLowerer {
             }
             default -> JType.ERROR;
         };
+    }
+
+    /**
+     * An unattributed or erroneous type is still a {@code PrimitiveTypeTree},
+     * but its tag is {@code ERROR}. Asking for the primitive kind asserts.
+     */
+    private TypeNode lowerPrimitive(com.sun.source.tree.PrimitiveTypeTree primitive, SourceRange range) {
+        TypeKind kind;
+        try {
+            kind = primitive.getPrimitiveTypeKind();
+        } catch (AssertionError ignored) {
+            return new ErroneousType(List.of(), range);
+        }
+        if (kind == TypeKind.ERROR || kind == TypeKind.NONE || kind == null) {
+            return new ErroneousType(List.of(), range);
+        }
+        if (kind == TypeKind.VOID) return new VoidTypeNode(range);
+        return new PrimitiveTypeNode(primitiveKind(kind), range);
     }
 
     private JType.Primitive primitiveKind(TypeKind kind) {

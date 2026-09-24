@@ -12,6 +12,7 @@ package ch.castleridge.javals.analysis.javac;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import javax.lang.model.element.Element;
@@ -28,6 +29,7 @@ import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.util.Trees;
 import com.sun.tools.javac.code.Symbol.ClassSymbol;
 
+import ch.castleridge.javals.analysis.AttachedSource;
 import ch.castleridge.javals.analysis.FileUris;
 import ch.castleridge.javals.ast.SymbolKey;
 import ch.castleridge.javals.classpath.ClasspathOrder;
@@ -59,20 +61,22 @@ public final class JavacSymbolKeys {
      *
      * <p>When this compilation declares the type, the origin is the classpath
      * winner's {@code resourceUri} if that entry is the same file as the
-     * buffer. The stored string is the index spelling, not the editor URI.
+     * buffer, or the indexed {@code .class} when the buffer is that entry's
+     * attached source. The stored string is the index spelling, not the editor URI.
      */
     public static Optional<SymbolKey> of(Element element,
                                          Elements elements,
                                          Types types,
                                          Trees trees,
                                          Index index,
-                                         ClasspathOrder classpath) {
+                                         ClasspathOrder classpath,
+                                         Map<String, String> sourceJarByBinaryJar) {
         if (element == null) return Optional.empty();
         String simpleName = element.getSimpleName().toString();
         if (isFileLocal(element)) {
             return Optional.of(SymbolKey.local(simpleName));
         }
-        Optional<String> origin = originResourceUri(element, trees, index, classpath);
+        Optional<String> origin = originResourceUri(element, trees, index, classpath, sourceJarByBinaryJar);
         if (origin.isEmpty()) return Optional.empty();
 
         String originUri = origin.get();
@@ -123,14 +127,16 @@ public final class JavacSymbolKeys {
      *
      * <p>A type loaded from the index keeps that entry's URI. A type declared
      * in this compilation uses the classpath winner's URI when the winner is
-     * this file, so an editor URI that differs only in spelling (Windows
-     * drive-letter case) still matches uses. A shadowed duplicate that this
-     * unit declares keeps the compilation URI.
+     * this file, or when this file is the attached source of that {@code .class},
+     * so an editor URI that differs only in spelling (Windows drive-letter case)
+     * still matches uses. A shadowed duplicate that this unit declares keeps
+     * the compilation URI.
      */
     public static Optional<String> originResourceUri(Element element,
                                                       Trees trees,
                                                       Index index,
-                                                      ClasspathOrder classpath) {
+                                                      ClasspathOrder classpath,
+                                                      Map<String, String> sourceJarByBinaryJar) {
         ClassSymbol enclosing = enclosingClass(element);
         if (enclosing == null) return Optional.empty();
 
@@ -144,13 +150,26 @@ public final class JavacSymbolKeys {
         }
 
         String compilationUri = compilationUri(enclosing, trees);
-        String indexed = indexedOrigin(enclosing, index, classpath);
+        TypeEntry entry = indexedEntry(enclosing, index, classpath);
+        String indexed = indexedOrigin(entry);
         boolean declaredHere = compilationUri != null;
-        if (indexed != null && (!declaredHere || FileUris.sameFile(compilationUri, indexed))) {
+        if (indexed != null && (!declaredHere || sameDeclaration(
+                compilationUri, indexed, entry, sourceJarByBinaryJar))) {
             return Optional.of(indexed);
         }
         if (declaredHere) return Optional.of(compilationUri);
         return Optional.empty();
+    }
+
+    private static boolean sameDeclaration(String compilationUri,
+                                           String indexed,
+                                           TypeEntry entry,
+                                           Map<String, String> sourceJarByBinaryJar) {
+        if (FileUris.sameFile(compilationUri, indexed)) return true;
+        if (entry == null) return false;
+        return AttachedSource.javaUri(indexed, entry.sourceUri(), sourceJarByBinaryJar)
+                .filter(javaUri -> FileUris.sameFile(compilationUri, javaUri))
+                .isPresent();
     }
 
     private static String compilationUri(ClassSymbol enclosing, Trees trees) {
@@ -162,10 +181,13 @@ public final class JavacSymbolKeys {
         return cu.getSourceFile().toUri().toString();
     }
 
-    private static String indexedOrigin(ClassSymbol enclosing, Index index, ClasspathOrder classpath) {
+    private static TypeEntry indexedEntry(ClassSymbol enclosing, Index index, ClasspathOrder classpath) {
         if (enclosing == null || index == null || classpath == null) return null;
         String jvmName = enclosing.flatName().toString().replace('.', '/');
-        TypeEntry entry = classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri);
+        return classpath.pick(index.getAll(jvmName), TypeEntry::sourceUri);
+    }
+
+    private static String indexedOrigin(TypeEntry entry) {
         if (entry == null) return null;
         String resourceUri = entry.resourceUri();
         if (resourceUri == null || resourceUri.isBlank()) return null;

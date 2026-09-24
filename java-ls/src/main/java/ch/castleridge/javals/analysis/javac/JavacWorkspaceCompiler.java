@@ -80,7 +80,8 @@ public final class JavacWorkspaceCompiler implements WorkspaceCompiler {
     public AnalysisSession analyze(String uri, CharSequence text, Index index, ClasspathOrder classpath) {
         Result result = compile(uri, text, index, classpath);
         String docUri = uri == null ? "" : uri;
-        CompilationUnit cu = JavacAstLowerer.lower(result, docUri, text, index, classpath);
+        CompilationUnit cu = JavacAstLowerer.lower(
+                result, docUri, text, index, classpath, sourceJarByBinaryJar);
         return new AstAnalysisSession(cu, mapDiagnostics(result, cu), index, classpath, locator, sourceJarByBinaryJar);
     }
 

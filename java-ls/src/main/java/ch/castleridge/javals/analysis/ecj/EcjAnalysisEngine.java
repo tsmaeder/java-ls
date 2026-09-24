@@ -53,7 +53,8 @@ final class EcjAnalysisEngine {
                                    Map<String, String> sourceJarByBinaryJar) {
         String source = text == null ? "" : text.toString();
         if (!index.contains(OBJECT_JVM_NAME)) {
-            ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(null, uri, source, index, classpath);
+            ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(
+                    null, uri, source, index, classpath, sourceJarByBinaryJar);
             return new AstAnalysisSession(cu, List.of(), index, classpath, locator, sourceJarByBinaryJar);
         }
 
@@ -88,7 +89,8 @@ final class EcjAnalysisEngine {
                 return session(uri, source, compiler.unit, diagnostics,
                         index, classpath, locator, sourceJarByBinaryJar);
             }
-            ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(null, uri, source, index, classpath);
+            ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(
+                    null, uri, source, index, classpath, sourceJarByBinaryJar);
             return new AstAnalysisSession(cu, diagnostics, index, classpath, locator, sourceJarByBinaryJar);
         } finally {
             environment.cleanup();
@@ -103,7 +105,8 @@ final class EcjAnalysisEngine {
                                               ClasspathOrder classpath,
                                               AstDeclarationLocator locator,
                                               Map<String, String> sourceJarByBinaryJar) {
-        ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(unit, uri, source, index, classpath);
+        ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(
+                unit, uri, source, index, classpath, sourceJarByBinaryJar);
         return new AstAnalysisSession(cu, diagnostics, index, classpath, locator, sourceJarByBinaryJar);
     }
 
