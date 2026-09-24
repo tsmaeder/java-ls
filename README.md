@@ -110,6 +110,10 @@ Settings are passed by the client in LSP `initialize` → `initializationOptions
 {
   "workspacePath": "/path/to/workspace",
   "referencesCandidateCap": 500,
+  "references": {
+    "inJars": false,
+    "inJdk": false
+  },
   "backend": {
     "sourceIndexer": "javac",
     "classIndexer": "asm",
@@ -122,11 +126,13 @@ Settings are passed by the client in LSP `initialize` → `initializationOptions
 | --- | --- | --- | --- |
 | `workspacePath` | string | first workspace folder (else parent of `mbt.json`) | Root used to resolve relative paths from `mbt.json` |
 | `referencesCandidateCap` | number | uncapped (`≤ 0` or omitted) | Max candidate files scanned for find-references after Bloom filtering; open documents and the origin file are always included |
+| `references.inJars` | boolean | `false` | Also search dependency sources jars when finding references |
+| `references.inJdk` | boolean | `false` | Also search JDK sources (`src.zip`) when finding references |
 | `backend.sourceIndexer` | `"javac"` \| `"ecj"` \| `"turbine"` | `"javac"` | Parser used when indexing sources |
 | `backend.classIndexer` | `"asm"` \| `"turbine"` | `"asm"` | Class-file reader used when indexing jars / JRT |
 | `backend.compiler` | `"javac"` \| `"ecj"` | `"javac"` | Compiler used when analyzing open files (diagnostics, navigation, etc.) |
 
-In [vscode-javals](https://github.com/tsmaeder/vscode-javals), these map to `javals.backend.sourceIndexer`, `javals.backend.classIndexer`, and `javals.backend.compiler`.
+In [vscode-javals](https://github.com/tsmaeder/vscode-javals), these map to `javals.references.inJars`, `javals.references.inJdk`, `javals.backend.sourceIndexer`, `javals.backend.classIndexer`, and `javals.backend.compiler`. Restart the language server after changing them.
 
 ## Use with VS Code / Cursor ([vscode-javals](https://github.com/tsmaeder/vscode-javals))
 

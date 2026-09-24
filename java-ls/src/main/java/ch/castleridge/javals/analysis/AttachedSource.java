@@ -54,6 +54,10 @@ public final class AttachedSource {
         int separator = resourceUri.indexOf("!/");
         if (separator < 0 || separator + 2 >= resourceUri.length()) return Optional.empty();
         String classEntry = resourceUri.substring(separator + 2);
+        // JRT walkers store modules/<module>/...; src.zip uses <module>/... .
+        if (containerUri != null && containerUri.startsWith("jrt:") && classEntry.startsWith("modules/")) {
+            classEntry = classEntry.substring("modules/".length());
+        }
         try {
             return Optional.of("jar:" + URI.create(sourcesArchive) + "!/" + outerClassJavaEntry(classEntry));
         } catch (IllegalArgumentException e) {

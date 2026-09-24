@@ -65,6 +65,21 @@ class AttachedSourceTest {
     }
 
     @Test
+    void mapsJrtWalkerPathToJdkSourceZipJavaEntry(@TempDir Path workspace) {
+        String jrtUri = "jrt:///C:/jdk-25";
+        String srcZipUri = jarUri(workspace, "src.zip");
+
+        // JrtInput stores modules/<module>/...; src.zip entries drop that prefix.
+        Optional<String> uri = AttachedSource.javaUri(
+                jrtUri + "!/modules/java.base/java/util/Base64$Encoder.class",
+                jrtUri,
+                Map.of(jrtUri, srcZipUri));
+
+        assertTrue(uri.isPresent());
+        assertEquals("jar:" + srcZipUri + "!/java.base/java/util/Base64.java", uri.get());
+    }
+
+    @Test
     void keepsSourceEntriesAsTheyAre() {
         String sourceUri = "file:///workspace/src/main/java/com/example/Hello.java";
         assertEquals(Optional.of(sourceUri),

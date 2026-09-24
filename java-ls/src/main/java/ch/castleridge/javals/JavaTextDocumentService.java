@@ -56,6 +56,8 @@ public class JavaTextDocumentService implements TextDocumentService {
     private volatile WorkspaceCompiler workspaceCompiler = BackendFactory.workspaceCompiler("javac");
     /** Max files to scan for cross-file references; {@code <= 0} means no cap. */
     private volatile int referencesCandidateCap;
+    /** Workspace sources are always searched; jars and the JDK follow this scope. */
+    private volatile ReferenceSearchScope referenceSearchScope = ReferenceSearchScope.DEFAULT;
     private final ScheduledExecutorService refreshScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "index-refresh-debounce");
         t.setDaemon(true);
@@ -81,6 +83,16 @@ public class JavaTextDocumentService implements TextDocumentService {
 
     int referencesCandidateCap() {
         return referencesCandidateCap;
+    }
+
+    public void setReferenceSearchScope(ReferenceSearchScope referenceSearchScope) {
+        this.referenceSearchScope = referenceSearchScope == null
+                ? ReferenceSearchScope.DEFAULT
+                : referenceSearchScope;
+    }
+
+    ReferenceSearchScope referenceSearchScope() {
+        return referenceSearchScope;
     }
 
     AstDeclarationLocator javacLocator() {
@@ -346,9 +358,11 @@ public class JavaTextDocumentService implements TextDocumentService {
         if (indexOpt.isPresent()) {
             String simpleName = key.simpleName();
             Map<String, String> sourceJars = indexService.sourceJarByBinaryJar();
+            ReferenceSearchScope scope = referenceSearchScope;
             for (BloomEntry entry : indexOpt.get().bloomFilters()) {
                 String path = entry.resourcePath();
                 if (path == null || !entry.filter().mightContain(simpleName)) continue;
+                if (!scope.include(entry.sourceUri(), path)) continue;
                 if (path.endsWith(".java")) {
                     String candidateUri = entry.resourceUri();
                     if (candidateUri != null) bloomCandidates.add(candidateUri);
@@ -384,9 +398,11 @@ public class JavaTextDocumentService implements TextDocumentService {
             capNote = ", capped " + candidates.size() + "/" + totalBeforeCap;
         }
 
+        ReferenceSearchScope scope = referenceSearchScope;
         server.logMessage(MessageType.Log,
                 "References: '" + key.simpleName() + "' -> " + candidates.size()
                         + " candidates (" + bloomHits + " bloom hits, " + openDocs + " open docs"
+                        + ", jars=" + scope.inJars() + ", jdk=" + scope.inJdk()
                         + capNote
                         + resolved.originResourceUri().map(u -> ", origin " + u).orElse("") + ")");
 

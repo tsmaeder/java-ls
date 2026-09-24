@@ -31,10 +31,47 @@ final class InitializationOptions {
         static final Backend DEFAULT = new Backend("javac", "asm", "javac");
     }
 
+    record References(boolean inJars, boolean inJdk) {
+        static final References DEFAULT = new References(
+                ReferenceSearchScope.DEFAULT.inJars(),
+                ReferenceSearchScope.DEFAULT.inJdk());
+
+        ReferenceSearchScope scope() {
+            return new ReferenceSearchScope(inJars, inJdk);
+        }
+    }
+
     private InitializationOptions() {}
 
     static OptionalInt referencesCandidateCap(InitializeParams params) {
         return readOptionalInt(optionsObject(params), "referencesCandidateCap");
+    }
+
+    /**
+     * Find-references scope. Absent keys keep {@link References#DEFAULT}:
+     * workspace sources only, dependency jars and the JDK excluded.
+     */
+    static References references(InitializeParams params) {
+        Object options = optionsObject(params);
+        Object references = null;
+        if (options instanceof Map<?, ?> map) {
+            references = map.get("references");
+        } else if (options instanceof JsonObject json) {
+            references = json.get("references");
+        }
+        if (references == null) {
+            return References.DEFAULT;
+        }
+        boolean inJars = References.DEFAULT.inJars();
+        boolean inJdk = References.DEFAULT.inJdk();
+        if (references instanceof Map<?, ?> map) {
+            inJars = readBoolean(map.get("inJars"), inJars);
+            inJdk = readBoolean(map.get("inJdk"), inJdk);
+        } else if (references instanceof JsonObject json) {
+            inJars = readBoolean(json.get("inJars"), inJars);
+            inJdk = readBoolean(json.get("inJdk"), inJdk);
+        }
+        return new References(inJars, inJdk);
     }
 
     static Optional<String> workspacePath(InitializeParams params) {
@@ -131,6 +168,23 @@ final class InitializationOptions {
             case "asm", "turbine" -> n;
             default -> Backend.DEFAULT.classIndexer();
         };
+    }
+
+    private static boolean readBoolean(Object value, boolean defaultValue) {
+        if (value == null) return defaultValue;
+        if (value instanceof Boolean b) return b;
+        if (value instanceof String s) {
+            if ("true".equalsIgnoreCase(s.trim())) return true;
+            if ("false".equalsIgnoreCase(s.trim())) return false;
+            return defaultValue;
+        }
+        if (value instanceof JsonElement el) {
+            if (el.isJsonNull() || !el.isJsonPrimitive()) return defaultValue;
+            JsonPrimitive primitive = el.getAsJsonPrimitive();
+            if (primitive.isBoolean()) return primitive.getAsBoolean();
+            if (primitive.isString()) return readBoolean(primitive.getAsString(), defaultValue);
+        }
+        return defaultValue;
     }
 
     private static OptionalInt readCap(Object value) {

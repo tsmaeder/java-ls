@@ -11,6 +11,7 @@
 package ch.castleridge.javals;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.eclipse.lsp4j.InitializeParams;
@@ -54,6 +55,49 @@ class InitializationOptionsTest {
 
         JavaTextDocumentService textService = (JavaTextDocumentService) server.getTextDocumentService();
         assertEquals(1, textService.referencesCandidateCap());
+        assertFalse(textService.referenceSearchScope().inJars());
+        assertFalse(textService.referenceSearchScope().inJdk());
+    }
+
+    @Test
+    void referencesScopeDefaultsToWorkspaceOnly() {
+        InitializationOptions.References defaults = InitializationOptions.references(new InitializeParams());
+        assertFalse(defaults.inJars());
+        assertFalse(defaults.inJdk());
+    }
+
+    @Test
+    void referencesScopeReadsNestedFlags() {
+        Map<String, Object> options = new HashMap<>();
+        options.put("references", Map.of("inJars", true, "inJdk", "false"));
+        InitializeParams params = new InitializeParams();
+        params.setInitializationOptions(options);
+        InitializationOptions.References references = InitializationOptions.references(params);
+        assertTrue(references.inJars());
+        assertFalse(references.inJdk());
+
+        JsonObject json = new JsonObject();
+        JsonObject referencesJson = new JsonObject();
+        referencesJson.addProperty("inJars", false);
+        referencesJson.addProperty("inJdk", true);
+        json.add("references", referencesJson);
+        params.setInitializationOptions(json);
+        references = InitializationOptions.references(params);
+        assertFalse(references.inJars());
+        assertTrue(references.inJdk());
+    }
+
+    @Test
+    void initializeAppliesReferencesScope() throws Exception {
+        JavaLanguageServer server = new JavaLanguageServer();
+        InitializeParams params = new InitializeParams();
+        params.setInitializationOptions(Map.of("references", Map.of("inJars", true, "inJdk", true)));
+
+        server.initialize(params).get();
+
+        JavaTextDocumentService textService = (JavaTextDocumentService) server.getTextDocumentService();
+        assertTrue(textService.referenceSearchScope().inJars());
+        assertTrue(textService.referenceSearchScope().inJdk());
     }
 
     @Test

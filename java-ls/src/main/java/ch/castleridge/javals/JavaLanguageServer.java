@@ -68,8 +68,13 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
                         + ", compiler=" + backend.compiler());
 
         indexService.initialize(params);
+        JavaTextDocumentService documents = (JavaTextDocumentService) textDocumentService;
         InitializationOptions.referencesCandidateCap(params)
-                .ifPresent(((JavaTextDocumentService) textDocumentService)::setReferencesCandidateCap);
+                .ifPresent(documents::setReferencesCandidateCap);
+        InitializationOptions.References references = InitializationOptions.references(params);
+        documents.setReferenceSearchScope(references.scope());
+        logMessage(MessageType.Info,
+                "References: inJars=" + references.inJars() + ", inJdk=" + references.inJdk());
 
         // Set up server capabilities
         ServerCapabilities capabilities = new ServerCapabilities();
