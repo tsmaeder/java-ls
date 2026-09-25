@@ -23,7 +23,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
 /**
- * Reads java-ls settings from LSP {@link InitializeParams#getInitializationOptions()}.
+ * Reads java-ls settings from an options root object (initialize
+ * {@code initializationOptions} or {@code didChangeConfiguration} settings).
  */
 final class InitializationOptions {
 
@@ -31,6 +32,9 @@ final class InitializationOptions {
         static final Backend DEFAULT = new Backend("javac", "asm", "javac");
     }
 
+    /**
+     * Typed model of the {@code references} JSON object ({@code inJars} / {@code inJdk}).
+     */
     record References(boolean inJars, boolean inJdk) {
         static final References DEFAULT = new References(
                 ReferenceSearchScope.DEFAULT.inJars(),
@@ -44,34 +48,75 @@ final class InitializationOptions {
     private InitializationOptions() {}
 
     static OptionalInt referencesCandidateCap(InitializeParams params) {
-        return readOptionalInt(optionsObject(params), "referencesCandidateCap");
+        return referencesCandidateCap(optionsObject(params));
     }
 
     /**
-     * Find-references scope. Absent keys keep {@link References#DEFAULT}:
-     * workspace sources only, dependency jars and the JDK excluded.
+     * {@code referencesCandidateCap} from an options root. Empty when the key is absent
+     * or not a valid integer.
+     */
+    static OptionalInt referencesCandidateCap(Object optionsRoot) {
+        if (!hasProperty(optionsRoot, "referencesCandidateCap")) {
+            return OptionalInt.empty();
+        }
+        return readCap(getProperty(optionsRoot, "referencesCandidateCap"));
+    }
+
+    /**
+     * Find-references scope from initialize params. Absent {@code references} key yields
+     * {@link References#DEFAULT}.
      */
     static References references(InitializeParams params) {
-        Object options = optionsObject(params);
-        Object references = null;
-        if (options instanceof Map<?, ?> map) {
-            references = map.get("references");
-        } else if (options instanceof JsonObject json) {
-            references = json.get("references");
+        return referencesFromOptions(optionsObject(params)).orElse(References.DEFAULT);
+    }
+
+    /**
+     * Looks up {@code references} on an options root. Empty when the key is absent
+     * (so a config update can leave the live scope unchanged).
+     */
+    static Optional<References> referencesFromOptions(Object optionsRoot) {
+        if (!hasProperty(optionsRoot, "references")) {
+            return Optional.empty();
         }
-        if (references == null) {
+        return Optional.of(parseReferences(getProperty(optionsRoot, "references")));
+    }
+
+    /**
+     * Parses a {@code references} subtree. Missing {@code inJars}/{@code inJdk} keep
+     * {@link References#DEFAULT} values. A null node is treated as defaults.
+     */
+    static References parseReferences(Object referencesNode) {
+        if (referencesNode == null
+                || (referencesNode instanceof JsonElement el && el.isJsonNull())) {
             return References.DEFAULT;
         }
         boolean inJars = References.DEFAULT.inJars();
         boolean inJdk = References.DEFAULT.inJdk();
-        if (references instanceof Map<?, ?> map) {
+        if (referencesNode instanceof Map<?, ?> map) {
             inJars = readBoolean(map.get("inJars"), inJars);
             inJdk = readBoolean(map.get("inJdk"), inJdk);
-        } else if (references instanceof JsonObject json) {
+        } else if (referencesNode instanceof JsonObject json) {
             inJars = readBoolean(json.get("inJars"), inJars);
             inJdk = readBoolean(json.get("inJdk"), inJdk);
         }
         return new References(inJars, inJdk);
+    }
+
+    /**
+     * Options root for {@code workspace/didChangeConfiguration}: use nested
+     * {@code javals} when present (VS Code section), otherwise the settings object itself.
+     */
+    static Object optionsRootFromDidChangeSettings(Object settings) {
+        if (settings == null) {
+            return null;
+        }
+        if (hasProperty(settings, "javals")) {
+            Object nested = getProperty(settings, "javals");
+            if (nested != null && !(nested instanceof JsonElement el && el.isJsonNull())) {
+                return nested;
+            }
+        }
+        return settings;
     }
 
     static Optional<String> workspacePath(InitializeParams params) {
@@ -120,14 +165,24 @@ final class InitializationOptions {
         return params == null ? null : params.getInitializationOptions();
     }
 
-    private static OptionalInt readOptionalInt(Object options, String key) {
+    private static boolean hasProperty(Object options, String key) {
         if (options instanceof Map<?, ?> map) {
-            return readCap(map.get(key));
+            return map.containsKey(key);
         }
         if (options instanceof JsonObject json) {
-            return readCap(json.get(key));
+            return json.has(key);
         }
-        return OptionalInt.empty();
+        return false;
+    }
+
+    private static Object getProperty(Object options, String key) {
+        if (options instanceof Map<?, ?> map) {
+            return map.get(key);
+        }
+        if (options instanceof JsonObject json) {
+            return json.get(key);
+        }
+        return null;
     }
 
     private static String readBackendName(Object value, String defaultValue, UnaryOperator<String> normalize) {

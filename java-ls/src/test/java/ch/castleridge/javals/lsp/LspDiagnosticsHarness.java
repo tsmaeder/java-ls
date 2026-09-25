@@ -31,6 +31,7 @@ import java.util.concurrent.TimeoutException;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionParams;
 import org.eclipse.lsp4j.Diagnostic;
+import org.eclipse.lsp4j.DidChangeConfigurationParams;
 import org.eclipse.lsp4j.DidCloseTextDocumentParams;
 import org.eclipse.lsp4j.DidOpenTextDocumentParams;
 import org.eclipse.lsp4j.DefinitionParams;
@@ -292,6 +293,24 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
     }
 
     /**
+     * Send {@code workspace/didChangeConfiguration} with the given settings object
+     * (same shape as initialize options, optionally nested under {@code javals}).
+     */
+    public void changeConfiguration(Object settings) {
+        DidChangeConfigurationParams params = new DidChangeConfigurationParams();
+        params.setSettings(settings);
+        server.getWorkspaceService().didChangeConfiguration(params);
+    }
+
+    /**
+     * Block until a {@code window/logMessage} containing {@code substring} arrives,
+     * or throw on timeout. Useful after notifications that only log their effect.
+     */
+    public void awaitLogContaining(String substring, Duration timeout) throws Exception {
+        capturingClient.awaitLogContaining(substring, timeout);
+    }
+
+    /**
      * Prepare a type hierarchy at {@code position} in an already-open document.
      */
     public List<TypeHierarchyItem> prepareTypeHierarchyAt(URI uri, Position position) throws Exception {
@@ -400,6 +419,27 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
             }
         }
 
+        void awaitLogContaining(String substring, Duration timeout)
+                throws TimeoutException, InterruptedException {
+            long deadline = System.nanoTime() + timeout.toNanos();
+            while (System.nanoTime() < deadline) {
+                synchronized (logMessages) {
+                    for (String message : logMessages) {
+                        if (message != null && message.contains(substring)) {
+                            return;
+                        }
+                    }
+                    long remainingMs = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+                    if (remainingMs <= 0) {
+                        break;
+                    }
+                    logMessages.wait(Math.min(remainingMs, 100));
+                }
+            }
+            throw new TimeoutException("Timed out waiting for log containing: " + substring
+                    + "; got: " + logMessages());
+        }
+
         @Override
         public void publishDiagnostics(PublishDiagnosticsParams diagnostics) {
             String decoded = UriCoding.decode(diagnostics.getUri());
@@ -415,6 +455,7 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
             String text = message == null ? "" : message.getMessage();
             synchronized (logMessages) {
                 logMessages.add(text);
+                logMessages.notifyAll();
             }
             if (isIndexReadyMessage(text)) {
                 indexReady.complete(null);

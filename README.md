@@ -104,7 +104,7 @@ On `initialize`, the server looks for an `mbt.json` under the workspace folders.
 
 ## Configuration
 
-Settings are passed by the client in LSP `initialize` → `initializationOptions`. Example:
+Settings are passed by the client in LSP `initialize` → `initializationOptions`, and reference-search settings are also applied from `workspace/didChangeConfiguration` (same object shape; VS Code may nest them under `javals`). Example:
 
 ```json
 {
@@ -132,7 +132,7 @@ Settings are passed by the client in LSP `initialize` → `initializationOptions
 | `backend.classIndexer` | `"asm"` \| `"turbine"` | `"asm"` | Class-file reader used when indexing jars / JRT |
 | `backend.compiler` | `"javac"` \| `"ecj"` | `"javac"` | Compiler used when analyzing open files (diagnostics, navigation, etc.) |
 
-In [vscode-javals](https://github.com/tsmaeder/vscode-javals), these map to `javals.references.inJars`, `javals.references.inJdk`, `javals.backend.sourceIndexer`, `javals.backend.classIndexer`, and `javals.backend.compiler`. Restart the language server after changing them.
+In [vscode-javals](https://github.com/tsmaeder/vscode-javals), these map to `javals.references.inJars`, `javals.references.inJdk`, `javals.backend.sourceIndexer`, `javals.backend.classIndexer`, and `javals.backend.compiler`. Changing `references.*` or `referencesCandidateCap` takes effect on the next `workspace/didChangeConfiguration` notification. Changing `backend.*` still requires restarting the language server.
 
 ## Use with VS Code / Cursor ([vscode-javals](https://github.com/tsmaeder/vscode-javals))
 

@@ -52,6 +52,40 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
         return indexService;
     }
 
+    /**
+     * Applies reference-search settings from an options root (initialize options or
+     * unwrapped {@code didChangeConfiguration} settings).
+     *
+     * @param updateOnly when {@code true}, only keys present in {@code optionsRoot} are
+     *        applied (partial config updates); when {@code false}, absent
+     *        {@code references} applies {@link InitializationOptions.References#DEFAULT}
+     */
+    void applyReferencesFromOptions(Object optionsRoot, boolean updateOnly) {
+        JavaTextDocumentService documents = (JavaTextDocumentService) textDocumentService;
+        var references = InitializationOptions.referencesFromOptions(optionsRoot);
+        if (references.isPresent()) {
+            InitializationOptions.References refs = references.get();
+            documents.setReferenceSearchScope(refs.scope());
+            logMessage(MessageType.Info,
+                    "References: inJars=" + refs.inJars() + ", inJdk=" + refs.inJdk());
+        } else if (!updateOnly) {
+            documents.setReferenceSearchScope(InitializationOptions.References.DEFAULT.scope());
+            logMessage(MessageType.Info,
+                    "References: inJars=" + InitializationOptions.References.DEFAULT.inJars()
+                            + ", inJdk=" + InitializationOptions.References.DEFAULT.inJdk());
+        }
+        InitializationOptions.referencesCandidateCap(optionsRoot)
+                .ifPresent(documents::setReferencesCandidateCap);
+    }
+
+    /**
+     * Hot-reloads reference-search settings from {@code workspace/didChangeConfiguration}.
+     */
+    void applyConfiguration(Object settings) {
+        applyReferencesFromOptions(
+                InitializationOptions.optionsRootFromDidChangeSettings(settings), true);
+    }
+
     @Override
     public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
         InitializationOptions.Backend backend = InitializationOptions.backend(params);
@@ -68,13 +102,7 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
                         + ", compiler=" + backend.compiler());
 
         indexService.initialize(params);
-        JavaTextDocumentService documents = (JavaTextDocumentService) textDocumentService;
-        InitializationOptions.referencesCandidateCap(params)
-                .ifPresent(documents::setReferencesCandidateCap);
-        InitializationOptions.References references = InitializationOptions.references(params);
-        documents.setReferenceSearchScope(references.scope());
-        logMessage(MessageType.Info,
-                "References: inJars=" + references.inJars() + ", inJdk=" + references.inJdk());
+        applyReferencesFromOptions(params.getInitializationOptions(), false);
 
         // Set up server capabilities
         ServerCapabilities capabilities = new ServerCapabilities();

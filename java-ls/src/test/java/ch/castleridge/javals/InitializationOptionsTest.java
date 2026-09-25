@@ -12,8 +12,10 @@ package ch.castleridge.javals;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.eclipse.lsp4j.DidChangeConfigurationParams;
 import org.eclipse.lsp4j.InitializeParams;
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +23,7 @@ import com.google.gson.JsonObject;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 
 class InitializationOptionsTest {
@@ -88,6 +91,46 @@ class InitializationOptionsTest {
     }
 
     @Test
+    void parseReferencesIsSharedSubtreeParser() {
+        InitializationOptions.References fromMap =
+                InitializationOptions.parseReferences(Map.of("inJars", true, "inJdk", false));
+        assertTrue(fromMap.inJars());
+        assertFalse(fromMap.inJdk());
+
+        JsonObject json = new JsonObject();
+        json.addProperty("inJars", false);
+        json.addProperty("inJdk", true);
+        InitializationOptions.References fromJson = InitializationOptions.parseReferences(json);
+        assertFalse(fromJson.inJars());
+        assertTrue(fromJson.inJdk());
+
+        assertEquals(InitializationOptions.References.DEFAULT, InitializationOptions.parseReferences(null));
+    }
+
+    @Test
+    void referencesFromOptionsEmptyWhenKeyAbsent() {
+        assertTrue(InitializationOptions.referencesFromOptions(Map.of()).isEmpty());
+        assertTrue(InitializationOptions.referencesFromOptions(new JsonObject()).isEmpty());
+
+        Optional<InitializationOptions.References> present =
+                InitializationOptions.referencesFromOptions(
+                        Map.of("references", Map.of("inJars", true, "inJdk", true)));
+        assertTrue(present.isPresent());
+        assertTrue(present.get().inJars());
+        assertTrue(present.get().inJdk());
+    }
+
+    @Test
+    void optionsRootFromDidChangeSettingsUnwrapsJavals() {
+        Map<String, Object> nested = Map.of("references", Map.of("inJars", true, "inJdk", false));
+        Object root = InitializationOptions.optionsRootFromDidChangeSettings(Map.of("javals", nested));
+        assertSame(nested, root);
+
+        Map<String, Object> flat = Map.of("references", Map.of("inJars", false, "inJdk", true));
+        assertSame(flat, InitializationOptions.optionsRootFromDidChangeSettings(flat));
+    }
+
+    @Test
     void initializeAppliesReferencesScope() throws Exception {
         JavaLanguageServer server = new JavaLanguageServer();
         InitializeParams params = new InitializeParams();
@@ -98,6 +141,47 @@ class InitializationOptionsTest {
         JavaTextDocumentService textService = (JavaTextDocumentService) server.getTextDocumentService();
         assertTrue(textService.referenceSearchScope().inJars());
         assertTrue(textService.referenceSearchScope().inJdk());
+    }
+
+    @Test
+    void didChangeConfigurationUpdatesReferencesScopeViaSharedApply() throws Exception {
+        JavaLanguageServer server = new JavaLanguageServer();
+        server.initialize(new InitializeParams()).get();
+
+        JavaTextDocumentService textService = (JavaTextDocumentService) server.getTextDocumentService();
+        assertFalse(textService.referenceSearchScope().inJars());
+        assertFalse(textService.referenceSearchScope().inJdk());
+
+        DidChangeConfigurationParams change = new DidChangeConfigurationParams();
+        change.setSettings(Map.of(
+                "javals",
+                Map.of(
+                        "references", Map.of("inJars", true, "inJdk", true),
+                        "referencesCandidateCap", 7)));
+        server.getWorkspaceService().didChangeConfiguration(change);
+
+        assertTrue(textService.referenceSearchScope().inJars());
+        assertTrue(textService.referenceSearchScope().inJdk());
+        assertEquals(7, textService.referencesCandidateCap());
+    }
+
+    @Test
+    void didChangeConfigurationSkipsAbsentReferencesKey() throws Exception {
+        JavaLanguageServer server = new JavaLanguageServer();
+        InitializeParams params = new InitializeParams();
+        params.setInitializationOptions(Map.of("references", Map.of("inJars", true, "inJdk", true)));
+        server.initialize(params).get();
+
+        JavaTextDocumentService textService = (JavaTextDocumentService) server.getTextDocumentService();
+        assertTrue(textService.referenceSearchScope().inJars());
+
+        DidChangeConfigurationParams change = new DidChangeConfigurationParams();
+        change.setSettings(Map.of("javals", Map.of("referencesCandidateCap", 3)));
+        server.getWorkspaceService().didChangeConfiguration(change);
+
+        assertTrue(textService.referenceSearchScope().inJars());
+        assertTrue(textService.referenceSearchScope().inJdk());
+        assertEquals(3, textService.referencesCandidateCap());
     }
 
     @Test
@@ -133,8 +217,6 @@ class InitializationOptionsTest {
     }
 
     private static OptionalInt capFrom(Map<String, Object> options) {
-        InitializeParams params = new InitializeParams();
-        params.setInitializationOptions(options);
-        return InitializationOptions.referencesCandidateCap(params);
+        return InitializationOptions.referencesCandidateCap(options);
     }
 }

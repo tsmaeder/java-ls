@@ -31,7 +31,8 @@ public class JavaWorkspaceService implements WorkspaceService {
 
     @Override
     public void didChangeConfiguration(DidChangeConfigurationParams params) {
-        server.logMessage(MessageType.Info, "Configuration changed");
+        Object settings = params == null ? null : params.getSettings();
+        server.applyConfiguration(settings);
     }
 
     @Override

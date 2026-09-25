@@ -235,6 +235,56 @@ class LspDiagnosticsHarnessTest {
         }
     }
 
+    @Test
+    void didChangeConfigurationUpdatesReferenceSearchScopeOverLsp(@TempDir Path workspace) throws Exception {
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+
+        Path alphaFile = sourceDir.resolve("Alpha.java");
+        Files.writeString(alphaFile, """
+                package com.example;
+
+                public class Alpha {
+                    String name = "a";
+                }
+                """);
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(TIMEOUT);
+            harness.openAndAwaitDiagnostics(alphaFile, TIMEOUT);
+
+            List<String> alphaLines = Files.readAllLines(alphaFile);
+            int stringDeclLine = -1;
+            for (int i = 0; i < alphaLines.size(); i++) {
+                if (alphaLines.get(i).contains("String name")) {
+                    stringDeclLine = i;
+                    break;
+                }
+            }
+            assertTrue(stringDeclLine >= 0);
+            int stringCol = alphaLines.get(stringDeclLine).indexOf("String");
+            assertTrue(stringCol >= 0);
+            Position stringPosition = new Position(stringDeclLine, stringCol);
+
+            harness.referencesAt(alphaFile.toUri(), stringPosition, false);
+            assertTrue(harness.logMessages().stream().anyMatch(m ->
+                            m != null && m.contains("jars=false") && m.contains("jdk=false")),
+                    () -> "expected default scope jars=false,jdk=false, got: " + harness.logMessages());
+
+            harness.changeConfiguration(Map.of(
+                    "javals",
+                    Map.of("references", Map.of("inJars", true, "inJdk", true))));
+            harness.awaitLogContaining("References: inJars=true, inJdk=true", Duration.ofSeconds(10));
+
+            harness.referencesAt(alphaFile.toUri(), stringPosition, false);
+            assertTrue(harness.logMessages().stream().anyMatch(m ->
+                            m != null && m.contains("jars=true") && m.contains("jdk=true")),
+                    () -> "expected updated scope jars=true,jdk=true after config change, got: "
+                            + harness.logMessages());
+        }
+    }
+
     // @Test
     void referencesRespectsCandidateCap(@TempDir Path workspace) throws Exception {
         Path sourceDir = workspace.resolve("src/main/java/com/example");
