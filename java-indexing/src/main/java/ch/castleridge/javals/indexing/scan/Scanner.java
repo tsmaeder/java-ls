@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import ch.castleridge.javals.indexing.bytecode.BytecodeIndexer;
 import ch.castleridge.javals.indexing.index.Index;
@@ -105,13 +106,26 @@ public final class Scanner {
      * {@link ScanResult} carries separate wall-clock timings.
      */
     public ScanResult scan(Collection<InputSource> sources, Index into) {
-        List<InputSource> classSources = new ArrayList<>();
-        List<InputSource> sourceDirs = new ArrayList<>();
+        return scan(sources, into, null);
+    }
+
+    /**
+     * Like {@link #scan(Collection, Index)} but reports per-file progress via
+     * {@code progress} (may be {@code null}).
+     */
+    public ScanResult scan(Collection<InputSource> sources, Index into,
+            ScanProgressListener progress) {
+        List<SourceSlot> classSources = new ArrayList<>();
+        List<SourceSlot> sourceDirs = new ArrayList<>();
+        int sourceCount = sources.size();
+        int ordinal = 0;
         for (InputSource src : sources) {
+            ordinal++;
+            SourceSlot slot = new SourceSlot(src, ordinal, sourceCount);
             if (src instanceof DirInput) {
-                sourceDirs.add(src);
+                sourceDirs.add(slot);
             } else {
-                classSources.add(src);
+                classSources.add(slot);
             }
         }
 
@@ -121,11 +135,11 @@ public final class Scanner {
         long sourceFilesMs;
         try {
             long c0 = System.nanoTime();
-            driveAll(classSources, into, failures);
+            driveAll(classSources, into, failures, progress);
             classFilesMs = (System.nanoTime() - c0) / 1_000_000L;
 
             long s0 = System.nanoTime();
-            driveAll(sourceDirs, into, failures);
+            driveAll(sourceDirs, into, failures, progress);
             sourceFilesMs = (System.nanoTime() - s0) / 1_000_000L;
         } finally {
             if (ownsPool) {
@@ -136,7 +150,8 @@ public final class Scanner {
         return new ScanResult(List.copyOf(failures), classFilesMs, sourceFilesMs, elapsedMs);
     }
 
-    private void driveAll(Collection<InputSource> sources, Index into, List<Throwable> failures) {
+    private void driveAll(Collection<SourceSlot> sources, Index into, List<Throwable> failures,
+            ScanProgressListener progress) {
         if (sources.isEmpty()) {
             return;
         }
@@ -152,8 +167,9 @@ public final class Scanner {
         });
         try {
             List<Future<?>> sourceFutures = new ArrayList<>(sources.size());
-            for (InputSource src : sources) {
-                sourceFutures.add(driverPool.submit(() -> scanOneSource(src, into, failures)));
+            for (SourceSlot slot : sources) {
+                sourceFutures.add(driverPool.submit(
+                        () -> scanOneSource(slot, into, failures, progress)));
             }
             for (Future<?> f : sourceFutures) {
                 try {
@@ -170,16 +186,23 @@ public final class Scanner {
         }
     }
 
-    private void scanOneSource(InputSource src, Index into, List<Throwable> failures) {
+    private void scanOneSource(SourceSlot slot, Index into, List<Throwable> failures,
+            ScanProgressListener progress) {
+        InputSource src = slot.source();
         String srcUri = src.sourceUri();
         Index temp = new InMemoryIndex();
         List<ForkJoinTask<?>> indexTasks = new ArrayList<>();
+        AtomicInteger filesInSource = new AtomicInteger();
         try {
             src.walk((relativePath, fileName, bytes) -> {
                 ForkJoinTask<?> task = pool.submit(() -> {
                     try {
                         indexOne(sourceIndexer, bytecodeIndexer, relativePath, srcUri,
                                 fileName, bytes.get(), temp);
+                        int n = filesInSource.incrementAndGet();
+                        if (progress != null) {
+                            progress.onFileIndexed(srcUri, slot.index(), slot.total(), n);
+                        }
                     } catch (Throwable t) {
                         failures.add(t);
                     }
@@ -204,6 +227,8 @@ public final class Scanner {
         }
         into.addAll(temp);
     }
+
+    private record SourceSlot(InputSource source, int index, int total) {}
 
     private static void indexOne(SourceIndexer sourceIndexer, BytecodeIndexer bytecodeIndexer,
                                  String relativePath, String sourceUri,

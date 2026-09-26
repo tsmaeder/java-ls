@@ -248,8 +248,17 @@ public final class IndexService {
             List<SourceRoot> sourceRoots = collectSourceRoots(sources);
             state.set(new State(index, classpathsByNamespace, sourceJarByBinaryJar, sourceRoots));
             notifyIndexChanged();
-            Scanner scanner = new Scanner(sourceIndexer, bytecodeIndexer);
-            ScanResult scan = scanner.scan(sources.values(), index);
+            IndexingProgress progress = IndexingProgress.open(server);
+            progress.begin();
+            ScanResult scan;
+            try {
+                Scanner scanner = new Scanner(sourceIndexer, bytecodeIndexer);
+                scan = scanner.scan(sources.values(), index, progress::fileIndexed);
+            } finally {
+                // End before the "Indexed" ready log so awaitIndexReady cannot
+                // return while a late progress end is still in flight.
+                progress.end(null);
+            }
             List<Throwable> failures = scan.failures();
             ScanStats stats = collector.snapshot();
 

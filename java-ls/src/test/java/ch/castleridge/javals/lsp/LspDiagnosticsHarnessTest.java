@@ -912,6 +912,9 @@ class LspDiagnosticsHarnessTest {
         try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
             harness.awaitIndexReady(TIMEOUT);
             harness.openAndAwaitDiagnostics(targetFile, TIMEOUT);
+            // Drop indexing createProgress / $/progress so this asserts references only.
+            harness.clearCreatedProgressTokens();
+            harness.clearProgressNotifications();
 
             List<Location> refs = harness.referencesAt(
                     targetFile.toUri(),
@@ -1050,6 +1053,7 @@ class LspDiagnosticsHarnessTest {
                         .map(p -> p.getValue().getLeft())
                         .filter(WorkDoneProgressEnd.class::isInstance)
                         .map(WorkDoneProgressEnd.class::cast)
+                        .filter(e -> "Cancelled".equals(e.getMessage()))
                         .findFirst()
                         .orElse(null);
                 if (end != null) {
@@ -1092,6 +1096,8 @@ class LspDiagnosticsHarnessTest {
         try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
             harness.awaitIndexReady(TIMEOUT);
             harness.openAndAwaitDiagnostics(targetFile, TIMEOUT);
+            harness.clearCreatedProgressTokens();
+            harness.clearProgressNotifications();
 
             CompletableFuture<List<? extends Location>> future = harness.referencesFuture(
                     targetFile.toUri(),
@@ -1112,6 +1118,7 @@ class LspDiagnosticsHarnessTest {
                         .map(p -> p.getValue().getLeft())
                         .filter(WorkDoneProgressEnd.class::isInstance)
                         .map(WorkDoneProgressEnd.class::cast)
+                        .filter(e -> "Cancelled".equals(e.getMessage()))
                         .findFirst()
                         .orElse(null);
                 if (end != null) {
