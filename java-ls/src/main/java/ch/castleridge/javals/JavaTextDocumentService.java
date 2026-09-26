@@ -11,18 +11,22 @@
 package ch.castleridge.javals;
 
 import org.eclipse.lsp4j.*;
+import org.eclipse.lsp4j.jsonrpc.CancelChecker;
+import org.eclipse.lsp4j.jsonrpc.CompletableFutures;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.jsonrpc.messages.Either3;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.TextDocumentService;
 
 import java.util.*;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import ch.castleridge.javals.analysis.AnalysisSession;
@@ -328,14 +332,15 @@ public class JavaTextDocumentService implements TextDocumentService {
 
     @Override
     public CompletableFuture<List<? extends Location>> references(ReferenceParams params) {
+        return CompletableFutures.computeAsync(cancelChecker -> computeReferences(params, cancelChecker));
+    }
+
+    private List<Location> computeReferences(ReferenceParams params, CancelChecker cancelChecker) {
         String uri = UriCoding.decode(params.getTextDocument().getUri());
         Position position = params.getPosition();
         boolean includeDeclaration = params.getContext() != null
                 && Boolean.TRUE.equals(params.getContext().isIncludeDeclaration());
-        return CompletableFuture.supplyAsync(() -> computeReferences(uri, position, includeDeclaration));
-    }
 
-    private List<Location> computeReferences(String uri, Position position, boolean includeDeclaration) {
         Optional<ResolvedSymbol> resolvedOpt = resolveSymbolAt(uri, position);
         if (resolvedOpt.isEmpty())
             return List.of();
@@ -352,6 +357,8 @@ public class JavaTextDocumentService implements TextDocumentService {
             Set<Location> locations = new LinkedHashSet<>(session.referencesInUnit(resolved));
             return finalizeReferences(locations, includeDeclaration, session, resolved);
         }
+
+        cancelChecker.checkCanceled();
 
         Set<String> bloomCandidates = new LinkedHashSet<>();
         Optional<Index> indexOpt = indexService.index();
@@ -406,38 +413,77 @@ public class JavaTextDocumentService implements TextDocumentService {
                         + capNote
                         + resolved.originResourceUri().map(u -> ", origin " + u).orElse("") + ")");
 
-        long t0 = System.nanoTime();
-        Set<Location> locations = Collections.synchronizedSet(new LinkedHashSet<>());
-        candidates.parallelStream().forEach(candidateUri -> {
-            String text = textForUri(candidateUri);
-            if (text == null)
-                return;
+        AtomicBoolean progressCancel = new AtomicBoolean();
+        ReferencesProgress progress = ReferencesProgress.open(
+                server, params.getWorkDoneToken(), candidates.size(), progressCancel);
+        CancelChecker combined = combineCancel(cancelChecker, progressCancel);
+        boolean cancelled = false;
+        progress.begin();
+        try {
+            long t0 = System.nanoTime();
+            Set<Location> locations = Collections.synchronizedSet(new LinkedHashSet<>());
+            candidates.parallelStream().forEach(candidateUri -> {
+                if (combined.isCanceled()) {
+                    return;
+                }
+                try {
+                    String text = textForUri(candidateUri);
+                    if (text == null)
+                        return;
 
-            Optional<Index> index = indexService.index();
-            if (index.isEmpty())
-                return;
-            ClasspathOrder classpath = indexService.classPathFor(candidateUri);
+                    Optional<Index> index = indexService.index();
+                    if (index.isEmpty())
+                        return;
+                    ClasspathOrder classpath = indexService.classPathFor(candidateUri);
 
-            AnalysisSession candidateSession;
-            try {
-                candidateSession = workspaceCompiler.analyze(candidateUri, text, index.get(), classpath);
-            } catch (RuntimeException | Error e) {
-                server.logMessage(MessageType.Error,
-                        "Error compiling candidate " + candidateUri + ": " + e.getMessage());
-                server.logException(e);
-                return;
+                    AnalysisSession candidateSession;
+                    try {
+                        candidateSession = workspaceCompiler.analyze(candidateUri, text, index.get(), classpath);
+                    } catch (RuntimeException | Error e) {
+                        server.logMessage(MessageType.Error,
+                                "Error compiling candidate " + candidateUri + ": " + e.getMessage());
+                        server.logException(e);
+                        return;
+                    }
+                    if (!candidateSession.isUsable())
+                        return;
+                    locations.addAll(candidateSession.findReferencesTo(key));
+                } finally {
+                    if (!combined.isCanceled()) {
+                        progress.fileDone();
+                    }
+                }
+            });
+
+            cancelled = combined.isCanceled();
+            long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+            server.logMessage(MessageType.Log,
+                    "References: resolved " + locations.size() + " references across "
+                            + candidates.size() + " files in " + elapsedMs + " ms"
+                            + (cancelled ? " (cancelled)" : ""));
+
+            return finalizeReferences(locations, includeDeclaration, session, resolved);
+        } finally {
+            progress.end(cancelled ? "Cancelled" : null);
+            progress.unregister();
+        }
+    }
+
+    private static CancelChecker combineCancel(CancelChecker requestCancel, AtomicBoolean progressCancel) {
+        return new CancelChecker() {
+            @Override
+            public void checkCanceled() {
+                requestCancel.checkCanceled();
+                if (progressCancel.get()) {
+                    throw new CancellationException();
+                }
             }
-            if (!candidateSession.isUsable())
-                return;
-            locations.addAll(candidateSession.findReferencesTo(key));
-        });
 
-        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
-        server.logMessage(MessageType.Log,
-                "References: resolved " + locations.size() + " references across "
-                        + candidates.size() + " files in " + elapsedMs + " ms");
-
-        return finalizeReferences(locations, includeDeclaration, session, resolved);
+            @Override
+            public boolean isCanceled() {
+                return requestCancel.isCanceled() || progressCancel.get();
+            }
+        };
     }
 
     @Override

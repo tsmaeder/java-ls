@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -23,14 +24,24 @@ import org.eclipse.lsp4j.Diagnostic;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.Position;
+import org.eclipse.lsp4j.ProgressParams;
 import org.eclipse.lsp4j.TypeHierarchyItem;
+import org.eclipse.lsp4j.WorkDoneProgressBegin;
+import org.eclipse.lsp4j.WorkDoneProgressEnd;
+import org.eclipse.lsp4j.WorkDoneProgressKind;
+import org.eclipse.lsp4j.WorkDoneProgressNotification;
+import org.eclipse.lsp4j.WorkDoneProgressReport;
+import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIf;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class LspDiagnosticsHarnessTest {
 
@@ -870,6 +881,248 @@ class LspDiagnosticsHarnessTest {
 
     private static boolean hasError(List<Diagnostic> diagnostics) {
         return diagnostics.stream().anyMatch(d -> d.getSeverity() == DiagnosticSeverity.Error);
+    }
+
+    @Test
+    void referencesReportsWorkDoneProgressEveryFiftyCandidates(@TempDir Path workspace) throws Exception {
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+
+        Path targetFile = sourceDir.resolve("Target.java");
+        Files.writeString(targetFile, """
+                package com.example;
+
+                public class Target {
+                }
+                """);
+
+        int userFiles = 55;
+        for (int i = 0; i < userFiles; i++) {
+            Files.writeString(sourceDir.resolve("User" + i + ".java"), """
+                    package com.example;
+
+                    public class User%d {
+                        Target t = new Target();
+                    }
+                    """.formatted(i));
+        }
+
+        Either<String, Integer> token = Either.forLeft("refs-progress");
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(TIMEOUT);
+            harness.openAndAwaitDiagnostics(targetFile, TIMEOUT);
+
+            List<Location> refs = harness.referencesAt(
+                    targetFile.toUri(),
+                    new Position(2, "public class Target".indexOf("Target")),
+                    true,
+                    token);
+
+            assertTrue(refs.size() >= 2, () -> "expected references, got: " + refs);
+
+            List<ProgressParams> progress = harness.progressNotifications();
+            assertFalse(progress.isEmpty(), "expected progress notifications");
+
+            WorkDoneProgressNotification first = progress.get(0).getValue().getLeft();
+            assertInstanceOf(WorkDoneProgressBegin.class, first);
+            assertEquals(WorkDoneProgressKind.begin, first.getKind());
+
+            boolean hasReportAtFifty = progress.stream()
+                    .map(p -> p.getValue().getLeft())
+                    .filter(WorkDoneProgressReport.class::isInstance)
+                    .map(WorkDoneProgressReport.class::cast)
+                    .anyMatch(r -> r.getMessage() != null
+                            && r.getMessage().contains("50 of"));
+            assertTrue(hasReportAtFifty,
+                    () -> "expected a report at 50 files, got: " + progress);
+
+            WorkDoneProgressNotification last = progress.get(progress.size() - 1).getValue().getLeft();
+            assertInstanceOf(WorkDoneProgressEnd.class, last);
+            assertEquals(WorkDoneProgressKind.end, last.getKind());
+
+            assertTrue(harness.createdProgressTokens().isEmpty(),
+                    () -> "client token should not trigger createProgress, got: "
+                            + harness.createdProgressTokens());
+        }
+    }
+
+    @Test
+    void referencesCreatesServerProgressWhenNoClientToken(@TempDir Path workspace) throws Exception {
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+
+        Path targetFile = sourceDir.resolve("Target.java");
+        Files.writeString(targetFile, """
+                package com.example;
+
+                public class Target {
+                }
+                """);
+
+        for (int i = 0; i < 55; i++) {
+            Files.writeString(sourceDir.resolve("User" + i + ".java"), """
+                    package com.example;
+
+                    public class User%d {
+                        Target t = new Target();
+                    }
+                    """.formatted(i));
+        }
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(TIMEOUT);
+            harness.openAndAwaitDiagnostics(targetFile, TIMEOUT);
+            harness.clearCreatedProgressTokens();
+            harness.clearProgressNotifications();
+
+            List<Location> refs = harness.referencesAt(
+                    targetFile.toUri(),
+                    new Position(2, "public class Target".indexOf("Target")),
+                    true);
+
+            assertTrue(refs.size() >= 2, () -> "expected references, got: " + refs);
+            assertFalse(harness.createdProgressTokens().isEmpty(),
+                    "expected window/workDoneProgress/create");
+
+            List<ProgressParams> progress = harness.progressNotifications();
+            assertFalse(progress.isEmpty(), "expected progress notifications");
+            assertInstanceOf(WorkDoneProgressBegin.class, progress.get(0).getValue().getLeft());
+            assertTrue(progress.stream()
+                            .map(p -> p.getValue().getLeft())
+                            .filter(WorkDoneProgressReport.class::isInstance)
+                            .map(WorkDoneProgressReport.class::cast)
+                            .anyMatch(r -> r.getMessage() != null && r.getMessage().contains("50 of")),
+                    () -> "expected a report at 50 files, got: " + progress);
+            assertInstanceOf(WorkDoneProgressEnd.class,
+                    progress.get(progress.size() - 1).getValue().getLeft());
+        }
+    }
+
+    @Test
+    void referencesCancelProgressStopsScanAndEndsProgress(@TempDir Path workspace) throws Exception {
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+
+        Path targetFile = sourceDir.resolve("Target.java");
+        Files.writeString(targetFile, """
+                package com.example;
+
+                public class Target {
+                }
+                """);
+
+        for (int i = 0; i < 80; i++) {
+            Files.writeString(sourceDir.resolve("User" + i + ".java"), """
+                    package com.example;
+
+                    public class User%d {
+                        Target t = new Target();
+                    }
+                    """.formatted(i));
+        }
+
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(TIMEOUT);
+            harness.openAndAwaitDiagnostics(targetFile, TIMEOUT);
+            harness.clearCreatedProgressTokens();
+            harness.clearProgressNotifications();
+
+            CompletableFuture<List<? extends Location>> future = harness.referencesFuture(
+                    targetFile.toUri(),
+                    new Position(2, "public class Target".indexOf("Target")),
+                    true,
+                    null);
+
+            Either<String, Integer> created = harness.awaitCreatedProgressToken(TIMEOUT);
+            harness.awaitProgress(TIMEOUT);
+            harness.cancelProgress(created);
+
+            List<? extends Location> refs = future.get(30, TimeUnit.SECONDS);
+            assertNotNull(refs, "cancelled search should still return partial results");
+
+            long deadline = System.nanoTime() + TIMEOUT.toNanos();
+            WorkDoneProgressEnd end = null;
+            while (System.nanoTime() < deadline) {
+                end = harness.progressNotifications().stream()
+                        .map(p -> p.getValue().getLeft())
+                        .filter(WorkDoneProgressEnd.class::isInstance)
+                        .map(WorkDoneProgressEnd.class::cast)
+                        .findFirst()
+                        .orElse(null);
+                if (end != null) {
+                    break;
+                }
+                Thread.sleep(50);
+            }
+            assertNotNull(end, () -> "expected progress end after cancelProgress, got: "
+                    + harness.progressNotifications());
+            assertEquals("Cancelled", end.getMessage());
+        }
+    }
+
+    @Test
+    void referencesCancelStopsScanAndEndsProgress(@TempDir Path workspace) throws Exception {
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+
+        Path targetFile = sourceDir.resolve("Target.java");
+        Files.writeString(targetFile, """
+                package com.example;
+
+                public class Target {
+                }
+                """);
+
+        // Enough candidates that cancel has time to land mid-scan.
+        for (int i = 0; i < 80; i++) {
+            Files.writeString(sourceDir.resolve("User" + i + ".java"), """
+                    package com.example;
+
+                    public class User%d {
+                        Target t = new Target();
+                    }
+                    """.formatted(i));
+        }
+
+        Either<String, Integer> token = Either.forLeft("refs-cancel");
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace)) {
+            harness.awaitIndexReady(TIMEOUT);
+            harness.openAndAwaitDiagnostics(targetFile, TIMEOUT);
+
+            CompletableFuture<List<? extends Location>> future = harness.referencesFuture(
+                    targetFile.toUri(),
+                    new Position(2, "public class Target".indexOf("Target")),
+                    true,
+                    token);
+
+            harness.awaitProgress(TIMEOUT);
+            assertTrue(future.cancel(true), "expected cancel to succeed");
+
+            assertThrows(CancellationException.class,
+                    () -> future.get(30, TimeUnit.SECONDS));
+
+            long deadline = System.nanoTime() + TIMEOUT.toNanos();
+            WorkDoneProgressEnd end = null;
+            while (System.nanoTime() < deadline) {
+                end = harness.progressNotifications().stream()
+                        .map(p -> p.getValue().getLeft())
+                        .filter(WorkDoneProgressEnd.class::isInstance)
+                        .map(WorkDoneProgressEnd.class::cast)
+                        .findFirst()
+                        .orElse(null);
+                if (end != null) {
+                    break;
+                }
+                Thread.sleep(50);
+            }
+            assertNotNull(end, () -> "expected progress end after cancel, got: "
+                    + harness.progressNotifications());
+            assertEquals("Cancelled", end.getMessage());
+        }
     }
 
     private static void writeMbtJson(Path workspace) throws Exception {

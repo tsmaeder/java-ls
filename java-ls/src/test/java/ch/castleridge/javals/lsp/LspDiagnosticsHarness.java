@@ -28,6 +28,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import org.eclipse.lsp4j.ClientCapabilities;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.CompletionParams;
 import org.eclipse.lsp4j.Diagnostic;
@@ -41,6 +42,7 @@ import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.MessageActionItem;
 import org.eclipse.lsp4j.MessageParams;
 import org.eclipse.lsp4j.Position;
+import org.eclipse.lsp4j.ProgressParams;
 import org.eclipse.lsp4j.PublishDiagnosticsParams;
 import org.eclipse.lsp4j.ReferenceContext;
 import org.eclipse.lsp4j.ReferenceParams;
@@ -51,8 +53,12 @@ import org.eclipse.lsp4j.TypeHierarchyItem;
 import org.eclipse.lsp4j.TypeHierarchyPrepareParams;
 import org.eclipse.lsp4j.TypeHierarchySubtypesParams;
 import org.eclipse.lsp4j.TypeHierarchySupertypesParams;
+import org.eclipse.lsp4j.WindowClientCapabilities;
+import org.eclipse.lsp4j.WorkDoneProgressCancelParams;
+import org.eclipse.lsp4j.WorkDoneProgressCreateParams;
 import org.eclipse.lsp4j.WorkspaceFolder;
 import org.eclipse.lsp4j.jsonrpc.Launcher;
+import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.launch.LSPLauncher;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageServer;
@@ -161,6 +167,12 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
         folder.setUri(absolute.toUri().toString());
         folder.setName(absolute.getFileName() != null ? absolute.getFileName().toString() : "workspace");
         init.setWorkspaceFolders(List.of(folder));
+
+        ClientCapabilities caps = new ClientCapabilities();
+        WindowClientCapabilities window = new WindowClientCapabilities();
+        window.setWorkDoneProgress(true);
+        caps.setWindow(window);
+        init.setCapabilities(caps);
 
         Map<String, Object> initOptions = new HashMap<>();
         initOptions.put("workspacePath", absolute.toString());
@@ -281,15 +293,75 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
      * document (or open it first via {@link #openAndAwaitDiagnostics}).
      */
     public List<Location> referencesAt(URI uri, Position position, boolean includeDeclaration) throws Exception {
+        return referencesAt(uri, position, includeDeclaration, null);
+    }
+
+    /**
+     * Like {@link #referencesAt(URI, Position, boolean)} but attaches a workDoneToken
+     * when {@code workDoneToken} is non-null so the server reports progress.
+     */
+    public List<Location> referencesAt(URI uri, Position position, boolean includeDeclaration,
+            Either<String, Integer> workDoneToken) throws Exception {
+        List<? extends Location> refs = referencesFuture(uri, position, includeDeclaration, workDoneToken)
+                .get(120, TimeUnit.SECONDS);
+        return refs == null ? List.of() : List.copyOf(refs);
+    }
+
+    /**
+     * Start find-references without blocking; useful for cancellation tests.
+     * Returns the server request future directly so {@link CompletableFuture#cancel}
+     * maps to {@code $/cancelRequest}.
+     */
+    public CompletableFuture<List<? extends Location>> referencesFuture(
+            URI uri, Position position, boolean includeDeclaration,
+            Either<String, Integer> workDoneToken) {
         ReferenceParams params = new ReferenceParams();
         params.setTextDocument(new TextDocumentIdentifier(uri.toString()));
         params.setPosition(position);
         ReferenceContext context = new ReferenceContext();
         context.setIncludeDeclaration(includeDeclaration);
         params.setContext(context);
-        List<? extends Location> refs = server.getTextDocumentService().references(params)
-                .get(120, TimeUnit.SECONDS);
-        return refs == null ? List.of() : List.copyOf(refs);
+        if (workDoneToken != null) {
+            params.setWorkDoneToken(workDoneToken);
+        }
+        return server.getTextDocumentService().references(params);
+    }
+
+    public List<ProgressParams> progressNotifications() {
+        return capturingClient.progressNotifications();
+    }
+
+    public void clearProgressNotifications() {
+        capturingClient.clearProgressNotifications();
+    }
+
+    public List<Either<String, Integer>> createdProgressTokens() {
+        return capturingClient.createdProgressTokens();
+    }
+
+    public void clearCreatedProgressTokens() {
+        capturingClient.clearCreatedProgressTokens();
+    }
+
+    /** Send {@code window/workDoneProgress/cancel} for a server-owned progress token. */
+    public void cancelProgress(Either<String, Integer> token) {
+        WorkDoneProgressCancelParams params = new WorkDoneProgressCancelParams();
+        params.setToken(token);
+        server.cancelProgress(params);
+    }
+
+    /**
+     * Block until at least one {@code $/progress} notification arrives, or timeout.
+     */
+    public void awaitProgress(Duration timeout) throws Exception {
+        capturingClient.awaitProgress(timeout);
+    }
+
+    /**
+     * Block until {@code window/workDoneProgress/create} is received, or timeout.
+     */
+    public Either<String, Integer> awaitCreatedProgressToken(Duration timeout) throws Exception {
+        return capturingClient.awaitCreatedProgressToken(timeout);
     }
 
     /**
@@ -394,6 +466,8 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
         private final ConcurrentHashMap<String, Integer> diagnosticsCountByUri = new ConcurrentHashMap<>();
         private final CompletableFuture<Void> indexReady = new CompletableFuture<>();
         private final List<String> logMessages = new ArrayList<>();
+        private final List<ProgressParams> progressNotifications = new ArrayList<>();
+        private final List<Either<String, Integer>> createdProgressTokens = new ArrayList<>();
 
         CompletableFuture<PublishDiagnosticsParams> prepareDiagnosticsFuture(String decodedUri) {
             CompletableFuture<PublishDiagnosticsParams> future = new CompletableFuture<>();
@@ -417,6 +491,65 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
             synchronized (logMessages) {
                 return List.copyOf(logMessages);
             }
+        }
+
+        List<ProgressParams> progressNotifications() {
+            synchronized (progressNotifications) {
+                return List.copyOf(progressNotifications);
+            }
+        }
+
+        void clearProgressNotifications() {
+            synchronized (progressNotifications) {
+                progressNotifications.clear();
+            }
+        }
+
+        List<Either<String, Integer>> createdProgressTokens() {
+            synchronized (createdProgressTokens) {
+                return List.copyOf(createdProgressTokens);
+            }
+        }
+
+        void clearCreatedProgressTokens() {
+            synchronized (createdProgressTokens) {
+                createdProgressTokens.clear();
+            }
+        }
+
+        void awaitProgress(Duration timeout) throws TimeoutException, InterruptedException {
+            long deadline = System.nanoTime() + timeout.toNanos();
+            while (System.nanoTime() < deadline) {
+                synchronized (progressNotifications) {
+                    if (!progressNotifications.isEmpty()) {
+                        return;
+                    }
+                    long remainingMs = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+                    if (remainingMs <= 0) {
+                        break;
+                    }
+                    progressNotifications.wait(Math.min(remainingMs, 100));
+                }
+            }
+            throw new TimeoutException("Timed out waiting for progress notification");
+        }
+
+        Either<String, Integer> awaitCreatedProgressToken(Duration timeout)
+                throws TimeoutException, InterruptedException {
+            long deadline = System.nanoTime() + timeout.toNanos();
+            while (System.nanoTime() < deadline) {
+                synchronized (createdProgressTokens) {
+                    if (!createdProgressTokens.isEmpty()) {
+                        return createdProgressTokens.get(createdProgressTokens.size() - 1);
+                    }
+                    long remainingMs = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+                    if (remainingMs <= 0) {
+                        break;
+                    }
+                    createdProgressTokens.wait(Math.min(remainingMs, 100));
+                }
+            }
+            throw new TimeoutException("Timed out waiting for workDoneProgress/create");
         }
 
         void awaitLogContaining(String substring, Duration timeout)
@@ -447,6 +580,23 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
             CompletableFuture<PublishDiagnosticsParams> future = diagnosticsByUri.get(decoded);
             if (future != null && !future.isDone()) {
                 future.complete(diagnostics);
+            }
+        }
+
+        @Override
+        public CompletableFuture<Void> createProgress(WorkDoneProgressCreateParams params) {
+            synchronized (createdProgressTokens) {
+                createdProgressTokens.add(params.getToken());
+                createdProgressTokens.notifyAll();
+            }
+            return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public void notifyProgress(ProgressParams params) {
+            synchronized (progressNotifications) {
+                progressNotifications.add(params);
+                progressNotifications.notifyAll();
             }
         }
 

@@ -15,8 +15,11 @@ import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.services.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 /**
@@ -31,6 +34,8 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     private int errorCode = 1;
     private volatile String compilerBackend = "javac";
     private volatile boolean watchedFilesDynamicRegistration;
+    private volatile boolean workDoneProgressSupported;
+    private final Map<Object, AtomicBoolean> progressCancels = new ConcurrentHashMap<>();
 
     public JavaLanguageServer() {
         this.indexService = new IndexService(this);
@@ -91,6 +96,7 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
         InitializationOptions.Backend backend = InitializationOptions.backend(params);
         this.compilerBackend = backend.compiler();
         this.watchedFilesDynamicRegistration = supportsWatchedFilesDynamicRegistration(params);
+        this.workDoneProgressSupported = supportsWorkDoneProgress(params);
         indexService.setSourceIndexer(
                 ch.castleridge.javals.indexing.source.SourceIndexer.of(backend.sourceIndexer()));
         indexService.setBytecodeIndexer(
@@ -122,8 +128,10 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
         // Definition support
         capabilities.setDefinitionProvider(true);
         
-        // References support
-        capabilities.setReferencesProvider(true);
+        // References support (cancellable workDoneProgress)
+        ReferenceOptions referenceOptions = new ReferenceOptions();
+        referenceOptions.setWorkDoneProgress(true);
+        capabilities.setReferencesProvider(referenceOptions);
 
         // Type hierarchy (prepare + subtypes + supertypes)
         capabilities.setTypeHierarchyProvider(true);
@@ -193,6 +201,50 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
         WorkspaceClientCapabilities workspace = params.getCapabilities().getWorkspace();
         if (workspace == null || workspace.getDidChangeWatchedFiles() == null) return false;
         return Boolean.TRUE.equals(workspace.getDidChangeWatchedFiles().getDynamicRegistration());
+    }
+
+    private static boolean supportsWorkDoneProgress(InitializeParams params) {
+        if (params == null || params.getCapabilities() == null) return false;
+        WindowClientCapabilities window = params.getCapabilities().getWindow();
+        if (window == null) return false;
+        return Boolean.TRUE.equals(window.getWorkDoneProgress());
+    }
+
+    /** Whether the client advertised {@code window.workDoneProgress} at initialize. */
+    boolean supportsWorkDoneProgress() {
+        return workDoneProgressSupported;
+    }
+
+    void registerProgressCancel(Either<String, Integer> token, AtomicBoolean cancel) {
+        Object key = progressCancelKey(token);
+        if (key != null && cancel != null) {
+            progressCancels.put(key, cancel);
+        }
+    }
+
+    void unregisterProgressCancel(Either<String, Integer> token) {
+        Object key = progressCancelKey(token);
+        if (key != null) {
+            progressCancels.remove(key);
+        }
+    }
+
+    @Override
+    public void cancelProgress(WorkDoneProgressCancelParams params) {
+        if (params == null) return;
+        Object key = progressCancelKey(params.getToken());
+        if (key == null) return;
+        AtomicBoolean cancel = progressCancels.get(key);
+        if (cancel != null) {
+            cancel.set(true);
+        }
+    }
+
+    private static Object progressCancelKey(Either<String, Integer> token) {
+        if (token == null) return null;
+        if (token.isLeft()) return token.getLeft();
+        if (token.isRight()) return token.getRight();
+        return null;
     }
 
     @Override
