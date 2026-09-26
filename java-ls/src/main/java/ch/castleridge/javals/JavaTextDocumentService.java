@@ -22,6 +22,7 @@ import java.util.*;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -417,55 +418,84 @@ public class JavaTextDocumentService implements TextDocumentService {
         ReferencesProgress progress = ReferencesProgress.open(
                 server, params.getWorkDoneToken(), candidates.size(), progressCancel);
         CancelChecker combined = combineCancel(cancelChecker, progressCancel);
-        boolean cancelled = false;
         progress.begin();
         try {
             long t0 = System.nanoTime();
             Set<Location> locations = Collections.synchronizedSet(new LinkedHashSet<>());
-            candidates.parallelStream().forEach(candidateUri -> {
-                if (combined.isCanceled()) {
-                    return;
-                }
-                try {
-                    String text = textForUri(candidateUri);
-                    if (text == null)
-                        return;
-
-                    Optional<Index> index = indexService.index();
-                    if (index.isEmpty())
-                        return;
-                    ClasspathOrder classpath = indexService.classPathFor(candidateUri);
-
-                    AnalysisSession candidateSession;
+            ConcurrentLinkedQueue<String> queue = new ConcurrentLinkedQueue<>(candidates);
+            int parallelism = Math.max(1, Runtime.getRuntime().availableProcessors());
+            Thread[] workers = new Thread[parallelism];
+            for (int i = 0; i < parallelism; i++) {
+                Thread worker = new Thread(() -> {
+                    while (!combined.isCanceled()) {
+                        String candidateUri = queue.poll();
+                        if (candidateUri == null) {
+                            break;
+                        }
+                        analyzeReferenceCandidate(candidateUri, key, locations, progress, combined);
+                    }
+                }, "references-analyze");
+                worker.setDaemon(true);
+                workers[i] = worker;
+                worker.start();
+            }
+            for (Thread worker : workers) {
+                while (true) {
                     try {
-                        candidateSession = workspaceCompiler.analyze(candidateUri, text, index.get(), classpath);
-                    } catch (RuntimeException | Error e) {
-                        server.logMessage(MessageType.Error,
-                                "Error compiling candidate " + candidateUri + ": " + e.getMessage());
-                        server.logException(e);
-                        return;
-                    }
-                    if (!candidateSession.isUsable())
-                        return;
-                    locations.addAll(candidateSession.findReferencesTo(key));
-                } finally {
-                    if (!combined.isCanceled()) {
-                        progress.fileDone();
+                        worker.join();
+                        server.logMessage(MessageType.Log, "worker joined");
+                        break;
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        progressCancel.set(true);
                     }
                 }
-            });
+            }
 
-            cancelled = combined.isCanceled();
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
             server.logMessage(MessageType.Log,
                     "References: resolved " + locations.size() + " references across "
                             + candidates.size() + " files in " + elapsedMs + " ms"
-                            + (cancelled ? " (cancelled)" : ""));
+                            + (combined.isCanceled() ? " (cancelled)" : ""));
 
             return finalizeReferences(locations, includeDeclaration, session, resolved);
         } finally {
-            progress.end(cancelled ? "Cancelled" : null);
+            progress.end(null);
             progress.unregister();
+        }
+    }
+
+    private void analyzeReferenceCandidate(String candidateUri,
+            SymbolKey key,
+            Set<Location> locations,
+            ReferencesProgress progress,
+            CancelChecker cancel) {
+        try {
+            String text = textForUri(candidateUri);
+            if (text == null)
+                return;
+
+            Optional<Index> index = indexService.index();
+            if (index.isEmpty())
+                return;
+            ClasspathOrder classpath = indexService.classPathFor(candidateUri);
+
+            AnalysisSession candidateSession;
+            try {
+                candidateSession = workspaceCompiler.analyze(candidateUri, text, index.get(), classpath);
+            } catch (RuntimeException | Error e) {
+                server.logMessage(MessageType.Error,
+                        "Error compiling candidate " + candidateUri + ": " + e.getMessage());
+                server.logException(e);
+                return;
+            }
+            if (!candidateSession.isUsable())
+                return;
+            locations.addAll(candidateSession.findReferencesTo(key));
+        } finally {
+            if (!cancel.isCanceled()) {
+                progress.fileDone();
+            }
         }
     }
 
