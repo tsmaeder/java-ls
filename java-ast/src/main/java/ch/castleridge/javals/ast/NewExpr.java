@@ -11,27 +11,32 @@ import java.util.List;
 public final class NewExpr extends Expression {
 
     private final Expression enclosing;
-    private final TypeNode type;
+    private final TypeNode typeNode;
     private final List<TypeNode> typeArguments;
     private final List<Expression> arguments;
     private final TypeDecl anonymousBody;
     private final MethodSymbol constructor;
 
     public NewExpr(Expression enclosing,
-                   TypeNode type,
+                   TypeNode typeNode,
                    List<TypeNode> typeArguments,
                    List<Expression> arguments,
                    TypeDecl anonymousBody,
                    MethodSymbol constructor,
+                   JType type,
                    SourceRange range) {
-        super(range);
+        super(range, coalesce(type, typeNode != null ? typeNode.resolvedType() : null));
         this.enclosing = enclosing;
-        this.type = type;
+        this.typeNode = typeNode;
         this.typeArguments = typeArguments == null ? List.of() : List.copyOf(typeArguments);
         this.arguments = arguments == null ? List.of() : List.copyOf(arguments);
         this.anonymousBody = anonymousBody;
         this.constructor = constructor;
-        if (type != null) setType(type.resolvedType());
+        if (enclosing != null) enclosing.setParent(this);
+        if (typeNode != null) typeNode.setParent(this);
+        for (Node __c : this.typeArguments) __c.setParent(this);
+        for (Node __c : this.arguments) __c.setParent(this);
+        if (anonymousBody != null) anonymousBody.setParent(this);
     }
 
     public Expression enclosing() {
@@ -39,7 +44,7 @@ public final class NewExpr extends Expression {
     }
 
     public TypeNode typeNode() {
-        return type;
+        return typeNode;
     }
 
     public List<TypeNode> typeArguments() {
@@ -57,10 +62,16 @@ public final class NewExpr extends Expression {
     public MethodSymbol constructor() {
         return constructor;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(enclosing, type, typeArguments, arguments, anonymousBody);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, enclosing, offset);
+        deepest = deeper(deepest, typeNode, offset);
+        for (Node __c : typeArguments) deepest = deeper(deepest, __c, offset);
+        for (Node __c : arguments) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, anonymousBody, offset);
+        return deepest;
     }
 
     @Override

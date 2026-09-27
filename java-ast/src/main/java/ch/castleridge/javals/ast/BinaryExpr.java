@@ -33,11 +33,13 @@ public final class BinaryExpr extends Expression {
     private final Expression left;
     private final Expression right;
 
-    public BinaryExpr(Op op, Expression left, Expression right, SourceRange range) {
-        super(range);
+    public BinaryExpr(Op op, Expression left, Expression right, JType type, SourceRange range) {
+        super(range, type);
         this.op = op;
         this.left = left;
         this.right = right;
+        if (left != null) left.setParent(this);
+        if (right != null) right.setParent(this);
     }
 
     public Op op() {
@@ -51,10 +53,13 @@ public final class BinaryExpr extends Expression {
     public Expression right() {
         return right;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(left, right);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, left, offset);
+        deepest = deeper(deepest, right, offset);
+        return deepest;
     }
 
     @Override

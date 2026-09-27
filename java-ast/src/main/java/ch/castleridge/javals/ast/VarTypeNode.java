@@ -10,13 +10,12 @@ import java.util.List;
 
 public final class VarTypeNode extends TypeNode {
 
-    public VarTypeNode(SourceRange range) {
-        super(range);
+    public VarTypeNode(JType resolved, SourceRange range) {
+        super(range, resolved);
     }
-
     @Override
-    public List<? extends Node> children() {
-        return List.of();
+    public Node nodeAt(int offset) {
+        return covers(offset) ? this : null;
     }
 
     @Override

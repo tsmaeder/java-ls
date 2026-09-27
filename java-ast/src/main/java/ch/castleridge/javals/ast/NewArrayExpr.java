@@ -17,11 +17,15 @@ public final class NewArrayExpr extends Expression {
     public NewArrayExpr(TypeNode elementType,
                         List<Expression> dimensions,
                         ArrayInitExpr initializer,
+                        JType type,
                         SourceRange range) {
-        super(range);
+        super(range, type);
         this.elementType = elementType;
         this.dimensions = dimensions == null ? List.of() : List.copyOf(dimensions);
         this.initializer = initializer;
+        if (elementType != null) elementType.setParent(this);
+        for (Node __c : this.dimensions) __c.setParent(this);
+        if (initializer != null) initializer.setParent(this);
     }
 
     public TypeNode elementType() {
@@ -35,10 +39,14 @@ public final class NewArrayExpr extends Expression {
     public ArrayInitExpr initializer() {
         return initializer;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(elementType, dimensions, initializer);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, elementType, offset);
+        for (Node __c : dimensions) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, initializer, offset);
+        return deepest;
     }
 
     @Override

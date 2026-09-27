@@ -167,7 +167,7 @@ final class AstCompleter {
                         && (best[0] == null || AstSymbols.span(n.range()) <= AstSymbols.span(best[0].range()))) {
                     best[0] = n;
                 }
-                visitChildren(n);
+                super.visitTypeDecl(n);
             }
         });
         return best[0];
@@ -399,7 +399,7 @@ final class AstCompleter {
                         && (best[0] == null || AstSymbols.span(n.range()) < AstSymbols.span(best[0].range()))) {
                     best[0] = n;
                 }
-                visitChildren(n);
+                super.visitMethodDecl(n);
             }
         });
         return best[0];
@@ -416,7 +416,7 @@ final class AstCompleter {
                         && (best[0] == null || AstSymbols.span(n.range()) < AstSymbols.span(best[0].range()))) {
                     best[0] = n;
                 }
-                visitChildren(n);
+                super.visitConstructorDecl(n);
             }
         });
         return best[0];

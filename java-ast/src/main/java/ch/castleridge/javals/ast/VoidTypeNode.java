@@ -10,14 +10,12 @@ import java.util.List;
 
 public final class VoidTypeNode extends TypeNode {
 
-    public VoidTypeNode(SourceRange range) {
-        super(range);
-        setResolvedType(JType.VOID);
+    public VoidTypeNode(JType resolved, SourceRange range) {
+        super(range, coalesce(resolved, JType.VOID));
     }
-
     @Override
-    public List<? extends Node> children() {
-        return List.of();
+    public Node nodeAt(int offset) {
+        return covers(offset) ? this : null;
     }
 
     @Override

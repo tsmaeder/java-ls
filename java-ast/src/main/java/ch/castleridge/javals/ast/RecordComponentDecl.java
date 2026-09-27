@@ -28,6 +28,9 @@ public final class RecordComponentDecl extends Declaration {
         this.name = name;
         this.varargs = varargs;
         this.symbol = symbol;
+        for (Node __c : this.annotations) __c.setParent(this);
+        if (type != null) type.setParent(this);
+        if (name != null) name.setParent(this);
     }
 
     public List<Annotation> annotations() {
@@ -49,10 +52,14 @@ public final class RecordComponentDecl extends Declaration {
     public RecordComponentSymbol symbol() {
         return symbol;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(annotations, type, name);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : annotations) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, type, offset);
+        deepest = deeper(deepest, name, offset);
+        return deepest;
     }
 
     @Override

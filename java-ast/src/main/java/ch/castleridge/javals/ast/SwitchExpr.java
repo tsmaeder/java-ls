@@ -13,10 +13,12 @@ public final class SwitchExpr extends Expression {
     private final Expression selector;
     private final List<SwitchArm> arms;
 
-    public SwitchExpr(Expression selector, List<SwitchArm> arms, SourceRange range) {
-        super(range);
+    public SwitchExpr(Expression selector, List<SwitchArm> arms, JType type, SourceRange range) {
+        super(range, type);
         this.selector = selector;
         this.arms = arms == null ? List.of() : List.copyOf(arms);
+        if (selector != null) selector.setParent(this);
+        for (Node __c : this.arms) __c.setParent(this);
     }
 
     public Expression selector() {
@@ -26,10 +28,13 @@ public final class SwitchExpr extends Expression {
     public List<SwitchArm> arms() {
         return arms;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(selector, arms);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, selector, offset);
+        for (Node __c : arms) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

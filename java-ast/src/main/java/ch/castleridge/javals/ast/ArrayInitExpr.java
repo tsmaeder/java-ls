@@ -12,18 +12,21 @@ public final class ArrayInitExpr extends Expression {
 
     private final List<Expression> elements;
 
-    public ArrayInitExpr(List<Expression> elements, SourceRange range) {
-        super(range);
+    public ArrayInitExpr(List<Expression> elements, JType type, SourceRange range) {
+        super(range, type);
         this.elements = elements == null ? List.of() : List.copyOf(elements);
+        for (Node __c : this.elements) __c.setParent(this);
     }
 
     public List<Expression> elements() {
         return elements;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(elements);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : elements) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

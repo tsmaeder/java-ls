@@ -6,28 +6,29 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
- * Owned attributed AST node. Trees are frozen after lowering.
+ * Owned attributed AST node. Structure and attribution are fixed at construction;
+ * only {@link #parent()} is set afterward by the owning parent's constructor.
  */
 public abstract sealed class Node
         permits Expression, Statement, TypeNode, Pattern, Declaration, ModuleDirective, CaseLabel,
                 CompilationUnit, Identifier, ImportDecl, AnnoArg, SwitchArm, CatchClause,
                 ReceiverParam, VarFragment, TypeParamDecl, ModuleDecl {
 
-    private CompilationUnit cu;
     private Node parent;
     private final SourceRange range;
-    private boolean frozen;
 
     protected Node(SourceRange range) {
         this.range = range == null ? SourceRange.NONE : range;
     }
 
     public final CompilationUnit cu() {
-        return cu;
+        Node n = this;
+        while (n != null) {
+            if (n instanceof CompilationUnit unit) return unit;
+            n = n.parent;
+        }
+        return null;
     }
 
     public final Node parent() {
@@ -42,10 +43,6 @@ public abstract sealed class Node
         return range.isPresent();
     }
 
-    public final boolean frozen() {
-        return frozen;
-    }
-
     public final <T extends Node> T enclosing(Class<T> type) {
         Node n = parent;
         while (n != null) {
@@ -55,56 +52,26 @@ public abstract sealed class Node
         return null;
     }
 
-    public abstract List<? extends Node> children();
-
     public abstract void accept(AstVisitor visitor);
 
-    final void attach(CompilationUnit unit, Node parent) {
-        this.cu = unit;
+    /** Deepest node covering {@code offset}, or {@code null} if this node does not cover it. */
+    public abstract Node nodeAt(int offset);
+
+    final void setParent(Node parent) {
+        if (parent == null) throw new IllegalArgumentException("parent");
+        if (this.parent != null && this.parent != parent) {
+            throw new IllegalStateException("child already adopted by another parent");
+        }
         this.parent = parent;
-        for (Node child : children()) {
-            if (child != null) child.attach(unit, this);
-        }
     }
 
-    final void freeze() {
-        this.frozen = true;
-        for (Node child : children()) {
-            if (child != null) child.freeze();
-        }
+    protected final boolean covers(int offset) {
+        return !hasRange() || (offset >= range.start() && offset < range.end());
     }
 
-    public final Node nodeAt(int offset) {
-        if (hasRange() && (offset < range.start() || offset >= range.end())) {
-            return null;
-        }
-        Node deepest = this;
-        for (Node child : children()) {
-            if (child == null) continue;
-            Node hit = child.nodeAt(offset);
-            if (hit != null) deepest = hit;
-        }
-        return deepest;
-    }
-
-    static List<Node> kids(Object... items) {
-        List<Node> out = new ArrayList<>();
-        addKids(out, items);
-        return List.copyOf(out);
-    }
-
-    private static void addKids(List<Node> out, Object[] items) {
-        for (Object item : items) {
-            switch (item) {
-                case null -> {}
-                case Node node -> out.add(node);
-                case List<?> list -> {
-                    for (Object inner : list) {
-                        if (inner instanceof Node node) out.add(node);
-                    }
-                }
-                default -> {}
-            }
-        }
+    protected final Node deeper(Node deepest, Node child, int offset) {
+        if (child == null) return deepest;
+        Node hit = child.nodeAt(offset);
+        return hit != null ? hit : deepest;
     }
 }

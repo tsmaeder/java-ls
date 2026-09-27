@@ -23,13 +23,18 @@ public final class MemberRefExpr extends Expression {
                          Mode mode,
                          Identifier name,
                          List<TypeNode> typeArguments,
+                         JType type,
                          SourceRange range) {
-        super(range);
+        super(range, type);
         this.qualifierExpr = qualifierExpr;
         this.qualifierType = qualifierType;
         this.mode = mode == null ? Mode.INVOKE : mode;
         this.name = name;
         this.typeArguments = typeArguments == null ? List.of() : List.copyOf(typeArguments);
+        if (qualifierExpr != null) qualifierExpr.setParent(this);
+        if (qualifierType != null) qualifierType.setParent(this);
+        if (name != null) name.setParent(this);
+        for (Node __c : this.typeArguments) __c.setParent(this);
     }
 
     public Expression qualifierExpr() {
@@ -51,10 +56,15 @@ public final class MemberRefExpr extends Expression {
     public List<TypeNode> typeArguments() {
         return typeArguments;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(qualifierExpr, qualifierType, name, typeArguments);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, qualifierExpr, offset);
+        deepest = deeper(deepest, qualifierType, offset);
+        deepest = deeper(deepest, name, offset);
+        for (Node __c : typeArguments) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

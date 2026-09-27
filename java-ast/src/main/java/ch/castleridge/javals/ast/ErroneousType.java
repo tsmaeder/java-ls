@@ -12,19 +12,21 @@ public final class ErroneousType extends TypeNode {
 
     private final List<Node> fragments;
 
-    public ErroneousType(List<Node> fragments, SourceRange range) {
-        super(range);
+    public ErroneousType(List<Node> fragments, JType resolved, SourceRange range) {
+        super(range, coalesce(resolved, JType.ERROR));
         this.fragments = fragments == null ? List.of() : List.copyOf(fragments);
-        setResolvedType(JType.ERROR);
+        for (Node __c : this.fragments) __c.setParent(this);
     }
 
     public List<Node> fragments() {
         return fragments;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(fragments);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : fragments) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

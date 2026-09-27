@@ -19,13 +19,17 @@ public final class CallExpr extends Expression {
                     Identifier name,
                     List<TypeNode> typeArguments,
                     List<Expression> arguments,
+                    JType type,
                     SourceRange range) {
-        super(range);
+        super(range, coalesce(type, name != null && name.symbol() != null ? name.symbol().type() : null));
         this.receiver = receiver;
         this.name = name;
         this.typeArguments = typeArguments == null ? List.of() : List.copyOf(typeArguments);
         this.arguments = arguments == null ? List.of() : List.copyOf(arguments);
-        if (name != null && name.symbol() != null) setType(name.symbol().type());
+        if (receiver != null) receiver.setParent(this);
+        if (name != null) name.setParent(this);
+        for (Node __c : this.typeArguments) __c.setParent(this);
+        for (Node __c : this.arguments) __c.setParent(this);
     }
 
     public Expression receiver() {
@@ -43,10 +47,15 @@ public final class CallExpr extends Expression {
     public List<Expression> arguments() {
         return arguments;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(receiver, name, typeArguments, arguments);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, receiver, offset);
+        deepest = deeper(deepest, name, offset);
+        for (Node __c : typeArguments) deepest = deeper(deepest, __c, offset);
+        for (Node __c : arguments) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

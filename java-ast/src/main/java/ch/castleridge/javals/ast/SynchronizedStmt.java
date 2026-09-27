@@ -15,9 +15,20 @@ public final class SynchronizedStmt extends Statement {
         super(range);
         this.lock = lock;
         this.body = body;
+        if (lock != null) lock.setParent(this);
+        if (body != null) body.setParent(this);
     }
     public Expression lock() { return lock; }
     public Block body() { return body; }
-    @Override public List<? extends Node> children() { return kids(lock, body); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitSynchronizedStmt(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, lock, offset);
+        deepest = deeper(deepest, body, offset);
+        return deepest;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitSynchronizedStmt(this); }
 }

@@ -15,9 +15,20 @@ public final class SwitchStmt extends Statement {
         super(range);
         this.selector = selector;
         this.arms = arms == null ? List.of() : List.copyOf(arms);
+        if (selector != null) selector.setParent(this);
+        for (Node __c : this.arms) __c.setParent(this);
     }
     public Expression selector() { return selector; }
     public List<SwitchArm> arms() { return arms; }
-    @Override public List<? extends Node> children() { return kids(selector, arms); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitSwitchStmt(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, selector, offset);
+        for (Node __c : arms) deepest = deeper(deepest, __c, offset);
+        return deepest;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitSwitchStmt(this); }
 }

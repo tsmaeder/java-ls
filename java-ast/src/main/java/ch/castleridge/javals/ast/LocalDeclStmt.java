@@ -21,11 +21,24 @@ public final class LocalDeclStmt extends Statement {
         this.annotations = annotations == null ? List.of() : List.copyOf(annotations);
         this.type = type;
         this.fragments = fragments == null ? List.of() : List.copyOf(fragments);
+        for (Node __c : this.annotations) __c.setParent(this);
+        if (type != null) type.setParent(this);
+        for (Node __c : this.fragments) __c.setParent(this);
     }
     public Set<Modifier> modifiers() { return modifiers; }
     public List<Annotation> annotations() { return annotations; }
     public TypeNode type() { return type; }
     public List<VarFragment> fragments() { return fragments; }
-    @Override public List<? extends Node> children() { return kids(annotations, type, fragments); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitLocalDeclStmt(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : annotations) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, type, offset);
+        for (Node __c : fragments) deepest = deeper(deepest, __c, offset);
+        return deepest;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitLocalDeclStmt(this); }
 }

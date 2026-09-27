@@ -17,6 +17,8 @@ public final class PackageDecl extends Declaration {
         super(range);
         this.annotations = annotations == null ? List.of() : List.copyOf(annotations);
         this.names = names == null ? List.of() : List.copyOf(names);
+        for (Node __c : this.annotations) __c.setParent(this);
+        for (Node __c : this.names) __c.setParent(this);
     }
 
     public List<Annotation> annotations() {
@@ -35,10 +37,13 @@ public final class PackageDecl extends Declaration {
         }
         return sb.toString();
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(annotations, names);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : annotations) deepest = deeper(deepest, __c, offset);
+        for (Node __c : names) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

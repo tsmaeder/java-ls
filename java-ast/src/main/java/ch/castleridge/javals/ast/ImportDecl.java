@@ -19,6 +19,7 @@ public final class ImportDecl extends Node {
         this.staticImport = staticImport;
         this.onDemand = onDemand;
         this.names = names == null ? List.of() : List.copyOf(names);
+        for (Node __c : this.names) __c.setParent(this);
     }
 
     public boolean staticImport() {
@@ -32,10 +33,12 @@ public final class ImportDecl extends Node {
     public List<Identifier> names() {
         return names;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(names);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : names) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

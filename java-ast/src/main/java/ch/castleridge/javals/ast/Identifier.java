@@ -11,11 +11,7 @@ import java.util.List;
 public final class Identifier extends Node {
 
     private final String name;
-    private Symbol symbol;
-
-    public Identifier(String name, SourceRange range) {
-        this(name, range, null);
-    }
+    private final Symbol symbol;
 
     public Identifier(String name, SourceRange range, Symbol symbol) {
         super(range);
@@ -30,15 +26,9 @@ public final class Identifier extends Node {
     public Symbol symbol() {
         return symbol;
     }
-
-    public void setSymbol(Symbol symbol) {
-        if (frozen()) throw new IllegalStateException("frozen");
-        this.symbol = symbol;
-    }
-
     @Override
-    public List<? extends Node> children() {
-        return List.of();
+    public Node nodeAt(int offset) {
+        return covers(offset) ? this : null;
     }
 
     @Override

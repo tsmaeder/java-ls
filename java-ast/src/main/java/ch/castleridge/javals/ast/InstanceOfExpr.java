@@ -11,15 +11,21 @@ import java.util.List;
 public final class InstanceOfExpr extends Expression {
 
     private final Expression expression;
-    private final TypeNode type;
+    private final TypeNode typeNode;
     private final Pattern pattern;
 
-    public InstanceOfExpr(Expression expression, TypeNode type, Pattern pattern, SourceRange range) {
-        super(range);
+    public InstanceOfExpr(Expression expression,
+                          TypeNode typeNode,
+                          Pattern pattern,
+                          JType type,
+                          SourceRange range) {
+        super(range, coalesce(type, JType.Primitive.BOOLEAN));
         this.expression = expression;
-        this.type = type;
+        this.typeNode = typeNode;
         this.pattern = pattern;
-        setType(JType.Primitive.BOOLEAN);
+        if (expression != null) expression.setParent(this);
+        if (typeNode != null) typeNode.setParent(this);
+        if (pattern != null) pattern.setParent(this);
     }
 
     public Expression expression() {
@@ -27,16 +33,20 @@ public final class InstanceOfExpr extends Expression {
     }
 
     public TypeNode typeNode() {
-        return type;
+        return typeNode;
     }
 
     public Pattern pattern() {
         return pattern;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(expression, type, pattern);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, expression, offset);
+        deepest = deeper(deepest, typeNode, offset);
+        deepest = deeper(deepest, pattern, offset);
+        return deepest;
     }
 
     @Override

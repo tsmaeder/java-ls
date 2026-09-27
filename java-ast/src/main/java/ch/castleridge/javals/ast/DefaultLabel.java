@@ -10,6 +10,11 @@ import java.util.List;
 
 public final class DefaultLabel extends CaseLabel {
     public DefaultLabel(SourceRange range) { super(range); }
-    @Override public List<? extends Node> children() { return List.of(); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitDefaultLabel(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        return covers(offset) ? this : null;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitDefaultLabel(this); }
 }

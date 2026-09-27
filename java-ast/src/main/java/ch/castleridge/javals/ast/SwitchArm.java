@@ -20,11 +20,24 @@ public final class SwitchArm extends Node {
         this.arrow = arrow;
         this.expressionBody = expressionBody;
         this.statements = statements == null ? List.of() : List.copyOf(statements);
+        for (Node __c : this.labels) __c.setParent(this);
+        if (expressionBody != null) expressionBody.setParent(this);
+        for (Node __c : this.statements) __c.setParent(this);
     }
     public List<CaseLabel> labels() { return labels; }
     public boolean arrow() { return arrow; }
     public Expression expressionBody() { return expressionBody; }
     public List<Statement> statements() { return statements; }
-    @Override public List<? extends Node> children() { return kids(labels, expressionBody, statements); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitSwitchArm(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : labels) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, expressionBody, offset);
+        for (Node __c : statements) deepest = deeper(deepest, __c, offset);
+        return deepest;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitSwitchArm(this); }
 }

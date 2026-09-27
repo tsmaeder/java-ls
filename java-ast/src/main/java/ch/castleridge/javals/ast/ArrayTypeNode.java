@@ -12,19 +12,21 @@ public final class ArrayTypeNode extends TypeNode {
 
     private final TypeNode element;
 
-    public ArrayTypeNode(TypeNode element, SourceRange range) {
-        super(range);
+    public ArrayTypeNode(TypeNode element, JType resolved, SourceRange range) {
+        super(range, coalesce(resolved, element != null ? JType.array(element.resolvedType()) : null));
         this.element = element;
-        if (element != null) setResolvedType(JType.array(element.resolvedType()));
+        if (element != null) element.setParent(this);
     }
 
     public TypeNode element() {
         return element;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(element);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, element, offset);
+        return deepest;
     }
 
     @Override

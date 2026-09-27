@@ -15,9 +15,20 @@ public final class WhileStmt extends Statement {
         super(range);
         this.condition = condition;
         this.body = body;
+        if (condition != null) condition.setParent(this);
+        if (body != null) body.setParent(this);
     }
     public Expression condition() { return condition; }
     public Statement body() { return body; }
-    @Override public List<? extends Node> children() { return kids(condition, body); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitWhileStmt(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, condition, offset);
+        deepest = deeper(deepest, body, offset);
+        return deepest;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitWhileStmt(this); }
 }

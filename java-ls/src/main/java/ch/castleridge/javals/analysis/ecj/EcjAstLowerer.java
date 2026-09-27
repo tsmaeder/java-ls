@@ -9,6 +9,7 @@ package ch.castleridge.javals.analysis.ecj;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -207,6 +208,8 @@ final class EcjAstLowerer {
     private final Map<String, String> sourceJarByBinaryJar;
     private final Map<Binding, Symbol> interned = new IdentityHashMap<>();
     private final Map<String, TypeSymbol> typesByJvm = new HashMap<>();
+    /** Lazily filled set of JVM names declared in this CU (incl. nested). */
+    private Set<String> declaredJvmNames;
 
     private EcjAstLowerer(CompilationUnitDeclaration unit,
                           String uri,
@@ -267,40 +270,49 @@ final class EcjAstLowerer {
 
     private List<Identifier> importNames(ImportReference tree) {
         if (tree.tokens == null) return List.of();
-        List<Identifier> out = new ArrayList<>();
+        List<String> nameStrs = new ArrayList<>(tree.tokens.length);
+        List<SourceRange> ranges = new ArrayList<>(tree.tokens.length);
         for (int i = 0; i < tree.tokens.length; i++) {
             long pos = tree.sourcePositions == null || i >= tree.sourcePositions.length
                     ? pack(tree.sourceStart, tree.sourceEnd) : tree.sourcePositions[i];
-            out.add(new Identifier(new String(tree.tokens[i]), posRange(pos), null));
+            nameStrs.add(new String(tree.tokens[i]));
+            ranges.add(posRange(pos));
         }
-        bindImportNames(out, tree.isStatic(), (tree.bits & ASTNode.OnDemand) != 0);
+        List<Symbol> symbols = importSymbols(nameStrs, tree.isStatic(), (tree.bits & ASTNode.OnDemand) != 0);
+        List<Identifier> out = new ArrayList<>(nameStrs.size());
+        for (int i = 0; i < nameStrs.size(); i++) {
+            out.add(new Identifier(nameStrs.get(i), ranges.get(i), symbols.get(i)));
+        }
         return out;
     }
 
-    private void bindImportNames(List<Identifier> names, boolean staticImport, boolean onDemand) {
-        if (names.isEmpty()) return;
+    private List<Symbol> importSymbols(List<String> names, boolean staticImport, boolean onDemand) {
+        List<Symbol> symbols = new ArrayList<>(names.size());
+        if (names.isEmpty()) return symbols;
         String jvm = "";
         TypeSymbol type = null;
         for (int i = 0; i < names.size(); i++) {
-            Identifier ident = names.get(i);
+            String name = names.get(i);
             boolean last = i == names.size() - 1;
-            String slash = jvm.isEmpty() ? ident.name() : jvm + "/" + ident.name();
-            String nested = jvm.isEmpty() ? ident.name() : jvm + "$" + ident.name();
+            String slash = jvm.isEmpty() ? name : jvm + "/" + name;
+            String nested = jvm.isEmpty() ? name : jvm + "$" + name;
             TypeSymbol found = typeSymbolForJvm(nested);
             if (found == null) found = typeSymbolForJvm(slash);
             if (found != null) {
-                ident.setSymbol(found);
+                symbols.add(found);
                 type = found;
                 jvm = found.jvmBinaryName().replace('.', '/');
                 continue;
             }
             if (type != null && last && staticImport && !onDemand) {
+                symbols.add(null);
                 continue;
             }
-            String qualified = jvm.isEmpty() ? ident.name() : jvm.replace('/', '.') + "." + ident.name();
-            ident.setSymbol(new PackageSymbol(qualified, SymbolKey.local(ident.name())));
+            String qualified = jvm.isEmpty() ? name : jvm.replace('/', '.') + "." + name;
+            symbols.add(new PackageSymbol(qualified, SymbolKey.local(name)));
             jvm = slash;
         }
+        return symbols;
     }
 
     private TypeSymbol typeSymbolForJvm(String jvm) {
@@ -389,6 +401,7 @@ final class EcjAstLowerer {
 
     private Declaration lowerMethod(AbstractMethodDeclaration tree, TypeSymbol owner, TypeDeclKind ownerKind) {
         if (tree instanceof Clinit) return null;
+        if ((tree.modifiers & ClassFileConstants.AccSynthetic) != 0) return null;
         MethodSymbol symbol = methodSymbol(tree.binding, owner);
         boolean constructor = tree.isConstructor();
         String raw = str(tree.selector);
@@ -413,7 +426,7 @@ final class EcjAstLowerer {
                     null, params, thrown, body, symbol, range(tree));
         }
         TypeNode returnType = tree instanceof MethodDeclaration method && method.returnType != null
-                ? lowerTypeRef(method.returnType) : new VoidTypeNode(SourceRange.NONE);
+                ? lowerTypeRef(method.returnType) : new VoidTypeNode(null, SourceRange.NONE);
         return new MethodDecl(mods(tree.modifiers), annos(tree.annotations), typeParams, returnType, name,
                 null, params, thrown, body, symbol, range(tree));
     }
@@ -560,8 +573,15 @@ final class EcjAstLowerer {
         Identifier name = new Identifier(str(tree.name), nameRange(tree.name, tree.sourceStart, tree.sourceEnd), symbol);
         VarFragment fragment = new VarFragment(name, 0,
                 tree.initialization == null ? null : lowerExpr(tree.initialization), symbol, range(tree));
-        TypeNode type = tree.type == null ? new VarTypeNode(SourceRange.NONE) : lowerTypeRef(tree.type);
-        if (type instanceof VarTypeNode varType && symbol != null) varType.setResolvedType(symbol.type());
+        TypeNode type;
+        if (tree.type == null) {
+            type = new VarTypeNode(symbol != null ? symbol.type() : null, SourceRange.NONE);
+        } else {
+            type = lowerTypeRef(tree.type);
+            if (type instanceof VarTypeNode && symbol != null) {
+                type = new VarTypeNode(symbol.type(), type.range());
+            }
+        }
         return new LocalDeclStmt(mods(tree.modifiers), annos(tree.annotations), type, List.of(fragment), range(tree));
     }
 
@@ -601,94 +621,102 @@ final class EcjAstLowerer {
     private ch.castleridge.javals.ast.Expression lowerExpr(Expression tree) {
         if (tree == null) return null;
         SourceRange r = range(tree);
-        ch.castleridge.javals.ast.Expression lowered;
+        JType type = jtype(tree.resolvedType);
         if (tree instanceof SingleNameReference name) {
             Identifier ident = new Identifier(str(name.token), r, symbolOf(name.binding));
-            lowered = new NameExpr(ident, r);
-        } else if (tree instanceof QualifiedNameReference qual) {
-            lowered = lowerQualifiedName(qual);
-        } else if (tree instanceof FieldReference field) {
+            return new NameExpr(ident, type, r);
+        }
+        if (tree instanceof QualifiedNameReference qual) {
+            return lowerQualifiedName(qual);
+        }
+        if (tree instanceof FieldReference field) {
             Identifier ident = new Identifier(str(field.token), namePos(field.nameSourcePosition), symbolOf(field.binding));
-            lowered = new Select(lowerExpr(field.receiver), ident, r);
-        } else if (tree instanceof MessageSend send) {
-            lowered = lowerCall(send);
-        } else if (tree instanceof AllocationExpression alloc) {
-            lowered = lowerNew(alloc);
-        } else if (tree instanceof ArrayAllocationExpression array) {
-            lowered = lowerNewArray(array);
-        } else if (tree instanceof ArrayInitializer init) {
-            lowered = new ArrayInitExpr(mapExprs(init.expressions), r);
-        } else if (tree instanceof ArrayReference access) {
-            lowered = new ArrayAccessExpr(lowerExpr(access.receiver), lowerExpr(access.position), r);
-        } else if (tree instanceof Literal literal) {
-            lowered = lowerLiteral(literal, r);
-        } else if (tree instanceof BinaryExpression binary) {
+            return new Select(lowerExpr(field.receiver), ident, type, r);
+        }
+        if (tree instanceof MessageSend send) {
+            return lowerCall(send);
+        }
+        if (tree instanceof AllocationExpression alloc) {
+            return lowerNew(alloc);
+        }
+        if (tree instanceof ArrayAllocationExpression array) {
+            return lowerNewArray(array);
+        }
+        if (tree instanceof ArrayInitializer init) {
+            return new ArrayInitExpr(mapExprs(init.expressions), type, r);
+        }
+        if (tree instanceof ArrayReference access) {
+            return new ArrayAccessExpr(lowerExpr(access.receiver), lowerExpr(access.position), type, r);
+        }
+        if (tree instanceof Literal literal) {
+            return lowerLiteral(literal, r);
+        }
+        if (tree instanceof BinaryExpression binary) {
             if (tree instanceof EqualExpression equal) {
-                lowered = new BinaryExpr(equalOp(equal), lowerExpr(equal.left), lowerExpr(equal.right), r);
-            } else if ((binary.bits & ASTNode.OperatorMASK) >> ASTNode.OperatorSHIFT == OperatorIds.AND_AND
-                    || (binary.bits & ASTNode.OperatorMASK) >> ASTNode.OperatorSHIFT == OperatorIds.OR_OR
-                    || true) {
-                int op = (binary.bits & ASTNode.OperatorMASK) >> ASTNode.OperatorSHIFT;
-                if (op == OperatorIds.QUESTIONCOLON) {
-                    // ConditionalExpression extends BinaryExpression in some versions; handle via fields if present
-                    lowered = new BinaryExpr(binaryOp(op), lowerExpr(binary.left), lowerExpr(binary.right), r);
-                } else {
-                    lowered = new BinaryExpr(binaryOp(op), lowerExpr(binary.left), lowerExpr(binary.right), r);
-                }
-            } else {
-                lowered = new ErroneousExpr(List.of(), r);
+                return new BinaryExpr(equalOp(equal), lowerExpr(equal.left), lowerExpr(equal.right), type, r);
             }
-        } else if (tree instanceof UnaryExpression unary) {
+            int op = (binary.bits & ASTNode.OperatorMASK) >> ASTNode.OperatorSHIFT;
+            return new BinaryExpr(binaryOp(op), lowerExpr(binary.left), lowerExpr(binary.right), type, r);
+        }
+        if (tree instanceof UnaryExpression unary) {
             int op = (unary.bits & ASTNode.OperatorMASK) >> ASTNode.OperatorSHIFT;
-            lowered = new UnaryExpr(unaryOp(op, false), lowerExpr(unary.expression), r);
-        } else if (tree instanceof PrefixExpression prefix) {
+            return new UnaryExpr(unaryOp(op, false), lowerExpr(unary.expression), type, r);
+        }
+        if (tree instanceof PrefixExpression prefix) {
             int op = (prefix.bits & ASTNode.OperatorMASK) >> ASTNode.OperatorSHIFT;
-            lowered = new UnaryExpr(unaryOp(op, false), lowerExpr(prefix.lhs), r);
-        } else if (tree instanceof PostfixExpression postfix) {
+            return new UnaryExpr(unaryOp(op, false), lowerExpr(prefix.lhs), type, r);
+        }
+        if (tree instanceof PostfixExpression postfix) {
             int op = (postfix.bits & ASTNode.OperatorMASK) >> ASTNode.OperatorSHIFT;
-            lowered = new UnaryExpr(unaryOp(op, true), lowerExpr(postfix.lhs), r);
-        } else if (tree instanceof Assignment assign) {
+            return new UnaryExpr(unaryOp(op, true), lowerExpr(postfix.lhs), type, r);
+        }
+        if (tree instanceof Assignment assign) {
             AssignExpr.Op op = assign instanceof CompoundAssignment compound
                     ? assignOp((compound.bits & ASTNode.OperatorMASK) >> ASTNode.OperatorSHIFT)
                     : AssignExpr.Op.ASSIGN;
-            lowered = new AssignExpr(op, lowerExpr(assign.lhs), lowerExpr(assign.expression), r);
-        } else if (tree instanceof CastExpression cast) {
-            lowered = new CastExpr(lowerTypeRef(cast.type), lowerExpr(cast.expression), r);
-        } else if (tree instanceof InstanceOfExpression io) {
-            lowered = new InstanceOfExpr(lowerExpr(io.expression), lowerTypeRef(io.type), null, r);
-        } else if (tree instanceof ThisReference thisRef) {
+            return new AssignExpr(op, lowerExpr(assign.lhs), lowerExpr(assign.expression), type, r);
+        }
+        if (tree instanceof CastExpression cast) {
+            return new CastExpr(lowerTypeRef(cast.type), lowerExpr(cast.expression), type, r);
+        }
+        if (tree instanceof InstanceOfExpression io) {
+            return new InstanceOfExpr(lowerExpr(io.expression), lowerTypeRef(io.type), null, type, r);
+        }
+        if (tree instanceof ThisReference thisRef) {
             TypeNode qual = tree instanceof QualifiedThisReference q ? lowerTypeRef(q.qualification) : null;
-            ThisExpr expr = new ThisExpr(qual, r);
-            expr.setType(jtype(thisRef.resolvedType));
-            lowered = expr;
-        } else if (tree instanceof SuperReference) {
-            SuperExpr expr = new SuperExpr(null, r);
-            expr.setType(jtype(tree.resolvedType));
-            lowered = expr;
-        } else if (tree instanceof ClassLiteralAccess cl) {
-            lowered = new ClassLiteralExpr(lowerTypeRef(cl.type), r);
-        } else if (tree instanceof LambdaExpression lambda) {
-            lowered = lowerLambda(lambda);
-        } else if (tree instanceof ReferenceExpression ref) {
-            lowered = lowerMemberRef(ref);
-        } else if (tree instanceof SwitchExpression sw) {
-            SwitchExpr expr = new SwitchExpr(lowerExpr(sw.expression), lowerSwitchArms(sw.statements), r);
-            expr.setType(jtype(sw.resolvedType));
-            lowered = expr;
-        } else if (tree instanceof org.eclipse.jdt.internal.compiler.ast.ConditionalExpression cond) {
-            lowered = new ConditionalExpr(lowerExpr(cond.condition), lowerExpr(cond.valueIfTrue),
-                    lowerExpr(cond.valueIfFalse), r);
-        } else if (tree instanceof TypeReference typeRef) {
-            TypeNode type = lowerTypeRef(typeRef);
-            lowered = new NameExpr(type instanceof TypeName tn && tn.simpleName() != null
-                    ? tn.simpleName() : new Identifier(typeRef.toString(), r, null), r);
-        } else {
-            lowered = new ErroneousExpr(List.of(), r);
+            return new ThisExpr(qual, type, r);
         }
-        if (lowered != null && lowered.type() == JType.ERROR && tree.resolvedType != null) {
-            lowered.setType(jtype(tree.resolvedType));
+        if (tree instanceof SuperReference) {
+            return new SuperExpr(null, type, r);
         }
-        return lowered;
+        if (tree instanceof ClassLiteralAccess cl) {
+            return new ClassLiteralExpr(lowerTypeRef(cl.type), type, r);
+        }
+        if (tree instanceof LambdaExpression lambda) {
+            return lowerLambda(lambda);
+        }
+        if (tree instanceof ReferenceExpression ref) {
+            return lowerMemberRef(ref);
+        }
+        if (tree instanceof SwitchExpression sw) {
+            return new SwitchExpr(lowerExpr(sw.expression), lowerSwitchArms(sw.statements), type, r);
+        }
+        if (tree instanceof org.eclipse.jdt.internal.compiler.ast.ConditionalExpression cond) {
+            return new ConditionalExpr(lowerExpr(cond.condition), lowerExpr(cond.valueIfTrue),
+                    lowerExpr(cond.valueIfFalse), type, r);
+        }
+        if (tree instanceof TypeReference typeRef) {
+            TypeNode typeNode = lowerTypeRef(typeRef);
+            Identifier name;
+            if (typeNode instanceof TypeName tn && tn.simpleName() != null) {
+                Identifier simple = tn.simpleName();
+                name = new Identifier(simple.name(), simple.range(), simple.symbol());
+            } else {
+                name = new Identifier(typeRef.toString(), r, null);
+            }
+            return new NameExpr(name, type, r);
+        }
+        return new ErroneousExpr(List.of(), type, r);
     }
 
     private ch.castleridge.javals.ast.Expression lowerQualifiedName(QualifiedNameReference tree) {
@@ -701,17 +729,18 @@ final class EcjAstLowerer {
             Binding binding = i == tokens.length - 1 ? tree.binding
                     : (others != null && i < others.length ? others[i] : null);
             Identifier ident = new Identifier(new String(tokens[i]), nr, symbolOf(binding));
-            current = current == null ? new NameExpr(ident, nr) : new Select(current, ident, span(current.range(), nr));
+            JType type = i == tokens.length - 1 ? jtype(tree.resolvedType) : null;
+            current = current == null
+                    ? new NameExpr(ident, type, nr)
+                    : new Select(current, ident, type, span(current.range(), nr));
         }
         return current;
     }
 
     private CallExpr lowerCall(MessageSend tree) {
         Identifier name = new Identifier(str(tree.selector), namePos(tree.nameSourcePosition), symbolOf(tree.binding));
-        CallExpr call = new CallExpr(tree.receiver == null || tree.receiver.isImplicitThis() ? null : lowerExpr(tree.receiver),
-                name, List.of(), mapExprs(tree.arguments), range(tree));
-        call.setType(jtype(tree.resolvedType));
-        return call;
+        return new CallExpr(tree.receiver == null || tree.receiver.isImplicitThis() ? null : lowerExpr(tree.receiver),
+                name, List.of(), mapExprs(tree.arguments), jtype(tree.resolvedType), range(tree));
     }
 
     private NewExpr lowerNew(AllocationExpression tree) {
@@ -719,55 +748,39 @@ final class EcjAstLowerer {
         if (tree instanceof QualifiedAllocationExpression q && q.anonymousType != null) {
             body = lowerType(q.anonymousType);
         }
-        TypeNode type = lowerTypeRef(tree.type);
         MethodSymbol constructor = methodSymbol(tree.binding, null);
-        bindConstructorName(type, constructor);
-        NewExpr expr = new NewExpr(
+        TypeNode type = lowerTypeRef(tree.type, constructor);
+        return new NewExpr(
                 tree instanceof QualifiedAllocationExpression q ? lowerExpr(q.enclosingInstance()) : null,
                 type, List.of(), mapExprs(tree.arguments), body,
-                constructor, range(tree));
-        expr.setType(jtype(tree.resolvedType));
-        return expr;
-    }
-
-    private void bindConstructorName(TypeNode type, Symbol constructor) {
-        if (constructor == null || type == null) return;
-        Identifier name = switch (type) {
-            case TypeName tn -> tn.simpleName();
-            case ParameterizedTypeNode parameterized -> {
-                bindConstructorName(parameterized.raw(), constructor);
-                yield null;
-            }
-            default -> null;
-        };
-        if (name != null) name.setSymbol(constructor);
+                constructor, jtype(tree.resolvedType), range(tree));
     }
 
     private NewArrayExpr lowerNewArray(ArrayAllocationExpression tree) {
         ArrayInitExpr init = tree.initializer == null ? null
-                : new ArrayInitExpr(mapExprs(tree.initializer.expressions), range(tree.initializer));
-        NewArrayExpr expr = new NewArrayExpr(lowerTypeRef(tree.type), mapExprs(tree.dimensions), init, range(tree));
-        expr.setType(jtype(tree.resolvedType));
-        return expr;
+                : new ArrayInitExpr(mapExprs(tree.initializer.expressions),
+                        jtype(tree.initializer.resolvedType), range(tree.initializer));
+        return new NewArrayExpr(lowerTypeRef(tree.type), mapExprs(tree.dimensions), init,
+                jtype(tree.resolvedType), range(tree));
     }
 
     private LiteralExpr lowerLiteral(Literal tree, SourceRange r) {
         Constant constant = tree.constant;
         if (constant == null || constant == Constant.NotAConstant) {
             if (tree instanceof org.eclipse.jdt.internal.compiler.ast.NullLiteral) {
-                return new LiteralExpr(LiteralExpr.Kind.NULL, null, slice(r), r);
+                return new LiteralExpr(LiteralExpr.Kind.NULL, null, slice(r), null, r);
             }
-            return new LiteralExpr(LiteralExpr.Kind.STRING, tree.toString(), slice(r), r);
+            return new LiteralExpr(LiteralExpr.Kind.STRING, tree.toString(), slice(r), null, r);
         }
         return switch (constant.typeID()) {
-            case TypeIds.T_int -> new LiteralExpr(LiteralExpr.Kind.INT, constant.intValue(), slice(r), r);
-            case TypeIds.T_long -> new LiteralExpr(LiteralExpr.Kind.LONG, constant.longValue(), slice(r), r);
-            case TypeIds.T_float -> new LiteralExpr(LiteralExpr.Kind.FLOAT, constant.floatValue(), slice(r), r);
-            case TypeIds.T_double -> new LiteralExpr(LiteralExpr.Kind.DOUBLE, constant.doubleValue(), slice(r), r);
-            case TypeIds.T_char -> new LiteralExpr(LiteralExpr.Kind.CHAR, constant.charValue(), slice(r), r);
-            case TypeIds.T_boolean -> new LiteralExpr(LiteralExpr.Kind.BOOLEAN, constant.booleanValue(), slice(r), r);
-            case TypeIds.T_JavaLangString -> new LiteralExpr(LiteralExpr.Kind.STRING, constant.stringValue(), slice(r), r);
-            default -> new LiteralExpr(LiteralExpr.Kind.NULL, null, slice(r), r);
+            case TypeIds.T_int -> new LiteralExpr(LiteralExpr.Kind.INT, constant.intValue(), slice(r), null, r);
+            case TypeIds.T_long -> new LiteralExpr(LiteralExpr.Kind.LONG, constant.longValue(), slice(r), null, r);
+            case TypeIds.T_float -> new LiteralExpr(LiteralExpr.Kind.FLOAT, constant.floatValue(), slice(r), null, r);
+            case TypeIds.T_double -> new LiteralExpr(LiteralExpr.Kind.DOUBLE, constant.doubleValue(), slice(r), null, r);
+            case TypeIds.T_char -> new LiteralExpr(LiteralExpr.Kind.CHAR, constant.charValue(), slice(r), null, r);
+            case TypeIds.T_boolean -> new LiteralExpr(LiteralExpr.Kind.BOOLEAN, constant.booleanValue(), slice(r), null, r);
+            case TypeIds.T_JavaLangString -> new LiteralExpr(LiteralExpr.Kind.STRING, constant.stringValue(), slice(r), null, r);
+            default -> new LiteralExpr(LiteralExpr.Kind.NULL, null, slice(r), null, r);
         };
     }
 
@@ -784,9 +797,7 @@ final class EcjAstLowerer {
             blockBody = new ch.castleridge.javals.ast.Block(List.of(lowerStmt(stmt)), range(tree.body));
         }
         boolean elided = tree.arguments == null || tree.arguments.length == 0 || tree.arguments[0].type == null;
-        LambdaExpr lambda = new LambdaExpr(params, elided, exprBody, blockBody, range(tree));
-        lambda.setType(jtype(tree.resolvedType));
-        return lambda;
+        return new LambdaExpr(params, elided, exprBody, blockBody, jtype(tree.resolvedType), range(tree));
     }
 
     private MemberRefExpr lowerMemberRef(ReferenceExpression tree) {
@@ -794,34 +805,43 @@ final class EcjAstLowerer {
         TypeNode type = tree.lhs instanceof TypeReference typeRef ? lowerTypeRef(typeRef) : null;
         ch.castleridge.javals.ast.Expression expr = type == null && tree.lhs != null ? lowerExpr(tree.lhs) : null;
         MemberRefExpr.Mode mode = tree.isConstructorReference() ? MemberRefExpr.Mode.NEW : MemberRefExpr.Mode.INVOKE;
-        MemberRefExpr ref = new MemberRefExpr(expr, type, mode, name, List.of(), range(tree));
-        ref.setType(jtype(tree.resolvedType));
-        return ref;
+        return new MemberRefExpr(expr, type, mode, name, List.of(), jtype(tree.resolvedType), range(tree));
     }
 
     private TypeNode lowerTypeRef(TypeReference tree) {
+        return lowerTypeRef(tree, null);
+    }
+
+    /**
+     * @param constructorName when non-null (from {@code new}), bind the simple-name Identifier
+     *                        of the allocated type to this constructor symbol on first construction
+     */
+    private TypeNode lowerTypeRef(TypeReference tree, Symbol constructorName) {
         if (tree == null) return null;
         SourceRange r = range(tree);
-        TypeNode lowered;
+        JType resolved = jtype(tree.resolvedType);
         if (tree instanceof Wildcard wild) {
-            lowered = switch (wild.kind) {
-                case Wildcard.UNBOUND -> new WildcardTypeNode(WildcardTypeNode.BoundKind.UNBOUNDED, null, r);
-                case Wildcard.EXTENDS -> new WildcardTypeNode(WildcardTypeNode.BoundKind.EXTENDS, lowerTypeRef(wild.bound), r);
-                default -> new WildcardTypeNode(WildcardTypeNode.BoundKind.SUPER, lowerTypeRef(wild.bound), r);
+            return switch (wild.kind) {
+                case Wildcard.UNBOUND -> new WildcardTypeNode(WildcardTypeNode.BoundKind.UNBOUNDED, null, resolved, r);
+                case Wildcard.EXTENDS -> new WildcardTypeNode(WildcardTypeNode.BoundKind.EXTENDS,
+                        lowerTypeRef(wild.bound), resolved, r);
+                default -> new WildcardTypeNode(WildcardTypeNode.BoundKind.SUPER,
+                        lowerTypeRef(wild.bound), resolved, r);
             };
-        } else if (tree instanceof ParameterizedSingleTypeReference param) {
+        }
+        if (tree instanceof ParameterizedSingleTypeReference param) {
             TypeName raw = typeName(List.of(new Identifier(str(param.token),
                     new SourceRange(param.sourceStart, param.sourceStart + param.token.length),
-                    symbolOf(validType(param.resolvedType)))), r);
+                    lastTypeSymbol(validType(param.resolvedType), constructorName))), null, r);
             List<TypeNode> args = new ArrayList<>();
             if (param.typeArguments != null) {
                 for (TypeReference arg : param.typeArguments) args.add(lowerTypeRef(arg));
             }
-            ParameterizedTypeNode node = new ParameterizedTypeNode(raw, args, r);
-            node.setResolvedType(jtype(param.resolvedType));
-            lowered = node;
-        } else if (tree instanceof ParameterizedQualifiedTypeReference param) {
-            TypeName raw = typeName(qualifiedTypeIdents(param.tokens, param.sourcePositions, param.resolvedType), r);
+            return new ParameterizedTypeNode(raw, args, resolved, r);
+        }
+        if (tree instanceof ParameterizedQualifiedTypeReference param) {
+            TypeName raw = typeName(qualifiedTypeIdents(param.tokens, param.sourcePositions, param.resolvedType,
+                    constructorName), null, r);
             List<TypeNode> args = List.of();
             if (param.typeArguments != null && param.typeArguments.length > 0
                     && param.typeArguments[param.typeArguments.length - 1] != null) {
@@ -831,65 +851,76 @@ final class EcjAstLowerer {
                 }
                 args = last;
             }
-            ParameterizedTypeNode node = new ParameterizedTypeNode(raw, args, r);
-            node.setResolvedType(jtype(param.resolvedType));
-            lowered = node;
-        } else if (tree instanceof ArrayTypeReference array) {
+            return new ParameterizedTypeNode(raw, args, resolved, r);
+        }
+        if (tree instanceof ArrayTypeReference array) {
             TypeNode element = typeName(List.of(new Identifier(str(array.token),
                     new SourceRange(array.sourceStart, array.sourceStart + array.token.length),
-                    symbolOf(validType(array.resolvedType)))), r);
+                    symbolOf(validType(array.resolvedType)))), null, r);
             TypeNode current = element;
             int dims = array.dimensions();
-            for (int i = 0; i < dims; i++) current = new ArrayTypeNode(current, r);
-            lowered = current;
-        } else if (tree instanceof ArrayQualifiedTypeReference array) {
-            TypeNode element = typeName(qualifiedTypeIdents(array.tokens, array.sourcePositions, array.resolvedType), r);
-            TypeNode current = element;
-            int dims = array.dimensions();
-            for (int i = 0; i < dims; i++) current = new ArrayTypeNode(current, r);
-            lowered = current;
-        } else if (tree instanceof QualifiedTypeReference qual) {
-            lowered = typeName(qualifiedTypeIdents(qual.tokens, qual.sourcePositions, qual.resolvedType), r);
-        } else if (tree instanceof SingleTypeReference single) {
-            if (isPrimitive(single.token)) {
-                lowered = primitive(single.token, r);
-            } else {
-                lowered = typeName(List.of(new Identifier(str(single.token), r,
-                        symbolOf(validType(single.resolvedType)))), r);
+            for (int i = 0; i < dims; i++) {
+                boolean outermost = i == dims - 1;
+                current = new ArrayTypeNode(current, outermost ? resolved : null, r);
             }
-        } else {
-            lowered = typeName(List.of(new Identifier(tree.toString(), r, symbolOf(validType(tree.resolvedType)))), r);
+            return current;
         }
-        if (lowered != null && lowered.resolvedType() == JType.ERROR) lowered.setResolvedType(jtype(tree.resolvedType));
-        return lowered;
+        if (tree instanceof ArrayQualifiedTypeReference array) {
+            TypeNode element = typeName(qualifiedTypeIdents(array.tokens, array.sourcePositions, array.resolvedType,
+                    null), null, r);
+            TypeNode current = element;
+            int dims = array.dimensions();
+            for (int i = 0; i < dims; i++) {
+                boolean outermost = i == dims - 1;
+                current = new ArrayTypeNode(current, outermost ? resolved : null, r);
+            }
+            return current;
+        }
+        if (tree instanceof QualifiedTypeReference qual) {
+            return typeName(qualifiedTypeIdents(qual.tokens, qual.sourcePositions, qual.resolvedType,
+                    constructorName), resolved, r);
+        }
+        if (tree instanceof SingleTypeReference single) {
+            if (isPrimitive(single.token)) {
+                return primitive(single.token, resolved, r);
+            }
+            return typeName(List.of(new Identifier(str(single.token), r,
+                    lastTypeSymbol(validType(single.resolvedType), constructorName))), resolved, r);
+        }
+        return typeName(List.of(new Identifier(tree.toString(), r,
+                        lastTypeSymbol(validType(tree.resolvedType), constructorName))),
+                resolved, r);
     }
 
-    private TypeName typeName(List<Identifier> names, SourceRange range) {
-        TypeName node = new TypeName(names, range);
-        if (!names.isEmpty() && names.get(names.size() - 1).symbol() != null) {
-            node.setResolvedType(names.get(names.size() - 1).symbol().type());
-        }
-        return node;
+    private TypeName typeName(List<Identifier> names, JType resolved, SourceRange range) {
+        return new TypeName(names, resolved, range);
     }
 
-    private List<Identifier> qualifiedTypeIdents(char[][] tokens, long[] positions, TypeBinding resolved) {
+    private List<Identifier> qualifiedTypeIdents(char[][] tokens, long[] positions, TypeBinding resolved,
+                                                 Symbol constructorName) {
         List<Identifier> out = new ArrayList<>();
         for (int i = 0; i < tokens.length; i++) {
             SourceRange nr = positions == null || i >= positions.length
                     ? SourceRange.NONE : posRange(positions[i]);
-            Binding binding = i == tokens.length - 1 ? validType(resolved) : null;
-            out.add(new Identifier(new String(tokens[i]), nr, symbolOf(binding)));
+            boolean last = i == tokens.length - 1;
+            Binding binding = last ? validType(resolved) : null;
+            Symbol symbol = last ? lastTypeSymbol(binding, constructorName) : symbolOf(binding);
+            out.add(new Identifier(new String(tokens[i]), nr, symbol));
         }
         return out;
+    }
+
+    private Symbol lastTypeSymbol(Binding typeBinding, Symbol constructorName) {
+        return constructorName != null ? constructorName : symbolOf(typeBinding);
     }
 
     private List<ch.castleridge.javals.ast.Annotation> annos(Annotation[] annotations) {
         if (annotations == null) return List.of();
         List<ch.castleridge.javals.ast.Annotation> out = new ArrayList<>();
         for (Annotation annotation : annotations) {
-            TypeName name = annotation.type == null ? typeName(List.of(), SourceRange.NONE)
+            TypeName name = annotation.type == null ? typeName(List.of(), null, SourceRange.NONE)
                     : (lowerTypeRef(annotation.type) instanceof TypeName tn ? tn
-                    : typeName(List.of(), range(annotation.type)));
+                    : typeName(List.of(), null, range(annotation.type)));
             List<AnnoArg> args = new ArrayList<>();
             if (annotation instanceof SingleMemberAnnotation single) {
                 args.add(new AnnoArg(null, lowerExpr(single.memberValue), range(single.memberValue)));
@@ -899,7 +930,8 @@ final class EcjAstLowerer {
                             lowerExpr(pair.value), range(pair)));
                 }
             }
-            out.add(new ch.castleridge.javals.ast.Annotation(name, args, range(annotation)));
+            out.add(new ch.castleridge.javals.ast.Annotation(name, args, jtype(annotation.resolvedType),
+                    range(annotation)));
         }
         return out;
     }
@@ -916,7 +948,7 @@ final class EcjAstLowerer {
         List<ch.castleridge.javals.ast.Expression> out = new ArrayList<>();
         for (Expression expr : exprs) {
             ch.castleridge.javals.ast.Expression lowered = expr == null ? null : lowerExpr(expr);
-            out.add(lowered == null ? new ErroneousExpr(List.of(), SourceRange.NONE) : lowered);
+            out.add(lowered == null ? new ErroneousExpr(List.of(), null, SourceRange.NONE) : lowered);
         }
         return out;
     }
@@ -1125,17 +1157,24 @@ final class EcjAstLowerer {
     }
 
     private boolean declares(String ownerJvm) {
-        if (unit.types == null) return false;
-        return declares(unit.types, ownerJvm);
+        if (ownerJvm == null || unit.types == null) return false;
+        Set<String> names = declaredJvmNames;
+        if (names == null) {
+            names = new HashSet<>();
+            collectDeclaredJvmNames(unit.types, names);
+            declaredJvmNames = names;
+        }
+        return names.contains(ownerJvm);
     }
 
-    private static boolean declares(TypeDeclaration[] types, String ownerJvm) {
-        if (types == null) return false;
+    private static void collectDeclaredJvmNames(TypeDeclaration[] types, Set<String> out) {
+        if (types == null) return;
         for (TypeDeclaration type : types) {
-            if (type.binding != null && ownerJvm.equals(new String(type.binding.constantPoolName()))) return true;
-            if (declares(type.memberTypes, ownerJvm)) return true;
+            if (type.binding != null && type.binding.constantPoolName() != null) {
+                out.add(new String(type.binding.constantPoolName()));
+            }
+            collectDeclaredJvmNames(type.memberTypes, out);
         }
-        return false;
     }
 
     private JType jtype(TypeBinding binding) {
@@ -1209,10 +1248,29 @@ final class EcjAstLowerer {
     }
 
     private SourceRange nameRange(char[] name, int start, int end) {
-        if (name == null) return new SourceRange(Math.max(0, start), inclusiveEnd(end));
-        int found = source.indexOf(new String(name), Math.max(0, start));
-        if (found < 0 || found > end) return new SourceRange(Math.max(0, start), Math.min(source.length(), start + name.length));
+        if (name == null || name.length == 0) {
+            return new SourceRange(Math.max(0, start), inclusiveEnd(end));
+        }
+        int from = Math.max(0, start);
+        int to = Math.min(source.length(), Math.max(from, end + 1));
+        int found = indexOfChars(source, name, from, to);
+        if (found < 0) {
+            return new SourceRange(from, Math.min(source.length(), from + name.length));
+        }
         return new SourceRange(found, found + name.length);
+    }
+
+    /** Find {@code name} in {@code source} within [{@code from}, {@code to}). */
+    private static int indexOfChars(String source, char[] name, int from, int to) {
+        int limit = to - name.length;
+        outer:
+        for (int i = from; i <= limit; i++) {
+            for (int j = 0; j < name.length; j++) {
+                if (source.charAt(i + j) != name[j]) continue outer;
+            }
+            return i;
+        }
+        return -1;
     }
 
     private SourceRange namePos(long packed) {
@@ -1254,9 +1312,9 @@ final class EcjAstLowerer {
         };
     }
 
-    private TypeNode primitive(char[] token, SourceRange range) {
+    private TypeNode primitive(char[] token, JType resolved, SourceRange range) {
         String n = str(token);
-        if ("void".equals(n)) return new VoidTypeNode(range);
+        if ("void".equals(n)) return new VoidTypeNode(resolved, range);
         JType.Primitive kind = switch (n) {
             case "boolean" -> JType.Primitive.BOOLEAN;
             case "byte" -> JType.Primitive.BYTE;
@@ -1267,7 +1325,7 @@ final class EcjAstLowerer {
             case "double" -> JType.Primitive.DOUBLE;
             default -> JType.Primitive.INT;
         };
-        return new PrimitiveTypeNode(kind, range);
+        return new PrimitiveTypeNode(kind, resolved, range);
     }
 
     private BinaryExpr.Op binaryOp(int op) {
@@ -1317,17 +1375,17 @@ final class EcjAstLowerer {
 
     private AssignExpr.Op assignOp(int op) {
         return switch (op) {
-            case OperatorIds.PLUS -> AssignExpr.Op.PLUS;
-            case OperatorIds.MINUS -> AssignExpr.Op.MINUS;
-            case OperatorIds.MULTIPLY -> AssignExpr.Op.MULTIPLY;
-            case OperatorIds.DIVIDE -> AssignExpr.Op.DIVIDE;
-            case OperatorIds.REMAINDER -> AssignExpr.Op.REMAINDER;
-            case OperatorIds.AND -> AssignExpr.Op.AND;
-            case OperatorIds.OR -> AssignExpr.Op.OR;
-            case OperatorIds.XOR -> AssignExpr.Op.XOR;
-            case OperatorIds.LEFT_SHIFT -> AssignExpr.Op.LEFT_SHIFT;
-            case OperatorIds.RIGHT_SHIFT -> AssignExpr.Op.RIGHT_SHIFT;
-            case OperatorIds.UNSIGNED_RIGHT_SHIFT -> AssignExpr.Op.UNSIGNED_RIGHT_SHIFT;
+            case OperatorIds.PLUS -> AssignExpr.Op.PLUS_ASSIGN;
+            case OperatorIds.MINUS -> AssignExpr.Op.MINUS_ASSIGN;
+            case OperatorIds.MULTIPLY -> AssignExpr.Op.MULTIPLY_ASSIGN;
+            case OperatorIds.DIVIDE -> AssignExpr.Op.DIVIDE_ASSIGN;
+            case OperatorIds.REMAINDER -> AssignExpr.Op.REMAINDER_ASSIGN;
+            case OperatorIds.AND -> AssignExpr.Op.AND_ASSIGN;
+            case OperatorIds.OR -> AssignExpr.Op.OR_ASSIGN;
+            case OperatorIds.XOR -> AssignExpr.Op.XOR_ASSIGN;
+            case OperatorIds.LEFT_SHIFT -> AssignExpr.Op.LEFT_SHIFT_ASSIGN;
+            case OperatorIds.RIGHT_SHIFT -> AssignExpr.Op.RIGHT_SHIFT_ASSIGN;
+            case OperatorIds.UNSIGNED_RIGHT_SHIFT -> AssignExpr.Op.UNSIGNED_RIGHT_SHIFT_ASSIGN;
             default -> AssignExpr.Op.ASSIGN;
         };
     }

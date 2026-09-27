@@ -13,11 +13,12 @@ public final class Select extends Expression {
     private final Expression receiver;
     private final Identifier name;
 
-    public Select(Expression receiver, Identifier name, SourceRange range) {
-        super(range);
+    public Select(Expression receiver, Identifier name, JType type, SourceRange range) {
+        super(range, coalesce(type, name != null && name.symbol() != null ? name.symbol().type() : null));
         this.receiver = receiver;
         this.name = name;
-        if (name != null && name.symbol() != null) setType(name.symbol().type());
+        if (receiver != null) receiver.setParent(this);
+        if (name != null) name.setParent(this);
     }
 
     public Expression receiver() {
@@ -27,10 +28,13 @@ public final class Select extends Expression {
     public Identifier name() {
         return name;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(receiver, name);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, receiver, offset);
+        deepest = deeper(deepest, name, offset);
+        return deepest;
     }
 
     @Override

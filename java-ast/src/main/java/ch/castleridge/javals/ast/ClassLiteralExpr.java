@@ -10,21 +10,23 @@ import java.util.List;
 
 public final class ClassLiteralExpr extends Expression {
 
-    private final TypeNode type;
+    private final TypeNode typeNode;
 
-    public ClassLiteralExpr(TypeNode type, SourceRange range) {
-        super(range);
-        this.type = type;
-        setType(JType.Declared.of("java/lang/Class"));
+    public ClassLiteralExpr(TypeNode typeNode, JType type, SourceRange range) {
+        super(range, coalesce(type, JType.Declared.of("java/lang/Class")));
+        this.typeNode = typeNode;
+        if (typeNode != null) typeNode.setParent(this);
     }
 
     public TypeNode typeNode() {
-        return type;
+        return typeNode;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(type);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, typeNode, offset);
+        return deepest;
     }
 
     @Override

@@ -17,11 +17,22 @@ public final class TypePattern extends Pattern {
         this.type = type;
         this.name = name;
         this.symbol = symbol;
+        if (type != null) type.setParent(this);
+        if (name != null) name.setParent(this);
     }
     public TypeNode type() { return type; }
     public Identifier name() { return name; }
     public LocalSymbol symbol() { return symbol; }
     public boolean unnamed() { return name == null || "_".equals(name.name()); }
-    @Override public List<? extends Node> children() { return kids(type, name); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitTypePattern(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, type, offset);
+        deepest = deeper(deepest, name, offset);
+        return deepest;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitTypePattern(this); }
 }

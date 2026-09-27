@@ -10,27 +10,31 @@ import java.util.List;
 
 public final class CastExpr extends Expression {
 
-    private final TypeNode type;
+    private final TypeNode typeNode;
     private final Expression expression;
 
-    public CastExpr(TypeNode type, Expression expression, SourceRange range) {
-        super(range);
-        this.type = type;
+    public CastExpr(TypeNode typeNode, Expression expression, JType type, SourceRange range) {
+        super(range, coalesce(type, typeNode != null ? typeNode.resolvedType() : null));
+        this.typeNode = typeNode;
         this.expression = expression;
-        if (type != null) setType(type.resolvedType());
+        if (typeNode != null) typeNode.setParent(this);
+        if (expression != null) expression.setParent(this);
     }
 
     public TypeNode typeNode() {
-        return type;
+        return typeNode;
     }
 
     public Expression expression() {
         return expression;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(type, expression);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, typeNode, offset);
+        deepest = deeper(deepest, expression, offset);
+        return deepest;
     }
 
     @Override

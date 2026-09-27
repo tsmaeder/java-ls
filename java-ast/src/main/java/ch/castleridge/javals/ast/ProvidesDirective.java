@@ -17,6 +17,8 @@ public final class ProvidesDirective extends ModuleDirective {
         super(range);
         this.service = service;
         this.implementations = implementations == null ? List.of() : List.copyOf(implementations);
+        if (service != null) service.setParent(this);
+        for (Node __c : this.implementations) __c.setParent(this);
     }
 
     public TypeName service() {
@@ -26,10 +28,13 @@ public final class ProvidesDirective extends ModuleDirective {
     public List<TypeName> implementations() {
         return implementations;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(service, implementations);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, service, offset);
+        for (Node __c : implementations) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

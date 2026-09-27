@@ -13,8 +13,17 @@ public final class BreakStmt extends Statement {
     public BreakStmt(Identifier label, SourceRange range) {
         super(range);
         this.label = label;
+        if (label != null) label.setParent(this);
     }
     public Identifier label() { return label; }
-    @Override public List<? extends Node> children() { return kids(label); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitBreakStmt(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, label, offset);
+        return deepest;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitBreakStmt(this); }
 }

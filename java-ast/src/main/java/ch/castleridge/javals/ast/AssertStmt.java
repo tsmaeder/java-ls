@@ -15,9 +15,20 @@ public final class AssertStmt extends Statement {
         super(range);
         this.condition = condition;
         this.message = message;
+        if (condition != null) condition.setParent(this);
+        if (message != null) message.setParent(this);
     }
     public Expression condition() { return condition; }
     public Expression message() { return message; }
-    @Override public List<? extends Node> children() { return kids(condition, message); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitAssertStmt(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, condition, offset);
+        deepest = deeper(deepest, message, offset);
+        return deepest;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitAssertStmt(this); }
 }

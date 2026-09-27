@@ -160,17 +160,13 @@ public final class AstAnalysisSession implements AnalysisSession {
         cu.accept(new AstVisitor() {
             @Override
             public void visitIdentifier(Identifier n) {
-                if (n.symbol() == null) {
-                    visitChildren(n);
-                    return;
-                }
+                if (n.symbol() == null) return;
                 boolean match = exact != null
                         ? n.symbol() == exact
                         : key != null && key.matches(n.symbol().key());
                 if (match && n.range().isPresent()) {
                     found.add(AstPositions.location(cu.uri(), cu.source(), n.range()));
                 }
-                visitChildren(n);
             }
         });
         return List.copyOf(found);
@@ -184,7 +180,6 @@ public final class AstAnalysisSession implements AnalysisSession {
                 if (found[0] == null && n.symbol() == symbol && AstSymbols.isDeclarationName(n)) {
                     found[0] = n;
                 }
-                visitChildren(n);
             }
         });
         return found[0];

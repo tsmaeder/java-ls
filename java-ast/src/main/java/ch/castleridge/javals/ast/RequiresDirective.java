@@ -19,6 +19,7 @@ public final class RequiresDirective extends ModuleDirective {
         this.transitive = transitive;
         this.staticPhase = staticPhase;
         this.moduleName = moduleName == null ? List.of() : List.copyOf(moduleName);
+        for (Node __c : this.moduleName) __c.setParent(this);
     }
 
     public boolean transitive() {
@@ -32,10 +33,12 @@ public final class RequiresDirective extends ModuleDirective {
     public List<Identifier> moduleName() {
         return moduleName;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(moduleName);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : moduleName) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

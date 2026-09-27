@@ -10,6 +10,11 @@ import java.util.List;
 
 public final class EmptyStmt extends Statement {
     public EmptyStmt(SourceRange range) { super(range); }
-    @Override public List<? extends Node> children() { return List.of(); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitEmptyStmt(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        return covers(offset) ? this : null;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitEmptyStmt(this); }
 }

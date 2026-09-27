@@ -19,12 +19,16 @@ public final class LambdaExpr extends Expression {
                       boolean implicitParameters,
                       Expression expressionBody,
                       Block blockBody,
+                      JType type,
                       SourceRange range) {
-        super(range);
+        super(range, type);
         this.parameters = parameters == null ? List.of() : List.copyOf(parameters);
         this.implicitParameters = implicitParameters;
         this.expressionBody = expressionBody;
         this.blockBody = blockBody;
+        for (Node __c : this.parameters) __c.setParent(this);
+        if (expressionBody != null) expressionBody.setParent(this);
+        if (blockBody != null) blockBody.setParent(this);
     }
 
     public List<ParamDecl> parameters() {
@@ -42,10 +46,14 @@ public final class LambdaExpr extends Expression {
     public Block blockBody() {
         return blockBody;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(parameters, expressionBody, blockBody);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : parameters) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, expressionBody, offset);
+        deepest = deeper(deepest, blockBody, offset);
+        return deepest;
     }
 
     @Override

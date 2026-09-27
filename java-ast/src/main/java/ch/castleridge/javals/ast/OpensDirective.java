@@ -17,6 +17,10 @@ public final class OpensDirective extends ModuleDirective {
         super(range);
         this.packageName = packageName == null ? List.of() : List.copyOf(packageName);
         this.targets = targets == null ? List.of() : List.copyOf(targets);
+        for (Identifier name : this.packageName) name.setParent(this);
+        for (List<Identifier> target : this.targets) {
+            for (Identifier name : target) name.setParent(this);
+        }
     }
 
     public List<Identifier> packageName() {
@@ -28,10 +32,14 @@ public final class OpensDirective extends ModuleDirective {
     }
 
     @Override
-    public List<? extends Node> children() {
-        List<Node> out = new java.util.ArrayList<>(packageName);
-        for (List<Identifier> target : targets) out.addAll(target);
-        return List.copyOf(out);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Identifier name : packageName) deepest = deeper(deepest, name, offset);
+        for (List<Identifier> target : targets) {
+            for (Identifier name : target) deepest = deeper(deepest, name, offset);
+        }
+        return deepest;
     }
 
     @Override

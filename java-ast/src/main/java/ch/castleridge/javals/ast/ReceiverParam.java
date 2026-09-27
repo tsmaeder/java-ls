@@ -19,6 +19,9 @@ public final class ReceiverParam extends Node {
         this.annotations = annotations == null ? List.of() : List.copyOf(annotations);
         this.type = type;
         this.name = name;
+        for (Node __c : this.annotations) __c.setParent(this);
+        if (type != null) type.setParent(this);
+        if (name != null) name.setParent(this);
     }
 
     public List<Annotation> annotations() {
@@ -32,10 +35,14 @@ public final class ReceiverParam extends Node {
     public Identifier name() {
         return name;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(annotations, type, name);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : annotations) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, type, offset);
+        deepest = deeper(deepest, name, offset);
+        return deepest;
     }
 
     @Override

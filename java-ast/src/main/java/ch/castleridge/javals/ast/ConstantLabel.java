@@ -13,8 +13,17 @@ public final class ConstantLabel extends CaseLabel {
     public ConstantLabel(Expression value, SourceRange range) {
         super(range);
         this.value = value;
+        if (value != null) value.setParent(this);
     }
     public Expression value() { return value; }
-    @Override public List<? extends Node> children() { return kids(value); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitConstantLabel(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, value, offset);
+        return deepest;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitConstantLabel(this); }
 }

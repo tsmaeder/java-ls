@@ -28,6 +28,10 @@ public final class EnumConstantDecl extends Declaration {
         this.arguments = arguments == null ? List.of() : List.copyOf(arguments);
         this.body = body;
         this.symbol = symbol;
+        for (Node __c : this.annotations) __c.setParent(this);
+        if (name != null) name.setParent(this);
+        for (Node __c : this.arguments) __c.setParent(this);
+        if (body != null) body.setParent(this);
     }
 
     public List<Annotation> annotations() {
@@ -49,10 +53,15 @@ public final class EnumConstantDecl extends Declaration {
     public EnumConstantSymbol symbol() {
         return symbol;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(annotations, name, arguments, body);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : annotations) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, name, offset);
+        for (Node __c : arguments) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, body, offset);
+        return deepest;
     }
 
     @Override

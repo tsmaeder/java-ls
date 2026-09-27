@@ -11,18 +11,20 @@ public abstract sealed class TypeNode extends Node
                 WildcardTypeNode, UnionTypeNode, IntersectionTypeNode, VarTypeNode,
                 AnnotatedTypeNode, ErroneousType {
 
-    private JType resolved = JType.ERROR;
+    private final JType resolved;
 
-    protected TypeNode(SourceRange range) {
+    protected TypeNode(SourceRange range, JType resolved) {
         super(range);
+        this.resolved = resolved == null ? JType.ERROR : resolved;
     }
 
     public final JType resolvedType() {
         return resolved;
     }
 
-    public final void setResolvedType(JType type) {
-        if (frozen()) throw new IllegalStateException("frozen");
-        this.resolved = type == null ? JType.ERROR : type;
+    /** Prefer {@code resolved} when non-null and not ERROR; otherwise {@code fallback}. */
+    protected static JType coalesce(JType resolved, JType fallback) {
+        if (resolved != null && resolved != JType.ERROR) return resolved;
+        return fallback == null ? JType.ERROR : fallback;
     }
 }

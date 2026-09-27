@@ -12,19 +12,17 @@ public final class PrimitiveTypeNode extends TypeNode {
 
     private final JType.Primitive kind;
 
-    public PrimitiveTypeNode(JType.Primitive kind, SourceRange range) {
-        super(range);
+    public PrimitiveTypeNode(JType.Primitive kind, JType resolved, SourceRange range) {
+        super(range, coalesce(resolved, kind == null ? JType.Primitive.INT : kind));
         this.kind = kind == null ? JType.Primitive.INT : kind;
-        setResolvedType(this.kind);
     }
 
     public JType.Primitive kind() {
         return kind;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return List.of();
+    public Node nodeAt(int offset) {
+        return covers(offset) ? this : null;
     }
 
     @Override

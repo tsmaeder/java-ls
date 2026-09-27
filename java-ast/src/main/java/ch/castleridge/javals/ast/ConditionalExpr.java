@@ -14,12 +14,18 @@ public final class ConditionalExpr extends Expression {
     private final Expression thenExpr;
     private final Expression elseExpr;
 
-    public ConditionalExpr(Expression condition, Expression thenExpr, Expression elseExpr, SourceRange range) {
-        super(range);
+    public ConditionalExpr(Expression condition,
+                           Expression thenExpr,
+                           Expression elseExpr,
+                           JType type,
+                           SourceRange range) {
+        super(range, coalesce(type, thenExpr != null ? thenExpr.type() : null));
         this.condition = condition;
         this.thenExpr = thenExpr;
         this.elseExpr = elseExpr;
-        if (thenExpr != null) setType(thenExpr.type());
+        if (condition != null) condition.setParent(this);
+        if (thenExpr != null) thenExpr.setParent(this);
+        if (elseExpr != null) elseExpr.setParent(this);
     }
 
     public Expression condition() {
@@ -33,10 +39,14 @@ public final class ConditionalExpr extends Expression {
     public Expression elseExpr() {
         return elseExpr;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(condition, thenExpr, elseExpr);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, condition, offset);
+        deepest = deeper(deepest, thenExpr, offset);
+        deepest = deeper(deepest, elseExpr, offset);
+        return deepest;
     }
 
     @Override

@@ -29,8 +29,10 @@ public final class CompilationUnit extends Node {
         this.imports = imports == null ? List.of() : List.copyOf(imports);
         this.types = types == null ? List.of() : List.copyOf(types);
         this.module = module;
-        attach(this, null);
-        freeze();
+        if (packageDecl != null) packageDecl.setParent(this);
+        for (Node __c : this.imports) __c.setParent(this);
+        for (Node __c : this.types) __c.setParent(this);
+        if (module != null) module.setParent(this);
     }
 
     public SourceFile source() {
@@ -66,8 +68,14 @@ public final class CompilationUnit extends Node {
     }
 
     @Override
-    public List<? extends Node> children() {
-        return kids(packageDecl, imports, types, module);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, packageDecl, offset);
+        for (ImportDecl imp : imports) deepest = deeper(deepest, imp, offset);
+        for (TypeDecl type : types) deepest = deeper(deepest, type, offset);
+        deepest = deeper(deepest, module, offset);
+        return deepest;
     }
 
     @Override

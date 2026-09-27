@@ -17,10 +17,23 @@ public final class ForEachStmt extends Statement {
         this.variable = variable;
         this.iterable = iterable;
         this.body = body;
+        if (variable != null) variable.setParent(this);
+        if (iterable != null) iterable.setParent(this);
+        if (body != null) body.setParent(this);
     }
     public LocalDeclStmt variable() { return variable; }
     public Expression iterable() { return iterable; }
     public Statement body() { return body; }
-    @Override public List<? extends Node> children() { return kids(variable, iterable, body); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitForEachStmt(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, variable, offset);
+        deepest = deeper(deepest, iterable, offset);
+        deepest = deeper(deepest, body, offset);
+        return deepest;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitForEachStmt(this); }
 }

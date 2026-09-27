@@ -12,19 +12,21 @@ public final class ParenthesizedExpr extends Expression {
 
     private final Expression expression;
 
-    public ParenthesizedExpr(Expression expression, SourceRange range) {
-        super(range);
+    public ParenthesizedExpr(Expression expression, JType type, SourceRange range) {
+        super(range, coalesce(type, expression != null ? expression.type() : null));
         this.expression = expression;
-        if (expression != null) setType(expression.type());
+        if (expression != null) expression.setParent(this);
     }
 
     public Expression expression() {
         return expression;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(expression);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, expression, offset);
+        return deepest;
     }
 
     @Override

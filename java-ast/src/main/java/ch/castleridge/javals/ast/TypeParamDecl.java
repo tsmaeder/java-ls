@@ -25,6 +25,9 @@ public final class TypeParamDecl extends Node {
         this.name = name;
         this.bounds = bounds == null ? List.of() : List.copyOf(bounds);
         this.symbol = symbol;
+        for (Node __c : this.annotations) __c.setParent(this);
+        if (name != null) name.setParent(this);
+        for (Node __c : this.bounds) __c.setParent(this);
     }
 
     public List<Annotation> annotations() {
@@ -42,10 +45,14 @@ public final class TypeParamDecl extends Node {
     public TypeVarSymbol symbol() {
         return symbol;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(annotations, name, bounds);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : annotations) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, name, offset);
+        for (Node __c : bounds) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

@@ -15,15 +15,18 @@ public final class UsesDirective extends ModuleDirective {
     public UsesDirective(TypeName service, SourceRange range) {
         super(range);
         this.service = service;
+        if (service != null) service.setParent(this);
     }
 
     public TypeName service() {
         return service;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(service);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, service, offset);
+        return deepest;
     }
 
     @Override

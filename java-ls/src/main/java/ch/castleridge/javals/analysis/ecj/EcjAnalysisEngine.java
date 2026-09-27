@@ -65,10 +65,8 @@ final class EcjAnalysisEngine {
         ICompilerRequestor requestor = result -> collectProblems(result, problems);
         CompilerOptions options = new CompilerOptions();
         options.generateClassFiles = false;
-        options.preserveAllLocalVariables = true;
         options.performMethodsFullRecovery = true;
         options.performStatementsRecovery = true;
-        options.produceReferenceInfo = true;
         // ECJ's batch default stops recording after 100 problems per unit. An
         // editor wants every squiggle in the file it has open.
         options.maxProblemsPerUnit = Integer.MAX_VALUE;
@@ -219,6 +217,40 @@ final class EcjAnalysisEngine {
                     options,
                     requestor,
                     new DefaultProblemFactory(Locale.ROOT));
+        }
+
+        /**
+         * Same pipeline as {@link Compiler#process} through flow analysis, but
+         * omits {@code generateCode()} and dependency-info storage. Analysis only
+         * needs bindings + problems; class bytes are discarded anyway.
+         */
+        @Override
+        public void process(CompilationUnitDeclaration unit, int i) {
+            this.lookupEnvironment.unitBeingCompleted = unit;
+            long parseStart = System.currentTimeMillis();
+
+            this.parser.getMethodBodies(unit);
+
+            long resolveStart = System.currentTimeMillis();
+            this.stats.parseTime += resolveStart - parseStart;
+
+            if (unit.scope != null) unit.scope.faultInTypes();
+            if (unit.scope != null) unit.scope.verifyMethods(this.lookupEnvironment.methodVerifier());
+            unit.resolve();
+
+            long analyzeStart = System.currentTimeMillis();
+            this.stats.resolveTime += analyzeStart - resolveStart;
+
+            if (!this.options.ignoreMethodBodies) unit.analyseCode();
+
+            long generateStart = System.currentTimeMillis();
+            this.stats.analyzeTime += generateStart - analyzeStart;
+
+            unit.finalizeProblems();
+
+            this.stats.generateTime += System.currentTimeMillis() - generateStart;
+            unit.compilationResult.totalUnitsKnown = this.totalUnits;
+            this.lookupEnvironment.unitBeingCompleted = null;
         }
 
         @Override

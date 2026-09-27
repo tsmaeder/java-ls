@@ -19,11 +19,26 @@ public final class TryStmt extends Statement {
         this.body = body;
         this.catches = catches == null ? List.of() : List.copyOf(catches);
         this.finallyBlock = finallyBlock;
+        for (Node __c : this.resources) __c.setParent(this);
+        if (body != null) body.setParent(this);
+        for (Node __c : this.catches) __c.setParent(this);
+        if (finallyBlock != null) finallyBlock.setParent(this);
     }
     public List<Node> resources() { return resources; }
     public Block body() { return body; }
     public List<CatchClause> catches() { return catches; }
     public Block finallyBlock() { return finallyBlock; }
-    @Override public List<? extends Node> children() { return kids(resources, body, catches, finallyBlock); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitTryStmt(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : resources) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, body, offset);
+        for (Node __c : catches) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, finallyBlock, offset);
+        return deepest;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitTryStmt(this); }
 }

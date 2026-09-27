@@ -12,19 +12,21 @@ public final class ErroneousExpr extends Expression {
 
     private final List<Node> fragments;
 
-    public ErroneousExpr(List<Node> fragments, SourceRange range) {
-        super(range);
+    public ErroneousExpr(List<Node> fragments, JType type, SourceRange range) {
+        super(range, coalesce(type, JType.ERROR));
         this.fragments = fragments == null ? List.of() : List.copyOf(fragments);
-        setType(JType.ERROR);
+        for (Node __c : this.fragments) __c.setParent(this);
     }
 
     public List<Node> fragments() {
         return fragments;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(fragments);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : fragments) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

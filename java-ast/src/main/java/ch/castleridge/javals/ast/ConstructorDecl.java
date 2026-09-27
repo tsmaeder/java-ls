@@ -41,6 +41,13 @@ public final class ConstructorDecl extends Declaration {
         this.thrown = thrown == null ? List.of() : List.copyOf(thrown);
         this.body = body;
         this.symbol = symbol;
+        for (Node __c : this.annotations) __c.setParent(this);
+        for (Node __c : this.typeParams) __c.setParent(this);
+        if (name != null) name.setParent(this);
+        if (receiver != null) receiver.setParent(this);
+        for (Node __c : this.parameters) __c.setParent(this);
+        for (Node __c : this.thrown) __c.setParent(this);
+        if (body != null) body.setParent(this);
     }
 
     public Set<Modifier> modifiers() {
@@ -78,10 +85,18 @@ public final class ConstructorDecl extends Declaration {
     public MethodSymbol symbol() {
         return symbol;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(annotations, typeParams, name, receiver, parameters, thrown, body);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : annotations) deepest = deeper(deepest, __c, offset);
+        for (Node __c : typeParams) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, name, offset);
+        deepest = deeper(deepest, receiver, offset);
+        for (Node __c : parameters) deepest = deeper(deepest, __c, offset);
+        for (Node __c : thrown) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, body, offset);
+        return deepest;
     }
 
     @Override

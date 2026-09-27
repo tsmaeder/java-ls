@@ -12,18 +12,20 @@ public abstract sealed class Expression extends Node
                 ArrayAccessExpr, LambdaExpr, MemberRefExpr, SwitchExpr, ClassLiteralExpr,
                 ParenthesizedExpr, ArrayInitExpr, ErroneousExpr, Annotation {
 
-    private JType type = JType.ERROR;
+    private final JType type;
 
-    protected Expression(SourceRange range) {
+    protected Expression(SourceRange range, JType type) {
         super(range);
+        this.type = type == null ? JType.ERROR : type;
     }
 
     public final JType type() {
         return type;
     }
 
-    public final void setType(JType type) {
-        if (frozen()) throw new IllegalStateException("frozen");
-        this.type = type == null ? JType.ERROR : type;
+    /** Prefer {@code type} when non-null and not ERROR; otherwise {@code fallback}. */
+    protected static JType coalesce(JType type, JType fallback) {
+        if (type != null && type != JType.ERROR) return type;
+        return fallback == null ? JType.ERROR : fallback;
     }
 }

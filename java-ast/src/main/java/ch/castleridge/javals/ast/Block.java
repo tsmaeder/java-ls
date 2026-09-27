@@ -17,6 +17,7 @@ public final class Block extends Statement {
         super(range);
         this.staticBlock = staticBlock;
         this.statements = statements == null ? List.of() : List.copyOf(statements);
+        for (Node __c : this.statements) __c.setParent(this);
     }
 
     public Block(List<Statement> statements, SourceRange range) {
@@ -30,10 +31,12 @@ public final class Block extends Statement {
     public List<Statement> statements() {
         return statements;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(statements);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : statements) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

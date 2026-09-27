@@ -49,6 +49,14 @@ public final class TypeDecl extends Declaration {
         this.recordComponents = recordComponents == null ? List.of() : List.copyOf(recordComponents);
         this.members = members == null ? List.of() : List.copyOf(members);
         this.symbol = symbol;
+        for (Node __c : this.annotations) __c.setParent(this);
+        if (name != null) name.setParent(this);
+        for (Node __c : this.typeParams) __c.setParent(this);
+        if (superclass != null) superclass.setParent(this);
+        for (Node __c : this.interfaces) __c.setParent(this);
+        for (Node __c : this.permits) __c.setParent(this);
+        for (Node __c : this.recordComponents) __c.setParent(this);
+        for (Node __c : this.members) __c.setParent(this);
     }
 
     public TypeDeclKind kind() {
@@ -94,10 +102,19 @@ public final class TypeDecl extends Declaration {
     public TypeSymbol symbol() {
         return symbol;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(annotations, name, typeParams, superclass, interfaces, permits, recordComponents, members);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : annotations) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, name, offset);
+        for (Node __c : typeParams) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, superclass, offset);
+        for (Node __c : interfaces) deepest = deeper(deepest, __c, offset);
+        for (Node __c : permits) deepest = deeper(deepest, __c, offset);
+        for (Node __c : recordComponents) deepest = deeper(deepest, __c, offset);
+        for (Node __c : members) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

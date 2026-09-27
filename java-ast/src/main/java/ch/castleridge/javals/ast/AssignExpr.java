@@ -11,9 +11,10 @@ import java.util.List;
 public final class AssignExpr extends Expression {
 
     public enum Op {
-        ASSIGN("="), PLUS("+="), MINUS("-="), MULTIPLY("*="), DIVIDE("/="), REMAINDER("%="),
-        AND("&="), OR("|="), XOR("^="),
-        LEFT_SHIFT("<<="), RIGHT_SHIFT(">>="), UNSIGNED_RIGHT_SHIFT(">>>=");
+        ASSIGN("="),
+        PLUS_ASSIGN("+="), MINUS_ASSIGN("-="), MULTIPLY_ASSIGN("*="), DIVIDE_ASSIGN("/="),
+        REMAINDER_ASSIGN("%="), AND_ASSIGN("&="), OR_ASSIGN("|="), XOR_ASSIGN("^="),
+        LEFT_SHIFT_ASSIGN("<<="), RIGHT_SHIFT_ASSIGN(">>="), UNSIGNED_RIGHT_SHIFT_ASSIGN(">>>=");
 
         private final String image;
 
@@ -30,12 +31,13 @@ public final class AssignExpr extends Expression {
     private final Expression target;
     private final Expression value;
 
-    public AssignExpr(Op op, Expression target, Expression value, SourceRange range) {
-        super(range);
-        this.op = op == null ? Op.ASSIGN : op;
+    public AssignExpr(Op op, Expression target, Expression value, JType type, SourceRange range) {
+        super(range, coalesce(type, target != null ? target.type() : null));
+        this.op = op;
         this.target = target;
         this.value = value;
-        if (target != null) setType(target.type());
+        if (target != null) target.setParent(this);
+        if (value != null) value.setParent(this);
     }
 
     public Op op() {
@@ -49,10 +51,13 @@ public final class AssignExpr extends Expression {
     public Expression value() {
         return value;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(target, value);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, target, offset);
+        deepest = deeper(deepest, value, offset);
+        return deepest;
     }
 
     @Override

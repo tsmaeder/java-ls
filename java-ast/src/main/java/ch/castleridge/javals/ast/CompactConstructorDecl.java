@@ -29,6 +29,9 @@ public final class CompactConstructorDecl extends Declaration {
         this.name = name;
         this.body = body;
         this.symbol = symbol;
+        for (Node __c : this.annotations) __c.setParent(this);
+        if (name != null) name.setParent(this);
+        if (body != null) body.setParent(this);
     }
 
     public Set<Modifier> modifiers() {
@@ -50,10 +53,14 @@ public final class CompactConstructorDecl extends Declaration {
     public MethodSymbol symbol() {
         return symbol;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(annotations, name, body);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : annotations) deepest = deeper(deepest, __c, offset);
+        deepest = deeper(deepest, name, offset);
+        deepest = deeper(deepest, body, offset);
+        return deepest;
     }
 
     @Override

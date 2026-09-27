@@ -28,6 +28,9 @@ public final class ModuleDecl extends Node {
         this.names = names == null ? List.of() : List.copyOf(names);
         this.directives = directives == null ? List.of() : List.copyOf(directives);
         this.symbol = symbol;
+        for (Node __c : this.annotations) __c.setParent(this);
+        for (Node __c : this.names) __c.setParent(this);
+        for (Node __c : this.directives) __c.setParent(this);
     }
 
     public boolean open() {
@@ -49,10 +52,14 @@ public final class ModuleDecl extends Node {
     public ModuleSymbol symbol() {
         return symbol;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(annotations, names, directives);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : annotations) deepest = deeper(deepest, __c, offset);
+        for (Node __c : names) deepest = deeper(deepest, __c, offset);
+        for (Node __c : directives) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

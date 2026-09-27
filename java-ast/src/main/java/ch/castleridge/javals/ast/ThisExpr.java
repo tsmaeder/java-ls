@@ -12,18 +12,21 @@ public final class ThisExpr extends Expression {
 
     private final TypeNode qualifier;
 
-    public ThisExpr(TypeNode qualifier, SourceRange range) {
-        super(range);
+    public ThisExpr(TypeNode qualifier, JType type, SourceRange range) {
+        super(range, type);
         this.qualifier = qualifier;
+        if (qualifier != null) qualifier.setParent(this);
     }
 
     public TypeNode qualifier() {
         return qualifier;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(qualifier);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, qualifier, offset);
+        return deepest;
     }
 
     @Override

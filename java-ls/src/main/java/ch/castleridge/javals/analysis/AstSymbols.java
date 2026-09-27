@@ -36,7 +36,6 @@ final class AstSymbols {
                         best[0] = n;
                     }
                 }
-                visitChildren(n);
             }
         });
         return best[0];

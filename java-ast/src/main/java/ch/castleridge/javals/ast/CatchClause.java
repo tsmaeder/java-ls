@@ -15,9 +15,20 @@ public final class CatchClause extends Node {
         super(range);
         this.parameter = parameter;
         this.body = body;
+        if (parameter != null) parameter.setParent(this);
+        if (body != null) body.setParent(this);
     }
     public ParamDecl parameter() { return parameter; }
     public Block body() { return body; }
-    @Override public List<? extends Node> children() { return kids(parameter, body); }
-    @Override public void accept(AstVisitor visitor) { visitor.visitCatchClause(this); }
+    @Override
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, parameter, offset);
+        deepest = deeper(deepest, body, offset);
+        return deepest;
+    }
+
+    @Override
+    public void accept(AstVisitor visitor) { visitor.visitCatchClause(this); }
 }

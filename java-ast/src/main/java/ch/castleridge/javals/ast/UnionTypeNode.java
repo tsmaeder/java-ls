@@ -13,21 +13,28 @@ public final class UnionTypeNode extends TypeNode {
 
     private final List<TypeNode> alternatives;
 
-    public UnionTypeNode(List<TypeNode> alternatives, SourceRange range) {
-        super(range);
+    public UnionTypeNode(List<TypeNode> alternatives, JType resolved, SourceRange range) {
+        super(range, coalesce(resolved, defaultFrom(alternatives)));
         this.alternatives = alternatives == null ? List.of() : List.copyOf(alternatives);
+        for (Node __c : this.alternatives) __c.setParent(this);
+    }
+
+    private static JType defaultFrom(List<TypeNode> alternatives) {
+        List<TypeNode> alts = alternatives == null ? List.of() : alternatives;
         List<JType> types = new ArrayList<>();
-        for (TypeNode alt : this.alternatives) types.add(alt.resolvedType());
-        setResolvedType(new JType.Union(types));
+        for (TypeNode alt : alts) types.add(alt.resolvedType());
+        return new JType.Union(types);
     }
 
     public List<TypeNode> alternatives() {
         return alternatives;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(alternatives);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        for (Node __c : alternatives) deepest = deeper(deepest, __c, offset);
+        return deepest;
     }
 
     @Override

@@ -33,10 +33,11 @@ public final class UnaryExpr extends Expression {
     private final Op op;
     private final Expression expression;
 
-    public UnaryExpr(Op op, Expression expression, SourceRange range) {
-        super(range);
+    public UnaryExpr(Op op, Expression expression, JType type, SourceRange range) {
+        super(range, type);
         this.op = op;
         this.expression = expression;
+        if (expression != null) expression.setParent(this);
     }
 
     public Op op() {
@@ -46,10 +47,12 @@ public final class UnaryExpr extends Expression {
     public Expression expression() {
         return expression;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(expression);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, expression, offset);
+        return deepest;
     }
 
     @Override

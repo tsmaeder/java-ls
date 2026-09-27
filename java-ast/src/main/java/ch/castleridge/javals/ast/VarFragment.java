@@ -21,6 +21,8 @@ public final class VarFragment extends Node {
         this.extraDimensions = extraDimensions;
         this.initializer = initializer;
         this.symbol = symbol;
+        if (name != null) name.setParent(this);
+        if (initializer != null) initializer.setParent(this);
     }
 
     public Identifier name() {
@@ -38,10 +40,13 @@ public final class VarFragment extends Node {
     public Symbol symbol() {
         return symbol;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(name, initializer);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, name, offset);
+        deepest = deeper(deepest, initializer, offset);
+        return deepest;
     }
 
     @Override

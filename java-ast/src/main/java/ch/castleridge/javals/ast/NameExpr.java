@@ -12,19 +12,21 @@ public final class NameExpr extends Expression {
 
     private final Identifier name;
 
-    public NameExpr(Identifier name, SourceRange range) {
-        super(range);
+    public NameExpr(Identifier name, JType type, SourceRange range) {
+        super(range, coalesce(type, name != null && name.symbol() != null ? name.symbol().type() : null));
         this.name = name;
-        if (name != null && name.symbol() != null) setType(name.symbol().type());
+        if (name != null) name.setParent(this);
     }
 
     public Identifier name() {
         return name;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(name);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, name, offset);
+        return deepest;
     }
 
     @Override

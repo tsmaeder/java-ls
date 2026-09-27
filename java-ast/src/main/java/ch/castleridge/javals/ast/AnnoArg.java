@@ -17,6 +17,8 @@ public final class AnnoArg extends Node {
         super(range);
         this.name = name;
         this.value = value;
+        if (name != null) name.setParent(this);
+        if (value != null) value.setParent(this);
     }
 
     public Identifier name() {
@@ -26,10 +28,13 @@ public final class AnnoArg extends Node {
     public Expression value() {
         return value;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(name, value);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, name, offset);
+        deepest = deeper(deepest, value, offset);
+        return deepest;
     }
 
     @Override

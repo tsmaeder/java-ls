@@ -17,6 +17,7 @@ public final class InitializerDecl extends Declaration {
         super(range);
         this.staticInit = staticInit;
         this.body = body;
+        if (body != null) body.setParent(this);
     }
 
     public boolean staticInit() {
@@ -26,10 +27,12 @@ public final class InitializerDecl extends Declaration {
     public Block body() {
         return body;
     }
-
     @Override
-    public List<? extends Node> children() {
-        return kids(body);
+    public Node nodeAt(int offset) {
+        if (!covers(offset)) return null;
+        Node deepest = this;
+        deepest = deeper(deepest, body, offset);
+        return deepest;
     }
 
     @Override
