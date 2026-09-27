@@ -432,7 +432,12 @@ public class JavaTextDocumentService implements TextDocumentService {
                         if (candidateUri == null) {
                             break;
                         }
+                        long ta0= System.nanoTime();
                         analyzeReferenceCandidate(candidateUri, key, locations, progress, combined);
+                        long elapsedNs = System.nanoTime() - ta0;
+                        if (elapsedNs > 1000000000) {
+                            server.logMessage(MessageType.Log, "analyzeReferenceCandidate took " + elapsedNs/1000000 + "ms for " + candidateUri);
+                        }
                     }
                 }, "references-analyze");
                 worker.setDaemon(true);

@@ -28,6 +28,7 @@ import org.eclipse.jdt.internal.compiler.batch.CompilationUnit;
 import org.eclipse.jdt.internal.compiler.env.ICompilationUnit;
 import org.eclipse.jdt.internal.compiler.impl.CompilerOptions;
 import org.eclipse.jdt.internal.compiler.problem.AbortCompilation;
+import org.eclipse.jdt.internal.compiler.problem.DefaultProblem;
 import org.eclipse.jdt.internal.compiler.problem.DefaultProblemFactory;
 import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.eclipse.lsp4j.Position;
@@ -136,10 +137,8 @@ final class EcjAnalysisEngine {
     private static List<PublishedDiagnostic> mapProblems(List<CategorizedProblem> problems, String source) {
         List<PublishedDiagnostic> out = new ArrayList<>(problems.size());
         for (CategorizedProblem problem : problems) {
-            int start = Math.max(0, problem.getSourceStart());
-            int end = Math.max(start, problem.getSourceEnd());
             out.add(new PublishedDiagnostic(
-                    new Range(positionAt(source, start), positionAt(source, Math.min(source.length(), end + 1))),
+                    problemRange(problem, source),
                     problem.getMessage(),
                     severity(problem),
                     "ecj",
@@ -148,11 +147,38 @@ final class EcjAnalysisEngine {
         return List.copyOf(out);
     }
 
+    /**
+     * {@link DefaultProblem} already stores a 1-based line and column for its
+     * start, taken from ECJ's line-separator table. Those become the diagnostic
+     * start directly. The end is that position advanced across the problem
+     * span, so only line endings inside the span are counted.
+     */
+    private static Range problemRange(CategorizedProblem problem, String source) {
+        int start = Math.max(0, problem.getSourceStart());
+        int endExclusive = Math.min(source.length(), Math.max(start, problem.getSourceEnd()) + 1);
+        if (problem instanceof DefaultProblem defaultProblem) {
+            int line = defaultProblem.getSourceLineNumber();
+            int column = defaultProblem.getSourceColumnNumber();
+            if (line > 0 && column > 0) {
+                Position startPos = new Position(line - 1, column - 1);
+                return new Range(startPos, advance(source, start, endExclusive, startPos));
+            }
+        }
+        return new Range(positionAt(source, start), positionAt(source, endExclusive));
+    }
+
     static Position positionAt(String source, int offset) {
         int bounded = Math.max(0, Math.min(source.length(), offset));
-        int line = 0;
-        int column = 0;
-        for (int i = 0; i < bounded; i++) {
+        return advance(source, 0, bounded, new Position(0, 0));
+    }
+
+    /** Position of {@code to}, starting from the known position of {@code from}. */
+    private static Position advance(String source, int from, int to, Position start) {
+        int line = start.getLine();
+        int column = start.getCharacter();
+        int begin = Math.max(0, Math.min(source.length(), from));
+        int end = Math.max(begin, Math.min(source.length(), to));
+        for (int i = begin; i < end; i++) {
             char c = source.charAt(i);
             if (c == '\n') {
                 line++;
