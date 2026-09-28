@@ -1,9 +1,5 @@
 /**
- * Copyright 2026 by Anysphere Inc.
- *
- * Licensed under the MIT License.
- *
- * SPDX-License-Identifier: MIT
+ * Copyright 2026 by Castle Ridge Software GmbH
  *
  * Author: Thomas Mäder, Castle Ridge Software
  *
