@@ -158,6 +158,7 @@ public final class AstAnalysisSession implements AnalysisSession {
 
     private List<Location> locationsMatching(Symbol exact, SymbolKey key) {
         Set<Location> found = new LinkedHashSet<>();
+        SourceFile.Cursor cursor = cu.source().cursor();
         cu.accept(new AstVisitor() {
             @Override
             public void visitIdentifier(Identifier n) {
@@ -166,7 +167,7 @@ public final class AstAnalysisSession implements AnalysisSession {
                         ? n.symbol() == exact
                         : key != null && key.matches(n.symbol().key());
                 if (match && n.range().isPresent()) {
-                    found.add(AstPositions.location(cu.uri(), cu.source(), n.range()));
+                    found.add(AstPositions.location(cu.uri(), cu.source(), n.range(), cursor));
                 }
             }
         });

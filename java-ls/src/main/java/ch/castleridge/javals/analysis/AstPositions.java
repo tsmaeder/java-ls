@@ -33,15 +33,29 @@ public final class AstPositions {
     }
 
     public static Range rangeOf(SourceFile source, SourceRange range) {
+        return rangeOf(source, range, null);
+    }
+
+    public static Range rangeOf(SourceFile source, SourceRange range, SourceFile.Cursor cursor) {
         if (source == null || range == null || !range.isPresent()) {
             Position origin = new Position(0, 0);
             return new Range(origin, origin);
         }
-        return new Range(positionAt(source, range.start()), positionAt(source, range.end()));
+        if (cursor == null) {
+            return new Range(positionAt(source, range.start()), positionAt(source, range.end()));
+        }
+        SourceFile.LineColumn start = cursor.lineColumn(range.start());
+        SourceFile.LineColumn end = cursor.lineColumn(range.end());
+        return new Range(new Position(start.line(), start.character()),
+                new Position(end.line(), end.character()));
     }
 
     public static Location location(String uri, SourceFile source, SourceRange range) {
+        return location(uri, source, range, null);
+    }
+
+    public static Location location(String uri, SourceFile source, SourceRange range, SourceFile.Cursor cursor) {
         String documentUri = uri == null ? (source == null ? "" : source.uri()) : uri;
-        return new Location(documentUri, rangeOf(source, range));
+        return new Location(documentUri, rangeOf(source, range, cursor));
     }
 }
