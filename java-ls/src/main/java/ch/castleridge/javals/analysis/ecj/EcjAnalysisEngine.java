@@ -220,6 +220,17 @@ final class EcjAnalysisEngine {
         }
 
         /**
+         * Stock statement recovery recurses when a recovered method body
+         * contains the type it is already walking. {@link RecoveryParser} stops
+         * that re-entry. Called from the {@link Compiler} constructor, so this
+         * override must not touch subclass state.
+         */
+        @Override
+        public void initializeParser() {
+            this.parser = new RecoveryParser(this.problemReporter, this.options.parseLiteralExpressionsAsConstants);
+        }
+
+        /**
          * Same pipeline as {@link Compiler#process} through flow analysis, but
          * omits {@code generateCode()} and dependency-info storage. Analysis only
          * needs bindings + problems; class bytes are discarded anyway.
