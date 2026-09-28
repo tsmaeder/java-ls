@@ -6,39 +6,37 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
-import java.util.Set;
 
 public final class ConstructorDecl extends Declaration {
 
-    private final Set<Modifier> modifiers;
-    private final List<Annotation> annotations;
-    private final List<TypeParamDecl> typeParams;
+    private final int modifiers;
+    private final Annotation[] annotations;
+    private final TypeParamDecl[] typeParams;
     private final Identifier name;
     private final ReceiverParam receiver;
-    private final List<ParamDecl> parameters;
-    private final List<TypeNode> thrown;
+    private final ParamDecl[] parameters;
+    private final TypeNode[] thrown;
     private final Block body;
     private final MethodSymbol symbol;
 
-    public ConstructorDecl(Set<Modifier> modifiers,
-                           List<Annotation> annotations,
-                           List<TypeParamDecl> typeParams,
+    public ConstructorDecl(int modifiers,
+                           Annotation[] annotations,
+                           TypeParamDecl[] typeParams,
                            Identifier name,
                            ReceiverParam receiver,
-                           List<ParamDecl> parameters,
-                           List<TypeNode> thrown,
+                           ParamDecl[] parameters,
+                           TypeNode[] thrown,
                            Block body,
                            MethodSymbol symbol,
                            SourceRange range) {
         super(range);
-        this.modifiers = MethodDecl.copyMods(modifiers);
-        this.annotations = annotations == null ? List.of() : List.copyOf(annotations);
-        this.typeParams = typeParams == null ? List.of() : List.copyOf(typeParams);
+        this.modifiers = modifiers;
+        this.annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION);
+        this.typeParams = EmptyArrays.orEmpty(typeParams, EmptyArrays.TYPE_PARAM);
         this.name = name;
         this.receiver = receiver;
-        this.parameters = parameters == null ? List.of() : List.copyOf(parameters);
-        this.thrown = thrown == null ? List.of() : List.copyOf(thrown);
+        this.parameters = EmptyArrays.orEmpty(parameters, EmptyArrays.PARAM_DECL);
+        this.thrown = EmptyArrays.orEmpty(thrown, EmptyArrays.TYPE_NODE);
         this.body = body;
         this.symbol = symbol;
         for (Node __c : this.annotations) __c.setParent(this);
@@ -50,15 +48,15 @@ public final class ConstructorDecl extends Declaration {
         if (body != null) body.setParent(this);
     }
 
-    public Set<Modifier> modifiers() {
+    public int modifiers() {
         return modifiers;
     }
 
-    public List<Annotation> annotations() {
+    public Annotation[] annotations() {
         return annotations;
     }
 
-    public List<TypeParamDecl> typeParams() {
+    public TypeParamDecl[] typeParams() {
         return typeParams;
     }
 
@@ -70,11 +68,11 @@ public final class ConstructorDecl extends Declaration {
         return receiver;
     }
 
-    public List<ParamDecl> parameters() {
+    public ParamDecl[] parameters() {
         return parameters;
     }
 
-    public List<TypeNode> thrown() {
+    public TypeNode[] thrown() {
         return thrown;
     }
 

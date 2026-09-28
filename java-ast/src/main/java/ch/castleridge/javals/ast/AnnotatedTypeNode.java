@@ -6,25 +6,24 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class AnnotatedTypeNode extends TypeNode {
 
-    private final List<Annotation> annotations;
+    private final Annotation[] annotations;
     private final TypeNode inner;
 
-    public AnnotatedTypeNode(List<Annotation> annotations,
+    public AnnotatedTypeNode(Annotation[] annotations,
                              TypeNode inner,
                              JType resolved,
                              SourceRange range) {
         super(range, coalesce(resolved, inner != null ? inner.resolvedType() : null));
-        this.annotations = annotations == null ? List.of() : List.copyOf(annotations);
+        this.annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION);
         this.inner = inner;
         for (Node __c : this.annotations) __c.setParent(this);
         if (inner != null) inner.setParent(this);
     }
 
-    public List<Annotation> annotations() {
+    public Annotation[] annotations() {
         return annotations;
     }
 

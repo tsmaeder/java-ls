@@ -6,6 +6,7 @@
  */
 package ch.castleridge.javals.ast;
 
+/** Java modifier flag. Stored on AST decls as an {@code int} bitset of {@link #bit()}. */
 public enum Modifier {
     PUBLIC,
     PROTECTED,
@@ -20,5 +21,13 @@ public enum Modifier {
     NATIVE,
     DEFAULT,
     SEALED,
-    NON_SEALED
+    NON_SEALED;
+
+    public int bit() {
+        return 1 << ordinal();
+    }
+
+    public static boolean has(int bits, Modifier modifier) {
+        return (bits & modifier.bit()) != 0;
+    }
 }

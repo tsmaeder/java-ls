@@ -6,34 +6,33 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class PackageDecl extends Declaration {
 
-    private final List<Annotation> annotations;
-    private final List<Identifier> names;
+    private final Annotation[] annotations;
+    private final Identifier[] names;
 
-    public PackageDecl(List<Annotation> annotations, List<Identifier> names, SourceRange range) {
+    public PackageDecl(Annotation[] annotations, Identifier[] names, SourceRange range) {
         super(range);
-        this.annotations = annotations == null ? List.of() : List.copyOf(annotations);
-        this.names = names == null ? List.of() : List.copyOf(names);
+        this.annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION);
+        this.names = EmptyArrays.orEmpty(names, EmptyArrays.IDENTIFIER);
         for (Node __c : this.annotations) __c.setParent(this);
         for (Node __c : this.names) __c.setParent(this);
     }
 
-    public List<Annotation> annotations() {
+    public Annotation[] annotations() {
         return annotations;
     }
 
-    public List<Identifier> names() {
+    public Identifier[] names() {
         return names;
     }
 
     public String qualifiedName() {
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < names.size(); i++) {
+        for (int i = 0; i < names.length; i++) {
             if (i > 0) sb.append('.');
-            sb.append(names.get(i).name());
+            sb.append(names[i].name());
         }
         return sb.toString();
     }

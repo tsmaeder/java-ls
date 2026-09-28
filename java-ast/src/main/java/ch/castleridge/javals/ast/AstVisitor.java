@@ -6,15 +6,13 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
-
 public abstract class AstVisitor {
 
     public void visit(Node node) {
         if (node != null) node.accept(this);
     }
 
-    protected final void visitAll(List<? extends Node> nodes) {
+    protected final void visitAll(Node[] nodes) {
         if (nodes == null) return;
         for (Node node : nodes) visit(node);
     }
@@ -143,12 +141,12 @@ public abstract class AstVisitor {
 
     public void visitExportsDirective(ExportsDirective n) {
         visitAll(n.packageName());
-        for (List<Identifier> target : n.targets()) visitAll(target);
+        for (Identifier[] target : n.targets()) visitAll(target);
     }
 
     public void visitOpensDirective(OpensDirective n) {
         visitAll(n.packageName());
-        for (List<Identifier> target : n.targets()) visitAll(target);
+        for (Identifier[] target : n.targets()) visitAll(target);
     }
 
     public void visitUsesDirective(UsesDirective n) {

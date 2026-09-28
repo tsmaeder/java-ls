@@ -6,26 +6,25 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class CallExpr extends Expression {
 
     private final Expression receiver;
     private final Identifier name;
-    private final List<TypeNode> typeArguments;
-    private final List<Expression> arguments;
+    private final TypeNode[] typeArguments;
+    private final Expression[] arguments;
 
     public CallExpr(Expression receiver,
                     Identifier name,
-                    List<TypeNode> typeArguments,
-                    List<Expression> arguments,
+                    TypeNode[] typeArguments,
+                    Expression[] arguments,
                     JType type,
                     SourceRange range) {
         super(range, coalesce(type, name != null && name.symbol() != null ? name.symbol().type() : null));
         this.receiver = receiver;
         this.name = name;
-        this.typeArguments = typeArguments == null ? List.of() : List.copyOf(typeArguments);
-        this.arguments = arguments == null ? List.of() : List.copyOf(arguments);
+        this.typeArguments = EmptyArrays.orEmpty(typeArguments, EmptyArrays.TYPE_NODE);
+        this.arguments = EmptyArrays.orEmpty(arguments, EmptyArrays.EXPRESSION);
         if (receiver != null) receiver.setParent(this);
         if (name != null) name.setParent(this);
         for (Node __c : this.typeArguments) __c.setParent(this);
@@ -40,11 +39,11 @@ public final class CallExpr extends Expression {
         return name;
     }
 
-    public List<TypeNode> typeArguments() {
+    public TypeNode[] typeArguments() {
         return typeArguments;
     }
 
-    public List<Expression> arguments() {
+    public Expression[] arguments() {
         return arguments;
     }
     @Override

@@ -7,11 +7,9 @@
 package ch.castleridge.javals.analysis.javac;
 
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
@@ -125,6 +123,7 @@ import ch.castleridge.javals.ast.Declaration;
 import ch.castleridge.javals.ast.DefaultLabel;
 import ch.castleridge.javals.ast.DoWhileStmt;
 import ch.castleridge.javals.ast.EmptyStmt;
+import ch.castleridge.javals.ast.EmptyArrays;
 import ch.castleridge.javals.ast.EnumConstantDecl;
 import ch.castleridge.javals.ast.EnumConstantSymbol;
 import ch.castleridge.javals.ast.ErroneousExpr;
@@ -251,7 +250,7 @@ final class JavacAstLowerer {
                                  Map<String, String> sourceJarByBinaryJar) {
         String source = text == null ? "" : text.toString();
         if (result == null || result.cu() == null) {
-            return new CompilationUnit(new SourceFile(uri, source), null, List.of(), List.of(), null,
+            return new CompilationUnit(new SourceFile(uri, source), null, EmptyArrays.IMPORT_DECL, EmptyArrays.TYPE_DECL, null,
                     new SourceRange(0, source.length()));
         }
         Elements elements = result.task() == null ? null : result.task().getElements();
@@ -263,7 +262,7 @@ final class JavacAstLowerer {
     static CompilationUnit diet(String uri, String text, CompilationUnitTree cu, Trees trees) {
         String source = text == null ? "" : text;
         if (cu == null) {
-            return new CompilationUnit(new SourceFile(uri, source), null, List.of(), List.of(), null,
+            return new CompilationUnit(new SourceFile(uri, source), null, EmptyArrays.IMPORT_DECL, EmptyArrays.TYPE_DECL, null,
                     new SourceRange(0, source.length()));
         }
         return new JavacAstLowerer(cu, trees, null, null, source, null, null, Map.of()).lowerUnit(uri);
@@ -271,11 +270,19 @@ final class JavacAstLowerer {
 
     private CompilationUnit lowerUnit(String uri) {
         PackageDecl pkg = cu.getPackage() == null ? null : lowerPackage(cu.getPackage());
-        List<ImportDecl> imports = new ArrayList<>();
-        for (ImportTree imp : cu.getImports()) imports.add(lowerImport(imp));
-        List<TypeDecl> types = new ArrayList<>();
-        for (Tree type : cu.getTypeDecls()) {
-            if (type instanceof ClassTree classTree) types.add(lowerType(classTree));
+        List<? extends ImportTree> importTrees = cu.getImports();
+        ImportDecl[] imports = importTrees.isEmpty()
+                ? EmptyArrays.IMPORT_DECL : new ImportDecl[importTrees.size()];
+        for (int i = 0; i < importTrees.size(); i++) imports[i] = lowerImport(importTrees.get(i));
+        List<? extends Tree> typeTrees = cu.getTypeDecls();
+        int typeCount = 0;
+        for (Tree type : typeTrees) {
+            if (type instanceof ClassTree) typeCount++;
+        }
+        TypeDecl[] types = typeCount == 0 ? EmptyArrays.TYPE_DECL : new TypeDecl[typeCount];
+        int ti = 0;
+        for (Tree type : typeTrees) {
+            if (type instanceof ClassTree classTree) types[ti++] = lowerType(classTree);
         }
         ModuleDecl module = cu.getModule() == null ? null : lowerModule(cu.getModule());
         return new CompilationUnit(new SourceFile(uri == null ? "" : uri, source),
@@ -284,25 +291,25 @@ final class JavacAstLowerer {
 
     private PackageDecl lowerPackage(PackageTree tree) {
         Tree name = tree.getPackageName();
-        List<Identifier> names = name instanceof ExpressionTree expr ? typeNameIdents(expr) : List.of();
+        Identifier[] names = name instanceof ExpressionTree expr ? typeNameIdents(expr) : EmptyArrays.IDENTIFIER;
         return new PackageDecl(annos(tree.getAnnotations()), names, range(tree));
     }
 
     private ImportDecl lowerImport(ImportTree tree) {
         Tree qual = tree.getQualifiedIdentifier();
-        List<Identifier> names = qual instanceof ExpressionTree expr ? typeNameIdents(expr) : List.of();
+        Identifier[] names = qual instanceof ExpressionTree expr ? typeNameIdents(expr) : EmptyArrays.IDENTIFIER;
         boolean onDemand = qual instanceof MemberSelectTree select
                 && "*".equals(select.getIdentifier().toString());
-        if (tree.isStatic() && !onDemand && !names.isEmpty()) {
+        if (tree.isStatic() && !onDemand && names.length > 0) {
             names = withStaticImportSymbol(names, qual);
         }
         return new ImportDecl(tree.isStatic(), onDemand, names, range(tree));
     }
 
     /** Rebuild the last Identifier so it carries the static member symbol (immutable). */
-    private List<Identifier> withStaticImportSymbol(List<Identifier> names, Tree qual) {
-        if (names.size() < 2) return names;
-        Identifier last = names.get(names.size() - 1);
+    private Identifier[] withStaticImportSymbol(Identifier[] names, Tree qual) {
+        if (names.length < 2) return names;
+        Identifier last = names[names.length - 1];
         if ("*".equals(last.name())) return names;
         ExpressionTree ownerTree = qual instanceof MemberSelectTree select ? select.getExpression() : null;
         Element owner = elementOf(ownerTree);
@@ -310,8 +317,8 @@ final class JavacAstLowerer {
         for (Element enclosed : type.getEnclosedElements()) {
             if (enclosed.getSimpleName().contentEquals(last.name())
                     && enclosed.getModifiers().contains(Modifier.STATIC)) {
-                List<Identifier> rebound = new ArrayList<>(names);
-                rebound.set(rebound.size() - 1, new Identifier(last.name(), last.range(), symbolOf(enclosed)));
+                Identifier[] rebound = names.clone();
+                rebound[rebound.length - 1] = new Identifier(last.name(), last.range(), symbolOf(enclosed));
                 return rebound;
             }
         }
@@ -328,20 +335,27 @@ final class JavacAstLowerer {
         };
         TypeSymbol symbol = typeSymbol(elementOf(tree));
         Identifier name = ident(tree.getSimpleName().toString(), nameRange(tree, tree.getSimpleName().toString()), symbol);
-        List<TypeParamDecl> typeParams = lowerTypeParams(tree.getTypeParameters());
+        TypeParamDecl[] typeParams = lowerTypeParams(tree.getTypeParameters());
         TypeNode superclass = tree.getExtendsClause() == null ? null : lowerTypeNode(tree.getExtendsClause());
-        List<TypeNode> interfaces = mapTypes(tree.getImplementsClause());
-        List<TypeNode> permits = mapTypes(tree.getPermitsClause());
-        List<RecordComponentDecl> components = new ArrayList<>();
-        List<Declaration> members = new ArrayList<>();
-        for (Tree member : tree.getMembers()) {
+        TypeNode[] interfaces = mapTypes(tree.getImplementsClause());
+        TypeNode[] permits = mapTypes(tree.getPermitsClause());
+        List<? extends Tree> memberTrees = tree.getMembers();
+        List<RecordComponentDecl> componentList = new ArrayList<>();
+        List<Declaration> memberList = new ArrayList<>();
+        for (Tree member : memberTrees) {
             if (member instanceof VariableTree variable && isRecordComponent(variable)) {
-                components.add(lowerRecordComponent(variable, symbol));
+                componentList.add(lowerRecordComponent(variable, symbol));
             } else {
                 Declaration decl = lowerMember(member, symbol, kind);
-                if (decl != null) members.add(decl);
+                if (decl != null) memberList.add(decl);
             }
         }
+        RecordComponentDecl[] components = componentList.isEmpty()
+                ? EmptyArrays.RECORD_COMPONENT
+                : componentList.toArray(new RecordComponentDecl[componentList.size()]);
+        Declaration[] members = memberList.isEmpty()
+                ? EmptyArrays.DECLARATION
+                : memberList.toArray(new Declaration[memberList.size()]);
         return new TypeDecl(kind, mods(tree.getModifiers()), annos(tree.getModifiers()), name,
                 typeParams, superclass, interfaces, permits, components, members, symbol, range(tree));
     }
@@ -380,15 +394,16 @@ final class JavacAstLowerer {
                 || (owner != null && rawName.equals(owner.name()));
         Identifier name = ident(constructor && owner != null ? owner.name() : rawName,
                 nameRange(tree, constructor && owner != null ? owner.name() : rawName), symbol);
-        List<TypeParamDecl> typeParams = lowerTypeParams(tree.getTypeParameters());
+        TypeParamDecl[] typeParams = lowerTypeParams(tree.getTypeParameters());
         ReceiverParam receiver = tree.getReceiverParameter() == null
                 ? null : lowerReceiver(tree.getReceiverParameter());
-        List<ParamDecl> params = new ArrayList<>();
         List<? extends VariableTree> parameters = tree.getParameters();
+        ParamDecl[] params = parameters.isEmpty()
+                ? EmptyArrays.PARAM_DECL : new ParamDecl[parameters.size()];
         for (int i = 0; i < parameters.size(); i++) {
-            params.add(lowerParam(parameters.get(i), i == parameters.size() - 1 && isVarargs(element)));
+            params[i] = lowerParam(parameters.get(i), i == parameters.size() - 1 && isVarargs(element));
         }
-        List<TypeNode> thrown = mapTypes(tree.getThrows());
+        TypeNode[] thrown = mapTypes(tree.getThrows());
         Block body = tree.getBody() == null ? null : lowerBlock(tree.getBody());
         if (constructor && isCompactConstructor(element) && ownerKind == TypeDeclKind.RECORD) {
             return new CompactConstructorDecl(mods(tree.getModifiers()), annos(tree.getModifiers()),
@@ -419,13 +434,13 @@ final class JavacAstLowerer {
         Identifier name = ident(tree.getName().toString(), nameRange(tree, tree.getName().toString()), symbol);
         Expression init = tree.getInitializer() == null ? null : lowerExpr(tree.getInitializer());
         VarFragment fragment = new VarFragment(name, 0, init, symbol, range(tree));
-        return new FieldDecl(mods(tree.getModifiers()), annos(tree.getModifiers()), type, List.of(fragment), range(tree));
+        return new FieldDecl(mods(tree.getModifiers()), annos(tree.getModifiers()), type, new VarFragment[] { fragment }, range(tree));
     }
 
     private EnumConstantDecl lowerEnumConstant(VariableTree tree, TypeSymbol owner) {
         EnumConstantSymbol symbol = enumSymbol(elementOf(tree), owner);
         Identifier name = ident(tree.getName().toString(), nameRange(tree, tree.getName().toString()), symbol);
-        List<Expression> args = List.of();
+        Expression[] args = EmptyArrays.EXPRESSION;
         TypeDecl body = null;
         if (tree.getInitializer() instanceof NewClassTree created) {
             args = mapExprs(created.getArguments());
@@ -453,9 +468,10 @@ final class JavacAstLowerer {
         return new ReceiverParam(annos(tree.getModifiers()), lowerTypeNode(tree.getType()), name, range(tree));
     }
 
-    private List<TypeParamDecl> lowerTypeParams(List<? extends TypeParameterTree> trees) {
-        List<TypeParamDecl> out = new ArrayList<>();
-        for (TypeParameterTree tree : trees) out.add(lowerTypeParam(tree));
+    private TypeParamDecl[] lowerTypeParams(List<? extends TypeParameterTree> trees) {
+        if (trees == null || trees.isEmpty()) return EmptyArrays.TYPE_PARAM;
+        TypeParamDecl[] out = new TypeParamDecl[trees.size()];
+        for (int i = 0; i < trees.size(); i++) out[i] = lowerTypeParam(trees.get(i));
         return out;
     }
 
@@ -466,8 +482,10 @@ final class JavacAstLowerer {
     }
 
     private Block lowerBlock(BlockTree tree) {
-        List<Statement> statements = new ArrayList<>();
-        for (StatementTree stmt : tree.getStatements()) statements.add(lowerStmt(stmt));
+        List<? extends StatementTree> stmts = tree.getStatements();
+        Statement[] statements = stmts.isEmpty()
+                ? EmptyArrays.STATEMENT : new Statement[stmts.size()];
+        for (int i = 0; i < stmts.size(); i++) statements[i] = lowerStmt(stmts.get(i));
         return new Block(tree.isStatic(), statements, range(tree));
     }
 
@@ -501,7 +519,7 @@ final class JavacAstLowerer {
                     lowerStmt(labeled.getStatement()), range);
             case SwitchTree sw -> new SwitchStmt(lowerExpr(sw.getExpression()), lowerArms(sw.getCases()), range);
             case ErroneousTree err -> new ErroneousStmt(lowerErroneous(err), range);
-            default -> new ErroneousStmt(List.of(), range);
+            default -> new ErroneousStmt(EmptyArrays.NODE, range);
         };
     }
 
@@ -522,13 +540,16 @@ final class JavacAstLowerer {
     }
 
     private ForStmt lowerFor(ForLoopTree tree) {
-        List<Node> init = new ArrayList<>();
+        List<Node> initList = new ArrayList<>();
         for (StatementTree stmt : tree.getInitializer()) {
-            if (stmt instanceof VariableTree variable) init.add(lowerLocal(variable));
-            else if (stmt instanceof ExpressionStatementTree expr) init.add(lowerExpr(expr.getExpression()));
+            if (stmt instanceof VariableTree variable) initList.add(lowerLocal(variable));
+            else if (stmt instanceof ExpressionStatementTree expr) initList.add(lowerExpr(expr.getExpression()));
         }
-        List<Expression> update = new ArrayList<>();
-        for (ExpressionStatementTree stmt : tree.getUpdate()) update.add(lowerExpr(stmt.getExpression()));
+        Node[] init = initList.isEmpty() ? EmptyArrays.NODE : initList.toArray(new Node[initList.size()]);
+        List<? extends ExpressionStatementTree> updates = tree.getUpdate();
+        Expression[] update = updates.isEmpty()
+                ? EmptyArrays.EXPRESSION : new Expression[updates.size()];
+        for (int i = 0; i < updates.size(); i++) update[i] = lowerExpr(updates.get(i).getExpression());
         return new ForStmt(init, tree.getCondition() == null ? null : lowerExpr(tree.getCondition()),
                 update, lowerStmt(tree.getStatement()), range(tree));
     }
@@ -539,15 +560,20 @@ final class JavacAstLowerer {
     }
 
     private TryStmt lowerTry(TryTree tree) {
-        List<Node> resources = new ArrayList<>();
+        List<Node> resourceList = new ArrayList<>();
         for (Tree resource : tree.getResources()) {
-            if (resource instanceof VariableTree variable) resources.add(lowerLocal(variable));
-            else if (resource instanceof ExpressionTree expr) resources.add(lowerExpr(expr));
+            if (resource instanceof VariableTree variable) resourceList.add(lowerLocal(variable));
+            else if (resource instanceof ExpressionTree expr) resourceList.add(lowerExpr(expr));
         }
-        List<CatchClause> catches = new ArrayList<>();
-        for (CatchTree catchTree : tree.getCatches()) {
-            catches.add(new CatchClause(lowerParam(catchTree.getParameter(), false),
-                    lowerBlock(catchTree.getBlock()), range(catchTree)));
+        Node[] resources = resourceList.isEmpty()
+                ? EmptyArrays.NODE : resourceList.toArray(new Node[resourceList.size()]);
+        List<? extends CatchTree> catchTrees = tree.getCatches();
+        CatchClause[] catches = catchTrees.isEmpty()
+                ? EmptyArrays.CATCH_CLAUSE : new CatchClause[catchTrees.size()];
+        for (int i = 0; i < catchTrees.size(); i++) {
+            CatchTree catchTree = catchTrees.get(i);
+            catches[i] = new CatchClause(lowerParam(catchTree.getParameter(), false),
+                    lowerBlock(catchTree.getBlock()), range(catchTree));
         }
         Block fin = tree.getFinallyBlock() == null ? null : lowerBlock(tree.getFinallyBlock());
         return new TryStmt(resources, lowerBlock(tree.getBlock()), catches, fin, range(tree));
@@ -567,35 +593,42 @@ final class JavacAstLowerer {
                 type = new VarTypeNode(symbol.type(), type.range());
             }
         }
-        return new LocalDeclStmt(mods(tree.getModifiers()), annos(tree.getModifiers()), type, List.of(fragment), range(tree));
+        return new LocalDeclStmt(mods(tree.getModifiers()), annos(tree.getModifiers()), type, new VarFragment[] { fragment }, range(tree));
     }
 
-    private List<SwitchArm> lowerArms(List<? extends CaseTree> cases) {
-        List<SwitchArm> out = new ArrayList<>();
-        for (CaseTree cse : cases) out.add(lowerArm(cse));
+    private SwitchArm[] lowerArms(List<? extends CaseTree> cases) {
+        if (cases == null || cases.isEmpty()) return EmptyArrays.SWITCH_ARM;
+        SwitchArm[] out = new SwitchArm[cases.size()];
+        for (int i = 0; i < cases.size(); i++) out[i] = lowerArm(cases.get(i));
         return out;
     }
 
     private SwitchArm lowerArm(CaseTree tree) {
-        List<CaseLabel> labels = new ArrayList<>();
+        List<CaseLabel> labelList = new ArrayList<>();
         try {
-            for (CaseLabelTree label : tree.getLabels()) labels.add(lowerCaseLabel(label, tree));
+            for (CaseLabelTree label : tree.getLabels()) labelList.add(lowerCaseLabel(label, tree));
         } catch (UnsupportedOperationException | Error ignored) {
             if (tree.getExpression() != null) {
-                labels.add(new ConstantLabel(lowerExpr(tree.getExpression()), range(tree.getExpression())));
+                labelList.add(new ConstantLabel(lowerExpr(tree.getExpression()), range(tree.getExpression())));
             } else {
-                labels.add(new DefaultLabel(range(tree)));
+                labelList.add(new DefaultLabel(range(tree)));
             }
         }
+        CaseLabel[] labels = labelList.isEmpty()
+                ? EmptyArrays.CASE_LABEL : labelList.toArray(new CaseLabel[labelList.size()]);
         boolean arrow = tree.getCaseKind() == CaseTree.CaseKind.RULE;
         Expression exprBody = null;
-        List<Statement> statements = new ArrayList<>();
+        Statement[] statements;
         if (arrow && tree.getBody() instanceof ExpressionTree expr) {
             exprBody = lowerExpr(expr);
+            statements = EmptyArrays.STATEMENT;
         } else if (tree.getBody() instanceof StatementTree stmt) {
-            statements.add(lowerStmt(stmt));
+            statements = new Statement[] { lowerStmt(stmt) };
         } else {
-            for (StatementTree stmt : tree.getStatements()) statements.add(lowerStmt(stmt));
+            List<? extends StatementTree> stmts = tree.getStatements();
+            statements = stmts.isEmpty()
+                    ? EmptyArrays.STATEMENT : new Statement[stmts.size()];
+            for (int i = 0; i < stmts.size(); i++) statements[i] = lowerStmt(stmts.get(i));
         }
         return new SwitchArm(labels, arrow, exprBody, statements, range(tree));
     }
@@ -654,13 +687,13 @@ final class JavacAstLowerer {
                         || tree.getKind() == Tree.Kind.SUPER_WILDCARD) {
                     yield classLiteralOrType(tree, type, range);
                 }
-                yield new ErroneousExpr(List.of(), type, range);
+                yield new ErroneousExpr(EmptyArrays.NODE, type, range);
             }
         };
     }
 
     private Expression classLiteralOrType(ExpressionTree tree, JType type, SourceRange range) {
-        return new ErroneousExpr(List.of(), type, range);
+        return new ErroneousExpr(EmptyArrays.NODE, type, range);
     }
 
     private Expression lowerIdentExpr(IdentifierTree tree, JType type, SourceRange range) {
@@ -759,9 +792,15 @@ final class JavacAstLowerer {
     }
 
     private LambdaExpr lowerLambda(LambdaExpressionTree tree) {
-        List<ParamDecl> params = new ArrayList<>();
-        for (VariableTree param : tree.getParameters()) params.add(lowerParam(param, false));
-        boolean implicit = tree.getParameters().stream().anyMatch(p -> p.getType() == null);
+        List<? extends VariableTree> parameterTrees = tree.getParameters();
+        ParamDecl[] params = parameterTrees.isEmpty()
+                ? EmptyArrays.PARAM_DECL : new ParamDecl[parameterTrees.size()];
+        boolean implicit = false;
+        for (int i = 0; i < parameterTrees.size(); i++) {
+            VariableTree param = parameterTrees.get(i);
+            if (param.getType() == null) implicit = true;
+            params[i] = lowerParam(param, false);
+        }
         Expression exprBody = null;
         Block blockBody = null;
         if (tree.getBodyKind() == LambdaExpressionTree.BodyKind.EXPRESSION
@@ -770,7 +809,7 @@ final class JavacAstLowerer {
         } else if (tree.getBody() instanceof BlockTree block) {
             blockBody = lowerBlock(block);
         } else if (tree.getBody() instanceof StatementTree stmt) {
-            blockBody = new Block(List.of(lowerStmt(stmt)), range(tree.getBody()));
+            blockBody = new Block(new Statement[] { lowerStmt(stmt) }, range(tree.getBody()));
         }
         return new LambdaExpr(params, implicit, exprBody, blockBody, jtype(typeOf(tree)), range(tree));
     }
@@ -811,7 +850,7 @@ final class JavacAstLowerer {
             return new TypePattern(lowerTypeNode(variable.getType()), ident, symbol, range(tree));
         }
         if (tree.getKind().name().contains("RECORD_PATTERN") && tree instanceof JCTree jc) {
-            return new RecordPattern(null, List.of(), range(tree));
+            return new RecordPattern(null, EmptyArrays.PATTERN, range(tree));
         }
         if (tree.getKind().name().equals("ANY_PATTERN")) return new UnnamedPattern(range(tree));
         return new UnnamedPattern(range(tree));
@@ -832,19 +871,20 @@ final class JavacAstLowerer {
         return switch (tree) {
             case com.sun.source.tree.PrimitiveTypeTree primitive -> lowerPrimitive(primitive, resolved, range);
             case IdentifierTree ident -> typeName(
-                    List.of(ident(ident.getName().toString(), range,
-                            lastTypeSymbol(elementOf(ident), constructorName))),
+                    new Identifier[] { ident(ident.getName().toString(), range,
+                            lastTypeSymbol(elementOf(ident), constructorName)) },
                     resolved, range);
             case MemberSelectTree select -> typeName(typeNameIdents(select, constructorName), resolved, range);
             case com.sun.source.tree.ParameterizedTypeTree parameterized -> {
                 TypeNode raw = lowerTypeNode(parameterized.getType(), constructorName);
-                List<TypeNode> args = mapTypes(parameterized.getTypeArguments());
+                TypeNode[] args = mapTypes(parameterized.getTypeArguments());
                 JType type = resolved;
                 if (type == JType.ERROR) {
                     JType rawType = raw == null ? JType.ERROR : raw.resolvedType();
                     if (rawType instanceof JType.Declared declared) {
-                        List<JType> typeArgs = new ArrayList<>();
-                        for (TypeNode arg : args) typeArgs.add(arg.resolvedType());
+                        JType[] typeArgs = args.length == 0
+                                ? EmptyArrays.JTYPE : new JType[args.length];
+                        for (int i = 0; i < args.length; i++) typeArgs[i] = args[i].resolvedType();
                         type = new JType.Declared(declared.jvmBinaryName(), typeArgs);
                     } else {
                         type = rawType;
@@ -871,7 +911,7 @@ final class JavacAstLowerer {
         };
     }
 
-    private TypeName typeName(List<Identifier> names, JType resolved, SourceRange range) {
+    private TypeName typeName(Identifier[] names, JType resolved, SourceRange range) {
         return new TypeName(names, resolved, range);
     }
 
@@ -889,40 +929,48 @@ final class JavacAstLowerer {
         TypeName name = tree.getAnnotationType() instanceof ExpressionTree expr
                 ? typeName(typeNameIdents(expr), jtype(typeOf(tree.getAnnotationType())),
                         range(tree.getAnnotationType()))
-                : typeName(List.of(), null, range(tree.getAnnotationType()));
-        List<AnnoArg> args = new ArrayList<>();
-        for (ExpressionTree arg : tree.getArguments()) {
+                : typeName(EmptyArrays.IDENTIFIER, null, range(tree.getAnnotationType()));
+        List<? extends ExpressionTree> argTrees = tree.getArguments();
+        AnnoArg[] args = argTrees.isEmpty()
+                ? EmptyArrays.ANNO_ARG : new AnnoArg[argTrees.size()];
+        for (int i = 0; i < argTrees.size(); i++) {
+            ExpressionTree arg = argTrees.get(i);
             if (arg instanceof AssignmentTree assign && assign.getVariable() instanceof IdentifierTree ident) {
-                args.add(new AnnoArg(ident(ident.getName().toString(), range(ident), null),
-                        lowerExpr(assign.getExpression()), range(arg)));
+                args[i] = new AnnoArg(ident(ident.getName().toString(), range(ident), null),
+                        lowerExpr(assign.getExpression()), range(arg));
             } else {
-                args.add(new AnnoArg(null, lowerExpr(arg), range(arg)));
+                args[i] = new AnnoArg(null, lowerExpr(arg), range(arg));
             }
         }
         return new Annotation(name, args, jtype(typeOf(tree)), range(tree));
     }
 
-    private List<Annotation> lowerAnnos(List<? extends AnnotationTree> trees) {
-        List<Annotation> out = new ArrayList<>();
-        for (AnnotationTree tree : trees) out.add(lowerAnnotation(tree));
+    private Annotation[] lowerAnnos(List<? extends AnnotationTree> trees) {
+        if (trees == null || trees.isEmpty()) return EmptyArrays.ANNOTATION;
+        Annotation[] out = new Annotation[trees.size()];
+        for (int i = 0; i < trees.size(); i++) out[i] = lowerAnnotation(trees.get(i));
         return out;
     }
 
-    private List<Annotation> annos(List<? extends AnnotationTree> trees) {
+    private Annotation[] annos(List<? extends AnnotationTree> trees) {
         return lowerAnnos(trees);
     }
 
-    private List<Annotation> annos(ModifiersTree modifiers) {
-        return modifiers == null ? List.of() : lowerAnnos(modifiers.getAnnotations());
+    private Annotation[] annos(ModifiersTree modifiers) {
+        return modifiers == null ? EmptyArrays.ANNOTATION : lowerAnnos(modifiers.getAnnotations());
     }
 
     private ModuleDecl lowerModule(ModuleTree tree) {
-        List<Identifier> names = typeNameIdents(asExpr(tree.getName()));
-        List<ModuleDirective> directives = new ArrayList<>();
-        for (var dir : tree.getDirectives()) {
+        Identifier[] names = typeNameIdents(asExpr(tree.getName()));
+        List<? extends Tree> dirs = tree.getDirectives();
+        List<ModuleDirective> directiveList = new ArrayList<>(dirs.size());
+        for (var dir : dirs) {
             ModuleDirective lowered = lowerDirective(dir);
-            if (lowered != null) directives.add(lowered);
+            if (lowered != null) directiveList.add(lowered);
         }
+        ModuleDirective[] directives = directiveList.isEmpty()
+                ? EmptyArrays.MODULE_DIRECTIVE
+                : directiveList.toArray(new ModuleDirective[directiveList.size()]);
         String qualified = join(names);
         ModuleSymbol symbol = new ModuleSymbol(qualified, SymbolKey.of("MD:" + qualified, qualified, ""));
         return new ModuleDecl(tree.getModuleType() == ModuleTree.ModuleKind.OPEN,
@@ -939,44 +987,52 @@ final class JavacAstLowerer {
                     moduleTargets(opens.getModuleNames()), range(opens));
             case UsesTree uses -> new UsesDirective(typeName(typeNameIdents(asExpr(uses.getServiceName())),
                     null, range(uses.getServiceName())), range(uses));
-            case ProvidesTree provides -> new ProvidesDirective(
-                    typeName(typeNameIdents(asExpr(provides.getServiceName())), null,
-                            range(provides.getServiceName())),
-                    provides.getImplementationNames().stream()
-                            .map(n -> typeName(typeNameIdents(asExpr(n)), null, range(n))).toList(),
-                    range(provides));
+            case ProvidesTree provides -> {
+                List<? extends ExpressionTree> impls = provides.getImplementationNames();
+                TypeName[] implementations = impls.isEmpty()
+                        ? EmptyArrays.TYPE_NAME : new TypeName[impls.size()];
+                for (int i = 0; i < impls.size(); i++) {
+                    ExpressionTree n = impls.get(i);
+                    implementations[i] = typeName(typeNameIdents(asExpr(n)), null, range(n));
+                }
+                yield new ProvidesDirective(
+                        typeName(typeNameIdents(asExpr(provides.getServiceName())), null,
+                                range(provides.getServiceName())),
+                        implementations, range(provides));
+            }
             default -> null;
         };
     }
 
-    private List<List<Identifier>> moduleTargets(List<? extends ExpressionTree> names) {
-        if (names == null) return List.of();
-        List<List<Identifier>> out = new ArrayList<>();
-        for (ExpressionTree name : names) out.add(typeNameIdents(name));
+    private Identifier[][] moduleTargets(List<? extends ExpressionTree> names) {
+        if (names == null || names.isEmpty()) return EmptyArrays.IDENTIFIER_TABLE;
+        Identifier[][] out = new Identifier[names.size()][];
+        for (int i = 0; i < names.size(); i++) out[i] = typeNameIdents(names.get(i));
         return out;
     }
 
-    private List<Node> lowerErroneous(ErroneousTree tree) {
-        List<Node> out = new ArrayList<>();
-        for (Tree err : tree.getErrorTrees()) {
-            if (err instanceof ExpressionTree expr) out.add(lowerExpr(expr));
-            else if (err instanceof StatementTree stmt) out.add(lowerStmt(stmt));
-            else if (err != null) out.add(lowerTypeNode(err));
+    private Node[] lowerErroneous(ErroneousTree tree) {
+        List<? extends Tree> errs = tree.getErrorTrees();
+        List<Node> outList = new ArrayList<>(errs.size());
+        for (Tree err : errs) {
+            if (err instanceof ExpressionTree expr) outList.add(lowerExpr(expr));
+            else if (err instanceof StatementTree stmt) outList.add(lowerStmt(stmt));
+            else if (err != null) outList.add(lowerTypeNode(err));
         }
+        return outList.isEmpty() ? EmptyArrays.NODE : outList.toArray(new Node[outList.size()]);
+    }
+
+    private TypeNode[] mapTypes(List<? extends Tree> trees) {
+        if (trees == null || trees.isEmpty()) return EmptyArrays.TYPE_NODE;
+        TypeNode[] out = new TypeNode[trees.size()];
+        for (int i = 0; i < trees.size(); i++) out[i] = lowerTypeNode(trees.get(i));
         return out;
     }
 
-    private List<TypeNode> mapTypes(List<? extends Tree> trees) {
-        if (trees == null) return List.of();
-        List<TypeNode> out = new ArrayList<>();
-        for (Tree tree : trees) out.add(lowerTypeNode(tree));
-        return out;
-    }
-
-    private List<Expression> mapExprs(List<? extends ExpressionTree> trees) {
-        if (trees == null) return List.of();
-        List<Expression> out = new ArrayList<>();
-        for (ExpressionTree tree : trees) out.add(lowerExpr(tree));
+    private Expression[] mapExprs(List<? extends ExpressionTree> trees) {
+        if (trees == null || trees.isEmpty()) return EmptyArrays.EXPRESSION;
+        Expression[] out = new Expression[trees.size()];
+        for (int i = 0; i < trees.size(); i++) out[i] = lowerExpr(trees.get(i));
         return out;
     }
 
@@ -984,14 +1040,14 @@ final class JavacAstLowerer {
         return tree instanceof ExpressionTree expr ? expr : null;
     }
 
-    private List<Identifier> typeNameIdents(ExpressionTree tree) {
+    private Identifier[] typeNameIdents(ExpressionTree tree) {
         return typeNameIdents(tree, null);
     }
 
-    private List<Identifier> typeNameIdents(ExpressionTree tree, Symbol constructorName) {
+    private Identifier[] typeNameIdents(ExpressionTree tree, Symbol constructorName) {
         List<Identifier> out = new ArrayList<>();
         collectName(tree, out, constructorName);
-        return out;
+        return out.isEmpty() ? EmptyArrays.IDENTIFIER : out.toArray(new Identifier[out.size()]);
     }
 
     private void collectName(ExpressionTree tree, List<Identifier> out) {
@@ -1028,30 +1084,29 @@ final class JavacAstLowerer {
         return ident(name.toString(), SourceRange.NONE, null);
     }
 
-    private Set<ch.castleridge.javals.ast.Modifier> mods(ModifiersTree tree) {
-        if (tree == null) return Set.of();
-        EnumSet<ch.castleridge.javals.ast.Modifier> out = EnumSet.noneOf(ch.castleridge.javals.ast.Modifier.class);
+    private int mods(ModifiersTree tree) {
+        if (tree == null) return 0;
+        int bits = 0;
         for (Modifier modifier : tree.getFlags()) {
-            ch.castleridge.javals.ast.Modifier mapped = switch (modifier) {
-                case PUBLIC -> ch.castleridge.javals.ast.Modifier.PUBLIC;
-                case PROTECTED -> ch.castleridge.javals.ast.Modifier.PROTECTED;
-                case PRIVATE -> ch.castleridge.javals.ast.Modifier.PRIVATE;
-                case ABSTRACT -> ch.castleridge.javals.ast.Modifier.ABSTRACT;
-                case STATIC -> ch.castleridge.javals.ast.Modifier.STATIC;
-                case FINAL -> ch.castleridge.javals.ast.Modifier.FINAL;
-                case STRICTFP -> ch.castleridge.javals.ast.Modifier.STRICTFP;
-                case TRANSIENT -> ch.castleridge.javals.ast.Modifier.TRANSIENT;
-                case VOLATILE -> ch.castleridge.javals.ast.Modifier.VOLATILE;
-                case SYNCHRONIZED -> ch.castleridge.javals.ast.Modifier.SYNCHRONIZED;
-                case NATIVE -> ch.castleridge.javals.ast.Modifier.NATIVE;
-                case DEFAULT -> ch.castleridge.javals.ast.Modifier.DEFAULT;
-                case SEALED -> ch.castleridge.javals.ast.Modifier.SEALED;
-                case NON_SEALED -> ch.castleridge.javals.ast.Modifier.NON_SEALED;
-                default -> null;
+            bits |= switch (modifier) {
+                case PUBLIC -> ch.castleridge.javals.ast.Modifier.PUBLIC.bit();
+                case PROTECTED -> ch.castleridge.javals.ast.Modifier.PROTECTED.bit();
+                case PRIVATE -> ch.castleridge.javals.ast.Modifier.PRIVATE.bit();
+                case ABSTRACT -> ch.castleridge.javals.ast.Modifier.ABSTRACT.bit();
+                case STATIC -> ch.castleridge.javals.ast.Modifier.STATIC.bit();
+                case FINAL -> ch.castleridge.javals.ast.Modifier.FINAL.bit();
+                case STRICTFP -> ch.castleridge.javals.ast.Modifier.STRICTFP.bit();
+                case TRANSIENT -> ch.castleridge.javals.ast.Modifier.TRANSIENT.bit();
+                case VOLATILE -> ch.castleridge.javals.ast.Modifier.VOLATILE.bit();
+                case SYNCHRONIZED -> ch.castleridge.javals.ast.Modifier.SYNCHRONIZED.bit();
+                case NATIVE -> ch.castleridge.javals.ast.Modifier.NATIVE.bit();
+                case DEFAULT -> ch.castleridge.javals.ast.Modifier.DEFAULT.bit();
+                case SEALED -> ch.castleridge.javals.ast.Modifier.SEALED.bit();
+                case NON_SEALED -> ch.castleridge.javals.ast.Modifier.NON_SEALED.bit();
+                default -> 0;
             };
-            if (mapped != null) out.add(mapped);
         }
-        return out.isEmpty() ? Set.of() : Set.copyOf(out);
+        return bits;
     }
 
     private SourceRange range(Tree tree) {
@@ -1170,12 +1225,13 @@ final class JavacAstLowerer {
         String binary = elements == null ? type.getQualifiedName().toString()
                 : elements.getBinaryName(type).toString();
         SymbolKey key = astKey(element);
-        List<TypeVarSymbol> typeParams = new ArrayList<>();
+        List<? extends TypeParameterElement> typeParamElements = type.getTypeParameters();
+        TypeVarSymbol[] typeParams = typeParamElements.isEmpty()
+                ? EmptyArrays.TYPE_VAR_SYMBOL : new TypeVarSymbol[typeParamElements.size()];
         TypeSymbol symbol = new TypeSymbol(kind, binary, key, typeParams);
         interned.put(type, symbol);
-        for (TypeParameterElement param : type.getTypeParameters()) {
-            TypeVarSymbol tv = typeVarSymbol(param);
-            if (tv != null) typeParams.add(tv);
+        for (int i = 0; i < typeParamElements.size(); i++) {
+            typeParams[i] = typeVarSymbol(typeParamElements.get(i));
         }
         return symbol;
     }
@@ -1187,8 +1243,10 @@ final class JavacAstLowerer {
         TypeSymbol resolvedOwner = owner != null ? owner : typeSymbol(executable.getEnclosingElement());
         boolean constructor = executable.getKind() == ElementKind.CONSTRUCTOR;
         String name = constructor ? "<init>" : executable.getSimpleName().toString();
-        List<JType> params = new ArrayList<>();
-        for (VariableElement param : executable.getParameters()) params.add(jtype(param.asType()));
+        List<? extends VariableElement> paramElements = executable.getParameters();
+        JType[] params = paramElements.isEmpty()
+                ? EmptyArrays.JTYPE : new JType[paramElements.size()];
+        for (int i = 0; i < paramElements.size(); i++) params[i] = jtype(paramElements.get(i).asType());
         boolean synthetic = executable instanceof com.sun.tools.javac.code.Symbol.MethodSymbol ms
                 && (ms.flags() & Flags.SYNTHETIC) != 0;
         MethodSymbol symbol = new MethodSymbol(name, jtype(executable.getReturnType()), params,
@@ -1247,8 +1305,10 @@ final class JavacAstLowerer {
         if (!(element instanceof TypeParameterElement param)) return null;
         Symbol existing = interned.get(param);
         if (existing instanceof TypeVarSymbol found) return found;
-        List<JType> bounds = new ArrayList<>();
-        for (TypeMirror bound : param.getBounds()) bounds.add(jtype(bound));
+        List<? extends TypeMirror> boundMirrors = param.getBounds();
+        JType[] bounds = boundMirrors.isEmpty()
+                ? EmptyArrays.JTYPE : new JType[boundMirrors.size()];
+        for (int i = 0; i < boundMirrors.size(); i++) bounds[i] = jtype(boundMirrors.get(i));
         TypeVarSymbol symbol = new TypeVarSymbol(param.getSimpleName().toString(), bounds);
         interned.put(param, symbol);
         return symbol;
@@ -1282,8 +1342,10 @@ final class JavacAstLowerer {
                 String binary = element instanceof TypeElement te && elements != null
                         ? elements.getBinaryName(te).toString().replace('.', '/')
                         : element.getSimpleName().toString();
-                List<JType> args = new ArrayList<>();
-                for (TypeMirror arg : declared.getTypeArguments()) args.add(jtype(arg));
+                List<? extends TypeMirror> argMirrors = declared.getTypeArguments();
+                JType[] args = argMirrors.isEmpty()
+                        ? EmptyArrays.JTYPE : new JType[argMirrors.size()];
+                for (int i = 0; i < argMirrors.size(); i++) args[i] = jtype(argMirrors.get(i));
                 yield new JType.Declared(binary, args);
             }
             case TYPEVAR -> new JType.TypeVar(((TypeVariable) type).asElement().getSimpleName().toString());
@@ -1298,13 +1360,17 @@ final class JavacAstLowerer {
                 yield JType.Wildcard.unbounded();
             }
             case INTERSECTION -> {
-                List<JType> bounds = new ArrayList<>();
-                for (TypeMirror bound : ((IntersectionType) type).getBounds()) bounds.add(jtype(bound));
+                List<? extends TypeMirror> boundMirrors = ((IntersectionType) type).getBounds();
+                JType[] bounds = boundMirrors.isEmpty()
+                        ? EmptyArrays.JTYPE : new JType[boundMirrors.size()];
+                for (int i = 0; i < boundMirrors.size(); i++) bounds[i] = jtype(boundMirrors.get(i));
                 yield new JType.Intersection(bounds);
             }
             case UNION -> {
-                List<JType> alts = new ArrayList<>();
-                for (TypeMirror alt : ((UnionType) type).getAlternatives()) alts.add(jtype(alt));
+                List<? extends TypeMirror> altMirrors = ((UnionType) type).getAlternatives();
+                JType[] alts = altMirrors.isEmpty()
+                        ? EmptyArrays.JTYPE : new JType[altMirrors.size()];
+                for (int i = 0; i < altMirrors.size(); i++) alts[i] = jtype(altMirrors.get(i));
                 yield new JType.Union(alts);
             }
             default -> JType.ERROR;
@@ -1322,10 +1388,10 @@ final class JavacAstLowerer {
         try {
             kind = primitive.getPrimitiveTypeKind();
         } catch (AssertionError ignored) {
-            return new ErroneousType(List.of(), resolved, range);
+            return new ErroneousType(EmptyArrays.NODE, resolved, range);
         }
         if (kind == TypeKind.ERROR || kind == TypeKind.NONE || kind == null) {
-            return new ErroneousType(List.of(), resolved, range);
+            return new ErroneousType(EmptyArrays.NODE, resolved, range);
         }
         if (kind == TypeKind.VOID) return new VoidTypeNode(resolved, range);
         return new PrimitiveTypeNode(primitiveKind(kind), resolved, range);
@@ -1400,11 +1466,11 @@ final class JavacAstLowerer {
         };
     }
 
-    private static String join(List<Identifier> names) {
+    private static String join(Identifier[] names) {
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < names.size(); i++) {
+        for (int i = 0; i < names.length; i++) {
             if (i > 0) sb.append('.');
-            sb.append(names.get(i).name());
+            sb.append(names[i].name());
         }
         return sb.toString();
     }

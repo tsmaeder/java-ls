@@ -6,13 +6,12 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class MethodSymbol implements Symbol {
 
     private final String name;
     private final JType returnType;
-    private final List<JType> parameterTypes;
+    private final JType[] parameterTypes;
     private final TypeSymbol owner;
     private final SymbolKey key;
     private final boolean constructor;
@@ -20,14 +19,14 @@ public final class MethodSymbol implements Symbol {
 
     public MethodSymbol(String name,
                         JType returnType,
-                        List<JType> parameterTypes,
+                        JType[] parameterTypes,
                         TypeSymbol owner,
                         SymbolKey key,
                         boolean constructor,
                         boolean synthetic) {
         this.name = name == null ? "" : name;
         this.returnType = returnType == null ? JType.ERROR : returnType;
-        this.parameterTypes = parameterTypes == null ? List.of() : List.copyOf(parameterTypes);
+        this.parameterTypes = EmptyArrays.orEmpty(parameterTypes, EmptyArrays.JTYPE);
         this.owner = owner;
         this.key = key;
         this.constructor = constructor;
@@ -48,7 +47,7 @@ public final class MethodSymbol implements Symbol {
         return returnType;
     }
 
-    public List<JType> parameterTypes() {
+    public JType[] parameterTypes() {
         return parameterTypes;
     }
 

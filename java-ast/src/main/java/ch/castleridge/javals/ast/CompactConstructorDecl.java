@@ -6,26 +6,24 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
-import java.util.Set;
 
 public final class CompactConstructorDecl extends Declaration {
 
-    private final Set<Modifier> modifiers;
-    private final List<Annotation> annotations;
+    private final int modifiers;
+    private final Annotation[] annotations;
     private final Identifier name;
     private final Block body;
     private final MethodSymbol symbol;
 
-    public CompactConstructorDecl(Set<Modifier> modifiers,
-                                  List<Annotation> annotations,
+    public CompactConstructorDecl(int modifiers,
+                                  Annotation[] annotations,
                                   Identifier name,
                                   Block body,
                                   MethodSymbol symbol,
                                   SourceRange range) {
         super(range);
-        this.modifiers = MethodDecl.copyMods(modifiers);
-        this.annotations = annotations == null ? List.of() : List.copyOf(annotations);
+        this.modifiers = modifiers;
+        this.annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION);
         this.name = name;
         this.body = body;
         this.symbol = symbol;
@@ -34,11 +32,11 @@ public final class CompactConstructorDecl extends Declaration {
         if (body != null) body.setParent(this);
     }
 
-    public Set<Modifier> modifiers() {
+    public int modifiers() {
         return modifiers;
     }
 
-    public List<Annotation> annotations() {
+    public Annotation[] annotations() {
         return annotations;
     }
 

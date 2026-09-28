@@ -6,17 +6,16 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class TypeVarSymbol implements Symbol {
 
     private final String name;
-    private final List<JType> bounds;
+    private final JType[] bounds;
     private final SymbolKey key;
 
-    public TypeVarSymbol(String name, List<JType> bounds) {
+    public TypeVarSymbol(String name, JType[] bounds) {
         this.name = name == null ? "" : name;
-        this.bounds = bounds == null ? List.of() : List.copyOf(bounds);
+        this.bounds = EmptyArrays.orEmpty(bounds, EmptyArrays.JTYPE);
         this.key = SymbolKey.local(this.name);
     }
 
@@ -30,7 +29,7 @@ public final class TypeVarSymbol implements Symbol {
         return new JType.TypeVar(name);
     }
 
-    public List<JType> bounds() {
+    public JType[] bounds() {
         return bounds;
     }
 

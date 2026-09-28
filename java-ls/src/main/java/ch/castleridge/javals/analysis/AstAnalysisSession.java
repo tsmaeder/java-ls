@@ -20,6 +20,7 @@ import org.eclipse.lsp4j.TypeHierarchyItem;
 
 import ch.castleridge.javals.ast.AstVisitor;
 import ch.castleridge.javals.ast.CompilationUnit;
+import ch.castleridge.javals.ast.EmptyArrays;
 import ch.castleridge.javals.ast.Identifier;
 import ch.castleridge.javals.ast.SourceFile;
 import ch.castleridge.javals.ast.SourceRange;
@@ -59,7 +60,7 @@ public final class AstAnalysisSession implements AnalysisSession {
 
     public static AstAnalysisSession empty() {
         return new AstAnalysisSession(
-                new CompilationUnit(new SourceFile("", ""), null, List.of(), List.of(), null, SourceRange.NONE),
+                new CompilationUnit(new SourceFile("", ""), null, EmptyArrays.IMPORT_DECL, EmptyArrays.TYPE_DECL, null, SourceRange.NONE),
                 List.of(), null, ClasspathOrder.UNRESTRICTED, null, Map.of());
     }
 

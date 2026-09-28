@@ -6,16 +6,15 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class ErroneousStmt extends Statement {
-    private final List<Node> fragments;
-    public ErroneousStmt(List<Node> fragments, SourceRange range) {
+    private final Node[] fragments;
+    public ErroneousStmt(Node[] fragments, SourceRange range) {
         super(range);
-        this.fragments = fragments == null ? List.of() : List.copyOf(fragments);
+        this.fragments = EmptyArrays.orEmpty(fragments, EmptyArrays.NODE);
         for (Node __c : this.fragments) __c.setParent(this);
     }
-    public List<Node> fragments() { return fragments; }
+    public Node[] fragments() { return fragments; }
     @Override
     public Node nodeAt(int offset) {
         if (!covers(offset)) return null;

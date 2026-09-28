@@ -6,19 +6,18 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class ArrayInitExpr extends Expression {
 
-    private final List<Expression> elements;
+    private final Expression[] elements;
 
-    public ArrayInitExpr(List<Expression> elements, JType type, SourceRange range) {
+    public ArrayInitExpr(Expression[] elements, JType type, SourceRange range) {
         super(range, type);
-        this.elements = elements == null ? List.of() : List.copyOf(elements);
+        this.elements = EmptyArrays.orEmpty(elements, EmptyArrays.EXPRESSION);
         for (Node __c : this.elements) __c.setParent(this);
     }
 
-    public List<Expression> elements() {
+    public Expression[] elements() {
         return elements;
     }
     @Override

@@ -6,28 +6,27 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class ExportsDirective extends ModuleDirective {
 
-    private final List<Identifier> packageName;
-    private final List<List<Identifier>> targets;
+    private final Identifier[] packageName;
+    private final Identifier[][] targets;
 
-    public ExportsDirective(List<Identifier> packageName, List<List<Identifier>> targets, SourceRange range) {
+    public ExportsDirective(Identifier[] packageName, Identifier[][] targets, SourceRange range) {
         super(range);
-        this.packageName = packageName == null ? List.of() : List.copyOf(packageName);
-        this.targets = targets == null ? List.of() : List.copyOf(targets);
+        this.packageName = EmptyArrays.orEmpty(packageName, EmptyArrays.IDENTIFIER);
+        this.targets = EmptyArrays.orEmpty(targets, EmptyArrays.IDENTIFIER_TABLE);
         for (Identifier name : this.packageName) name.setParent(this);
-        for (List<Identifier> target : this.targets) {
+        for (Identifier[] target : this.targets) {
             for (Identifier name : target) name.setParent(this);
         }
     }
 
-    public List<Identifier> packageName() {
+    public Identifier[] packageName() {
         return packageName;
     }
 
-    public List<List<Identifier>> targets() {
+    public Identifier[][] targets() {
         return targets;
     }
 
@@ -36,7 +35,7 @@ public final class ExportsDirective extends ModuleDirective {
         if (!covers(offset)) return null;
         Node deepest = this;
         for (Identifier name : packageName) deepest = deeper(deepest, name, offset);
-        for (List<Identifier> target : targets) {
+        for (Identifier[] target : targets) {
             for (Identifier name : target) deepest = deeper(deepest, name, offset);
         }
         return deepest;

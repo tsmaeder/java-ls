@@ -6,19 +6,18 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class ErroneousType extends TypeNode {
 
-    private final List<Node> fragments;
+    private final Node[] fragments;
 
-    public ErroneousType(List<Node> fragments, JType resolved, SourceRange range) {
+    public ErroneousType(Node[] fragments, JType resolved, SourceRange range) {
         super(range, coalesce(resolved, JType.ERROR));
-        this.fragments = fragments == null ? List.of() : List.copyOf(fragments);
+        this.fragments = EmptyArrays.orEmpty(fragments, EmptyArrays.NODE);
         for (Node __c : this.fragments) __c.setParent(this);
     }
 
-    public List<Node> fragments() {
+    public Node[] fragments() {
         return fragments;
     }
     @Override

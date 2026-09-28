@@ -6,23 +6,22 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class LambdaExpr extends Expression {
 
-    private final List<ParamDecl> parameters;
+    private final ParamDecl[] parameters;
     private final boolean implicitParameters;
     private final Expression expressionBody;
     private final Block blockBody;
 
-    public LambdaExpr(List<ParamDecl> parameters,
+    public LambdaExpr(ParamDecl[] parameters,
                       boolean implicitParameters,
                       Expression expressionBody,
                       Block blockBody,
                       JType type,
                       SourceRange range) {
         super(range, type);
-        this.parameters = parameters == null ? List.of() : List.copyOf(parameters);
+        this.parameters = EmptyArrays.orEmpty(parameters, EmptyArrays.PARAM_DECL);
         this.implicitParameters = implicitParameters;
         this.expressionBody = expressionBody;
         this.blockBody = blockBody;
@@ -31,7 +30,7 @@ public final class LambdaExpr extends Expression {
         if (blockBody != null) blockBody.setParent(this);
     }
 
-    public List<ParamDecl> parameters() {
+    public ParamDecl[] parameters() {
         return parameters;
     }
 

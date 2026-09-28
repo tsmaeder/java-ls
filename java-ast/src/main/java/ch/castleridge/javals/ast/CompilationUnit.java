@@ -6,28 +6,27 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 import java.net.URI;
 
 public final class CompilationUnit extends Node {
 
     private final SourceFile source;
     private final PackageDecl packageDecl;
-    private final List<ImportDecl> imports;
-    private final List<TypeDecl> types;
+    private final ImportDecl[] imports;
+    private final TypeDecl[] types;
     private final ModuleDecl module;
 
     public CompilationUnit(SourceFile source,
                            PackageDecl packageDecl,
-                           List<ImportDecl> imports,
-                           List<TypeDecl> types,
+                           ImportDecl[] imports,
+                           TypeDecl[] types,
                            ModuleDecl module,
                            SourceRange range) {
         super(range);
         this.source = source == null ? new SourceFile("", "") : source;
         this.packageDecl = packageDecl;
-        this.imports = imports == null ? List.of() : List.copyOf(imports);
-        this.types = types == null ? List.of() : List.copyOf(types);
+        this.imports = EmptyArrays.orEmpty(imports, EmptyArrays.IMPORT_DECL);
+        this.types = EmptyArrays.orEmpty(types, EmptyArrays.TYPE_DECL);
         this.module = module;
         if (packageDecl != null) packageDecl.setParent(this);
         for (Node __c : this.imports) __c.setParent(this);
@@ -47,11 +46,11 @@ public final class CompilationUnit extends Node {
         return packageDecl;
     }
 
-    public List<ImportDecl> imports() {
+    public ImportDecl[] imports() {
         return imports;
     }
 
-    public List<TypeDecl> types() {
+    public TypeDecl[] types() {
         return types;
     }
 

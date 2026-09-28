@@ -6,17 +6,16 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class Annotation extends Expression {
 
     private final TypeName name;
-    private final List<AnnoArg> arguments;
+    private final AnnoArg[] arguments;
 
-    public Annotation(TypeName name, List<AnnoArg> arguments, JType type, SourceRange range) {
+    public Annotation(TypeName name, AnnoArg[] arguments, JType type, SourceRange range) {
         super(range, type);
         this.name = name;
-        this.arguments = arguments == null ? List.of() : List.copyOf(arguments);
+        this.arguments = EmptyArrays.orEmpty(arguments, EmptyArrays.ANNO_ARG);
         if (name != null) name.setParent(this);
         for (Node __c : this.arguments) __c.setParent(this);
     }
@@ -25,7 +24,7 @@ public final class Annotation extends Expression {
         return name;
     }
 
-    public List<AnnoArg> arguments() {
+    public AnnoArg[] arguments() {
         return arguments;
     }
     @Override

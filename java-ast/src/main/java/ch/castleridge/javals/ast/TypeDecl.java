@@ -6,48 +6,44 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.EnumSet;
-import java.util.List;
-import java.util.Set;
 
 public final class TypeDecl extends Declaration {
 
     private final TypeDeclKind kind;
-    private final Set<Modifier> modifiers;
-    private final List<Annotation> annotations;
+    private final int modifiers;
+    private final Annotation[] annotations;
     private final Identifier name;
-    private final List<TypeParamDecl> typeParams;
+    private final TypeParamDecl[] typeParams;
     private final TypeNode superclass;
-    private final List<TypeNode> interfaces;
-    private final List<TypeNode> permits;
-    private final List<RecordComponentDecl> recordComponents;
-    private final List<Declaration> members;
+    private final TypeNode[] interfaces;
+    private final TypeNode[] permits;
+    private final RecordComponentDecl[] recordComponents;
+    private final Declaration[] members;
     private final TypeSymbol symbol;
 
     public TypeDecl(TypeDeclKind kind,
-                    Set<Modifier> modifiers,
-                    List<Annotation> annotations,
+                    int modifiers,
+                    Annotation[] annotations,
                     Identifier name,
-                    List<TypeParamDecl> typeParams,
+                    TypeParamDecl[] typeParams,
                     TypeNode superclass,
-                    List<TypeNode> interfaces,
-                    List<TypeNode> permits,
-                    List<RecordComponentDecl> recordComponents,
-                    List<Declaration> members,
+                    TypeNode[] interfaces,
+                    TypeNode[] permits,
+                    RecordComponentDecl[] recordComponents,
+                    Declaration[] members,
                     TypeSymbol symbol,
                     SourceRange range) {
         super(range);
         this.kind = kind == null ? TypeDeclKind.CLASS : kind;
-        this.modifiers = modifiers == null || modifiers.isEmpty()
-                ? Set.of() : Set.copyOf(EnumSet.copyOf(modifiers));
-        this.annotations = annotations == null ? List.of() : List.copyOf(annotations);
+        this.modifiers = modifiers;
+        this.annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION);
         this.name = name;
-        this.typeParams = typeParams == null ? List.of() : List.copyOf(typeParams);
+        this.typeParams = EmptyArrays.orEmpty(typeParams, EmptyArrays.TYPE_PARAM);
         this.superclass = superclass;
-        this.interfaces = interfaces == null ? List.of() : List.copyOf(interfaces);
-        this.permits = permits == null ? List.of() : List.copyOf(permits);
-        this.recordComponents = recordComponents == null ? List.of() : List.copyOf(recordComponents);
-        this.members = members == null ? List.of() : List.copyOf(members);
+        this.interfaces = EmptyArrays.orEmpty(interfaces, EmptyArrays.TYPE_NODE);
+        this.permits = EmptyArrays.orEmpty(permits, EmptyArrays.TYPE_NODE);
+        this.recordComponents = EmptyArrays.orEmpty(recordComponents, EmptyArrays.RECORD_COMPONENT);
+        this.members = EmptyArrays.orEmpty(members, EmptyArrays.DECLARATION);
         this.symbol = symbol;
         for (Node __c : this.annotations) __c.setParent(this);
         if (name != null) name.setParent(this);
@@ -63,11 +59,11 @@ public final class TypeDecl extends Declaration {
         return kind;
     }
 
-    public Set<Modifier> modifiers() {
+    public int modifiers() {
         return modifiers;
     }
 
-    public List<Annotation> annotations() {
+    public Annotation[] annotations() {
         return annotations;
     }
 
@@ -75,7 +71,7 @@ public final class TypeDecl extends Declaration {
         return name;
     }
 
-    public List<TypeParamDecl> typeParams() {
+    public TypeParamDecl[] typeParams() {
         return typeParams;
     }
 
@@ -83,19 +79,19 @@ public final class TypeDecl extends Declaration {
         return superclass;
     }
 
-    public List<TypeNode> interfaces() {
+    public TypeNode[] interfaces() {
         return interfaces;
     }
 
-    public List<TypeNode> permits() {
+    public TypeNode[] permits() {
         return permits;
     }
 
-    public List<RecordComponentDecl> recordComponents() {
+    public RecordComponentDecl[] recordComponents() {
         return recordComponents;
     }
 
-    public List<Declaration> members() {
+    public Declaration[] members() {
         return members;
     }
 

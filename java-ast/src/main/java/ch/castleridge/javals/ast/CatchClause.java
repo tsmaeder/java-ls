@@ -6,7 +6,6 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class CatchClause extends Node {
     private final ParamDecl parameter;

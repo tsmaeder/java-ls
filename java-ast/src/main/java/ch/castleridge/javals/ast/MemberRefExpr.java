@@ -6,7 +6,6 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class MemberRefExpr extends Expression {
 
@@ -16,13 +15,13 @@ public final class MemberRefExpr extends Expression {
     private final TypeNode qualifierType;
     private final Mode mode;
     private final Identifier name;
-    private final List<TypeNode> typeArguments;
+    private final TypeNode[] typeArguments;
 
     public MemberRefExpr(Expression qualifierExpr,
                          TypeNode qualifierType,
                          Mode mode,
                          Identifier name,
-                         List<TypeNode> typeArguments,
+                         TypeNode[] typeArguments,
                          JType type,
                          SourceRange range) {
         super(range, type);
@@ -30,7 +29,7 @@ public final class MemberRefExpr extends Expression {
         this.qualifierType = qualifierType;
         this.mode = mode == null ? Mode.INVOKE : mode;
         this.name = name;
-        this.typeArguments = typeArguments == null ? List.of() : List.copyOf(typeArguments);
+        this.typeArguments = EmptyArrays.orEmpty(typeArguments, EmptyArrays.TYPE_NODE);
         if (qualifierExpr != null) qualifierExpr.setParent(this);
         if (qualifierType != null) qualifierType.setParent(this);
         if (name != null) name.setParent(this);
@@ -53,7 +52,7 @@ public final class MemberRefExpr extends Expression {
         return name;
     }
 
-    public List<TypeNode> typeArguments() {
+    public TypeNode[] typeArguments() {
         return typeArguments;
     }
     @Override

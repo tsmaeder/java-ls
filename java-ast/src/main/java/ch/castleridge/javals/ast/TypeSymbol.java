@@ -7,32 +7,33 @@
 package ch.castleridge.javals.ast;
 
 import java.util.ArrayList;
-import java.util.List;
 
 public final class TypeSymbol implements Symbol {
+
+    private static final Symbol[] NO_MEMBERS = new Symbol[0];
 
     private final TypeDeclKind kind;
     private final String jvmBinaryName;
     private final SymbolKey key;
     private final JType type;
-    private final List<TypeVarSymbol> typeParams;
-    private final List<Symbol> members = new ArrayList<>();
+    private final TypeVarSymbol[] typeParams;
+    private final ArrayList<Symbol> members = new ArrayList<>();
     private final boolean synthetic;
 
-    public TypeSymbol(TypeDeclKind kind, String jvmBinaryName, SymbolKey key, List<TypeVarSymbol> typeParams) {
+    public TypeSymbol(TypeDeclKind kind, String jvmBinaryName, SymbolKey key, TypeVarSymbol[] typeParams) {
         this(kind, jvmBinaryName, key, typeParams, false);
     }
 
     public TypeSymbol(TypeDeclKind kind,
                       String jvmBinaryName,
                       SymbolKey key,
-                      List<TypeVarSymbol> typeParams,
+                      TypeVarSymbol[] typeParams,
                       boolean synthetic) {
         this.kind = kind == null ? TypeDeclKind.CLASS : kind;
         this.jvmBinaryName = jvmBinaryName == null ? "" : jvmBinaryName;
         this.key = key;
         this.type = JType.Declared.of(this.jvmBinaryName.replace('.', '/'));
-        this.typeParams = typeParams == null ? List.of() : List.copyOf(typeParams);
+        this.typeParams = EmptyArrays.orEmpty(typeParams, EmptyArrays.TYPE_VAR_SYMBOL);
         this.synthetic = synthetic;
     }
 
@@ -44,12 +45,12 @@ public final class TypeSymbol implements Symbol {
         return jvmBinaryName;
     }
 
-    public List<TypeVarSymbol> typeParams() {
+    public TypeVarSymbol[] typeParams() {
         return typeParams;
     }
 
-    public List<Symbol> members() {
-        return List.copyOf(members);
+    public Symbol[] members() {
+        return members.isEmpty() ? NO_MEMBERS : members.toArray(NO_MEMBERS);
     }
 
     public void addMember(Symbol member) {

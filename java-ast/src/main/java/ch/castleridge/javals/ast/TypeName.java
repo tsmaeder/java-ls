@@ -6,30 +6,29 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class TypeName extends TypeNode {
 
-    private final List<Identifier> names;
+    private final Identifier[] names;
 
-    public TypeName(List<Identifier> names, JType resolved, SourceRange range) {
+    public TypeName(Identifier[] names, JType resolved, SourceRange range) {
         super(range, coalesce(resolved, defaultFrom(names)));
-        this.names = names == null ? List.of() : List.copyOf(names);
+        this.names = EmptyArrays.orEmpty(names, EmptyArrays.IDENTIFIER);
         for (Node __c : this.names) __c.setParent(this);
     }
 
-    private static JType defaultFrom(List<Identifier> names) {
-        if (names == null || names.isEmpty()) return null;
-        Identifier last = names.get(names.size() - 1);
+    private static JType defaultFrom(Identifier[] names) {
+        if (names == null || names.length == 0) return null;
+        Identifier last = names[names.length - 1];
         return last != null && last.symbol() != null ? last.symbol().type() : null;
     }
 
-    public List<Identifier> names() {
+    public Identifier[] names() {
         return names;
     }
 
     public Identifier simpleName() {
-        return names.isEmpty() ? null : names.get(names.size() - 1);
+        return names.length == 0 ? null : names[names.length - 1];
     }
     @Override
     public Node nodeAt(int offset) {

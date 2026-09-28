@@ -6,7 +6,6 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class BreakStmt extends Statement {
     private final Identifier label;

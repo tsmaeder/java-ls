@@ -250,8 +250,8 @@ final class AstCompleter {
 
     private static void addImported(CompilationUnit cu, String prefix, Map<String, CompletionItem> items) {
         for (ImportDecl imp : cu.imports()) {
-            if (imp.onDemand() || imp.names().isEmpty()) continue;
-            Identifier last = imp.names().get(imp.names().size() - 1);
+            if (imp.onDemand() || imp.names().length == 0) continue;
+            Identifier last = imp.names()[imp.names().length - 1];
             if (!last.name().startsWith(prefix)) continue;
             items.putIfAbsent("n:" + last.name(), last.symbol() instanceof TypeSymbol type
                     ? typeItem(last.name(), type)
@@ -295,9 +295,9 @@ final class AstCompleter {
         for (ImportDecl imp : cu.imports()) {
             if (imp.staticImport()) continue;
             StringBuilder fqcn = new StringBuilder();
-            for (int i = 0; i < imp.names().size(); i++) {
+            for (int i = 0; i < imp.names().length; i++) {
                 if (i > 0) fqcn.append('.');
-                fqcn.append(imp.names().get(i).name());
+                fqcn.append(imp.names()[i].name());
             }
             if (imp.onDemand()) fqcn.append(".*");
             out.add(fqcn.toString());
@@ -308,8 +308,8 @@ final class AstCompleter {
     private static TextEdit importEdit(CompilationUnit cu, String fqcn) {
         SourceFile source = cu.source();
         int insert = 0;
-        if (!cu.imports().isEmpty()) {
-            insert = cu.imports().get(cu.imports().size() - 1).range().end();
+        if (cu.imports().length > 0) {
+            insert = cu.imports()[cu.imports().length - 1].range().end();
         } else if (cu.packageDecl() != null) {
             insert = cu.packageDecl().range().end();
         }
@@ -636,10 +636,10 @@ final class AstCompleter {
         StringBuilder sb = new StringBuilder();
         if (!symbol.constructor()) sb.append(symbol.returnType()).append(' ');
         sb.append(symbol.name()).append('(');
-        List<JType> params = symbol.parameterTypes();
-        for (int i = 0; i < params.size(); i++) {
+        JType[] params = symbol.parameterTypes();
+        for (int i = 0; i < params.length; i++) {
             if (i > 0) sb.append(", ");
-            sb.append(params.get(i));
+            sb.append(params[i]);
         }
         return sb.append(')').toString();
     }

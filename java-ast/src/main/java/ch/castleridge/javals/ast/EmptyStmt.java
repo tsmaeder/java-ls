@@ -6,7 +6,6 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class EmptyStmt extends Statement {
     public EmptyStmt(SourceRange range) { super(range); }

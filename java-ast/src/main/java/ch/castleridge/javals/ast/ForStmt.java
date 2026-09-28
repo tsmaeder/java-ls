@@ -6,27 +6,26 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class ForStmt extends Statement {
-    private final List<Node> init;
+    private final Node[] init;
     private final Expression condition;
-    private final List<Expression> update;
+    private final Expression[] update;
     private final Statement body;
-    public ForStmt(List<Node> init, Expression condition, List<Expression> update, Statement body, SourceRange range) {
+    public ForStmt(Node[] init, Expression condition, Expression[] update, Statement body, SourceRange range) {
         super(range);
-        this.init = init == null ? List.of() : List.copyOf(init);
+        this.init = EmptyArrays.orEmpty(init, EmptyArrays.NODE);
         this.condition = condition;
-        this.update = update == null ? List.of() : List.copyOf(update);
+        this.update = EmptyArrays.orEmpty(update, EmptyArrays.EXPRESSION);
         this.body = body;
         for (Node __c : this.init) __c.setParent(this);
         if (condition != null) condition.setParent(this);
         for (Node __c : this.update) __c.setParent(this);
         if (body != null) body.setParent(this);
     }
-    public List<Node> init() { return init; }
+    public Node[] init() { return init; }
     public Expression condition() { return condition; }
-    public List<Expression> update() { return update; }
+    public Expression[] update() { return update; }
     public Statement body() { return body; }
     @Override
     public Node nodeAt(int offset) {

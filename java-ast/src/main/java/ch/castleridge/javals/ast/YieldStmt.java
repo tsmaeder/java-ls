@@ -6,7 +6,6 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class YieldStmt extends Statement {
     private final Expression value;

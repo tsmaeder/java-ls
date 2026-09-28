@@ -6,19 +6,18 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class ErroneousExpr extends Expression {
 
-    private final List<Node> fragments;
+    private final Node[] fragments;
 
-    public ErroneousExpr(List<Node> fragments, JType type, SourceRange range) {
+    public ErroneousExpr(Node[] fragments, JType type, SourceRange range) {
         super(range, coalesce(type, JType.ERROR));
-        this.fragments = fragments == null ? List.of() : List.copyOf(fragments);
+        this.fragments = EmptyArrays.orEmpty(fragments, EmptyArrays.NODE);
         for (Node __c : this.fragments) __c.setParent(this);
     }
 
-    public List<Node> fragments() {
+    public Node[] fragments() {
         return fragments;
     }
     @Override

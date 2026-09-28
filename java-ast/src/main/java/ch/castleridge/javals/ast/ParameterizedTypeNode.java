@@ -6,20 +6,19 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class ParameterizedTypeNode extends TypeNode {
 
     private final TypeNode raw;
-    private final List<TypeNode> typeArguments;
+    private final TypeNode[] typeArguments;
 
     public ParameterizedTypeNode(TypeNode raw,
-                                 List<TypeNode> typeArguments,
+                                 TypeNode[] typeArguments,
                                  JType resolved,
                                  SourceRange range) {
         super(range, coalesce(resolved, null));
         this.raw = raw;
-        this.typeArguments = typeArguments == null ? List.of() : List.copyOf(typeArguments);
+        this.typeArguments = EmptyArrays.orEmpty(typeArguments, EmptyArrays.TYPE_NODE);
         if (raw != null) raw.setParent(this);
         for (Node __c : this.typeArguments) __c.setParent(this);
     }
@@ -28,7 +27,7 @@ public final class ParameterizedTypeNode extends TypeNode {
         return raw;
     }
 
-    public List<TypeNode> typeArguments() {
+    public TypeNode[] typeArguments() {
         return typeArguments;
     }
     @Override

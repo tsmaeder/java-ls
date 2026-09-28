@@ -6,19 +6,18 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class ImportDecl extends Node {
 
     private final boolean staticImport;
     private final boolean onDemand;
-    private final List<Identifier> names;
+    private final Identifier[] names;
 
-    public ImportDecl(boolean staticImport, boolean onDemand, List<Identifier> names, SourceRange range) {
+    public ImportDecl(boolean staticImport, boolean onDemand, Identifier[] names, SourceRange range) {
         super(range);
         this.staticImport = staticImport;
         this.onDemand = onDemand;
-        this.names = names == null ? List.of() : List.copyOf(names);
+        this.names = EmptyArrays.orEmpty(names, EmptyArrays.IDENTIFIER);
         for (Node __c : this.names) __c.setParent(this);
     }
 
@@ -30,7 +29,7 @@ public final class ImportDecl extends Node {
         return onDemand;
     }
 
-    public List<Identifier> names() {
+    public Identifier[] names() {
         return names;
     }
     @Override

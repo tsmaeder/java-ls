@@ -6,9 +6,6 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
  * Resolved type on expressions and type-use nodes. Independent of the
  * indexer's {@code Type} model (which still carries unresolved names).
@@ -75,16 +72,16 @@ public sealed interface JType
         }
     }
 
-    record Declared(String jvmBinaryName, List<JType> typeArgs) implements JType {
+    record Declared(String jvmBinaryName, JType[] typeArgs) implements JType {
         public Declared {
             if (jvmBinaryName == null || jvmBinaryName.isEmpty()) {
                 throw new IllegalArgumentException("jvmBinaryName");
             }
-            typeArgs = typeArgs == null || typeArgs.isEmpty() ? List.of() : List.copyOf(typeArgs);
+            typeArgs = EmptyArrays.orEmpty(typeArgs, EmptyArrays.JTYPE);
         }
 
         public static Declared of(String jvmBinaryName) {
-            return new Declared(jvmBinaryName, List.of());
+            return new Declared(jvmBinaryName, EmptyArrays.JTYPE);
         }
 
         public String binaryName() {
@@ -94,11 +91,11 @@ public sealed interface JType
         @Override
         public String toString() {
             String name = binaryName().replace('$', '.');
-            if (typeArgs.isEmpty()) return name;
+            if (typeArgs.length == 0) return name;
             StringBuilder sb = new StringBuilder(name).append('<');
-            for (int i = 0; i < typeArgs.size(); i++) {
+            for (int i = 0; i < typeArgs.length; i++) {
                 if (i > 0) sb.append(',');
-                sb.append(typeArgs.get(i));
+                sb.append(typeArgs[i]);
             }
             return sb.append('>').toString();
         }
@@ -134,33 +131,33 @@ public sealed interface JType
         }
     }
 
-    record Intersection(List<JType> bounds) implements JType {
+    record Intersection(JType[] bounds) implements JType {
         public Intersection {
-            bounds = bounds == null ? List.of() : List.copyOf(bounds);
+            bounds = EmptyArrays.orEmpty(bounds, EmptyArrays.JTYPE);
         }
 
         @Override
         public String toString() {
             StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < bounds.size(); i++) {
+            for (int i = 0; i < bounds.length; i++) {
                 if (i > 0) sb.append('&');
-                sb.append(bounds.get(i));
+                sb.append(bounds[i]);
             }
             return sb.toString();
         }
     }
 
-    record Union(List<JType> alternatives) implements JType {
+    record Union(JType[] alternatives) implements JType {
         public Union {
-            alternatives = alternatives == null ? List.of() : List.copyOf(alternatives);
+            alternatives = EmptyArrays.orEmpty(alternatives, EmptyArrays.JTYPE);
         }
 
         @Override
         public String toString() {
             StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < alternatives.size(); i++) {
+            for (int i = 0; i < alternatives.length; i++) {
                 if (i > 0) sb.append('|');
-                sb.append(alternatives.get(i));
+                sb.append(alternatives[i]);
             }
             return sb.toString();
         }

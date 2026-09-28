@@ -6,7 +6,6 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class LocalTypeStmt extends Statement {
     private final TypeDecl type;

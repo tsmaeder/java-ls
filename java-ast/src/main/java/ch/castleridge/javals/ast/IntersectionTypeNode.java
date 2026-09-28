@@ -6,29 +6,27 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.ArrayList;
-import java.util.List;
-
 public final class IntersectionTypeNode extends TypeNode {
 
-    private final List<TypeNode> bounds;
+    private final TypeNode[] bounds;
 
-    public IntersectionTypeNode(List<TypeNode> bounds, JType resolved, SourceRange range) {
+    public IntersectionTypeNode(TypeNode[] bounds, JType resolved, SourceRange range) {
         super(range, coalesce(resolved, defaultFrom(bounds)));
-        this.bounds = bounds == null ? List.of() : List.copyOf(bounds);
+        this.bounds = EmptyArrays.orEmpty(bounds, EmptyArrays.TYPE_NODE);
         for (Node __c : this.bounds) __c.setParent(this);
     }
 
-    private static JType defaultFrom(List<TypeNode> bounds) {
-        List<TypeNode> bs = bounds == null ? List.of() : bounds;
-        List<JType> types = new ArrayList<>();
-        for (TypeNode bound : bs) types.add(bound.resolvedType());
+    private static JType defaultFrom(TypeNode[] bounds) {
+        TypeNode[] bs = EmptyArrays.orEmpty(bounds, EmptyArrays.TYPE_NODE);
+        JType[] types = new JType[bs.length];
+        for (int i = 0; i < bs.length; i++) types[i] = bs[i].resolvedType();
         return new JType.Intersection(types);
     }
 
-    public List<TypeNode> bounds() {
+    public TypeNode[] bounds() {
         return bounds;
     }
+
     @Override
     public Node nodeAt(int offset) {
         if (!covers(offset)) return null;

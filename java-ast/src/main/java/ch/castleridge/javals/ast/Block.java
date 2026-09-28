@@ -6,21 +6,20 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class Block extends Statement {
 
     private final boolean staticBlock;
-    private final List<Statement> statements;
+    private final Statement[] statements;
 
-    public Block(boolean staticBlock, List<Statement> statements, SourceRange range) {
+    public Block(boolean staticBlock, Statement[] statements, SourceRange range) {
         super(range);
         this.staticBlock = staticBlock;
-        this.statements = statements == null ? List.of() : List.copyOf(statements);
+        this.statements = EmptyArrays.orEmpty(statements, EmptyArrays.STATEMENT);
         for (Node __c : this.statements) __c.setParent(this);
     }
 
-    public Block(List<Statement> statements, SourceRange range) {
+    public Block(Statement[] statements, SourceRange range) {
         this(false, statements, range);
     }
 
@@ -28,7 +27,7 @@ public final class Block extends Statement {
         return staticBlock;
     }
 
-    public List<Statement> statements() {
+    public Statement[] statements() {
         return statements;
     }
     @Override

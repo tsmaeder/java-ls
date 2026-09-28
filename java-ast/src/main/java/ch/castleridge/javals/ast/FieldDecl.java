@@ -6,36 +6,34 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
-import java.util.Set;
 
 public final class FieldDecl extends Declaration {
 
-    private final Set<Modifier> modifiers;
-    private final List<Annotation> annotations;
+    private final int modifiers;
+    private final Annotation[] annotations;
     private final TypeNode type;
-    private final List<VarFragment> fragments;
+    private final VarFragment[] fragments;
 
-    public FieldDecl(Set<Modifier> modifiers,
-                     List<Annotation> annotations,
+    public FieldDecl(int modifiers,
+                     Annotation[] annotations,
                      TypeNode type,
-                     List<VarFragment> fragments,
+                     VarFragment[] fragments,
                      SourceRange range) {
         super(range);
-        this.modifiers = MethodDecl.copyMods(modifiers);
-        this.annotations = annotations == null ? List.of() : List.copyOf(annotations);
+        this.modifiers = modifiers;
+        this.annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION);
         this.type = type;
-        this.fragments = fragments == null ? List.of() : List.copyOf(fragments);
+        this.fragments = EmptyArrays.orEmpty(fragments, EmptyArrays.VAR_FRAGMENT);
         for (Node __c : this.annotations) __c.setParent(this);
         if (type != null) type.setParent(this);
         for (Node __c : this.fragments) __c.setParent(this);
     }
 
-    public Set<Modifier> modifiers() {
+    public int modifiers() {
         return modifiers;
     }
 
-    public List<Annotation> annotations() {
+    public Annotation[] annotations() {
         return annotations;
     }
 
@@ -43,7 +41,7 @@ public final class FieldDecl extends Declaration {
         return type;
     }
 
-    public List<VarFragment> fragments() {
+    public VarFragment[] fragments() {
         return fragments;
     }
     @Override

@@ -6,7 +6,6 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public abstract sealed class ModuleDirective extends Node
         permits RequiresDirective, ExportsDirective, OpensDirective, UsesDirective, ProvidesDirective {

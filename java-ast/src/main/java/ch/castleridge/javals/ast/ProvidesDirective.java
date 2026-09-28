@@ -6,17 +6,16 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class ProvidesDirective extends ModuleDirective {
 
     private final TypeName service;
-    private final List<TypeName> implementations;
+    private final TypeName[] implementations;
 
-    public ProvidesDirective(TypeName service, List<TypeName> implementations, SourceRange range) {
+    public ProvidesDirective(TypeName service, TypeName[] implementations, SourceRange range) {
         super(range);
         this.service = service;
-        this.implementations = implementations == null ? List.of() : List.copyOf(implementations);
+        this.implementations = EmptyArrays.orEmpty(implementations, EmptyArrays.TYPE_NAME);
         if (service != null) service.setParent(this);
         for (Node __c : this.implementations) __c.setParent(this);
     }
@@ -25,7 +24,7 @@ public final class ProvidesDirective extends ModuleDirective {
         return service;
     }
 
-    public List<TypeName> implementations() {
+    public TypeName[] implementations() {
         return implementations;
     }
     @Override

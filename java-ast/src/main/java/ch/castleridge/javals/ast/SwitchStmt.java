@@ -6,20 +6,19 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class SwitchStmt extends Statement {
     private final Expression selector;
-    private final List<SwitchArm> arms;
-    public SwitchStmt(Expression selector, List<SwitchArm> arms, SourceRange range) {
+    private final SwitchArm[] arms;
+    public SwitchStmt(Expression selector, SwitchArm[] arms, SourceRange range) {
         super(range);
         this.selector = selector;
-        this.arms = arms == null ? List.of() : List.copyOf(arms);
+        this.arms = EmptyArrays.orEmpty(arms, EmptyArrays.SWITCH_ARM);
         if (selector != null) selector.setParent(this);
         for (Node __c : this.arms) __c.setParent(this);
     }
     public Expression selector() { return selector; }
-    public List<SwitchArm> arms() { return arms; }
+    public SwitchArm[] arms() { return arms; }
     @Override
     public Node nodeAt(int offset) {
         if (!covers(offset)) return null;

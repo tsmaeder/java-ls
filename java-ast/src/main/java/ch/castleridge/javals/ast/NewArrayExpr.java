@@ -6,22 +6,21 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class NewArrayExpr extends Expression {
 
     private final TypeNode elementType;
-    private final List<Expression> dimensions;
+    private final Expression[] dimensions;
     private final ArrayInitExpr initializer;
 
     public NewArrayExpr(TypeNode elementType,
-                        List<Expression> dimensions,
+                        Expression[] dimensions,
                         ArrayInitExpr initializer,
                         JType type,
                         SourceRange range) {
         super(range, type);
         this.elementType = elementType;
-        this.dimensions = dimensions == null ? List.of() : List.copyOf(dimensions);
+        this.dimensions = EmptyArrays.orEmpty(dimensions, EmptyArrays.EXPRESSION);
         this.initializer = initializer;
         if (elementType != null) elementType.setParent(this);
         for (Node __c : this.dimensions) __c.setParent(this);
@@ -32,7 +31,7 @@ public final class NewArrayExpr extends Expression {
         return elementType;
     }
 
-    public List<Expression> dimensions() {
+    public Expression[] dimensions() {
         return dimensions;
     }
 

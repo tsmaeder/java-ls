@@ -6,24 +6,23 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class RecordComponentDecl extends Declaration {
 
-    private final List<Annotation> annotations;
+    private final Annotation[] annotations;
     private final TypeNode type;
     private final Identifier name;
     private final boolean varargs;
     private final RecordComponentSymbol symbol;
 
-    public RecordComponentDecl(List<Annotation> annotations,
+    public RecordComponentDecl(Annotation[] annotations,
                                TypeNode type,
                                Identifier name,
                                boolean varargs,
                                RecordComponentSymbol symbol,
                                SourceRange range) {
         super(range);
-        this.annotations = annotations == null ? List.of() : List.copyOf(annotations);
+        this.annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION);
         this.type = type;
         this.name = name;
         this.varargs = varargs;
@@ -33,7 +32,7 @@ public final class RecordComponentDecl extends Declaration {
         if (name != null) name.setParent(this);
     }
 
-    public List<Annotation> annotations() {
+    public Annotation[] annotations() {
         return annotations;
     }
 

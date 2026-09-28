@@ -23,6 +23,7 @@ import ch.castleridge.javals.ast.FieldDecl;
 import ch.castleridge.javals.ast.Identifier;
 import ch.castleridge.javals.ast.MethodDecl;
 import ch.castleridge.javals.ast.MethodSymbol;
+import ch.castleridge.javals.ast.JType;
 import ch.castleridge.javals.ast.ParamDecl;
 import ch.castleridge.javals.ast.RecordComponentDecl;
 import ch.castleridge.javals.ast.Symbol;
@@ -138,12 +139,13 @@ public final class AstDeclarationLocator {
         String wantName = wanted.constructor()
                 ? (type.name() == null ? wanted.name() : type.name().name())
                 : wanted.name();
-        int arity = wanted.parameterTypes().size();
-        List<String> wantParams = wanted.parameterTypes().stream().map(Object::toString).toList();
+        int arity = wanted.parameterTypes().length;
+        List<String> wantParams = new ArrayList<>(arity);
+        for (JType paramType : wanted.parameterTypes()) wantParams.add(paramType.toString());
         Identifier byArity = null;
         for (Declaration member : type.members()) {
             Identifier name;
-            List<ParamDecl> params;
+            ParamDecl[] params;
             boolean constructor;
             if (member instanceof MethodDecl method) {
                 name = method.name();
@@ -158,7 +160,7 @@ public final class AstDeclarationLocator {
             }
             if (constructor != wanted.constructor()) continue;
             if (name == null || !wantName.equals(name.name())) continue;
-            if (params.size() != arity) continue;
+            if (params.length != arity) continue;
             if (byArity == null) byArity = name;
             if (sourceParamNames(params).equals(simpleNames(wantParams))) return name;
             if (equalsIgnoreCase(sourceParamNames(params), simpleNames(wantParams))) return name;
@@ -191,8 +193,8 @@ public final class AstDeclarationLocator {
         return null;
     }
 
-    private static List<String> sourceParamNames(List<ParamDecl> params) {
-        List<String> out = new ArrayList<>(params.size());
+    private static List<String> sourceParamNames(ParamDecl[] params) {
+        List<String> out = new ArrayList<>(params.length);
         for (ParamDecl param : params) out.add(simpleTypeName(param.type()));
         return out;
     }

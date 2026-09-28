@@ -6,28 +6,26 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
-import java.util.Set;
 
 public final class ParamDecl extends Declaration {
 
-    private final Set<Modifier> modifiers;
-    private final List<Annotation> annotations;
+    private final int modifiers;
+    private final Annotation[] annotations;
     private final TypeNode type;
     private final Identifier name;
     private final boolean varargs;
     private final LocalSymbol symbol;
 
-    public ParamDecl(Set<Modifier> modifiers,
-                     List<Annotation> annotations,
+    public ParamDecl(int modifiers,
+                     Annotation[] annotations,
                      TypeNode type,
                      Identifier name,
                      boolean varargs,
                      LocalSymbol symbol,
                      SourceRange range) {
         super(range);
-        this.modifiers = MethodDecl.copyMods(modifiers);
-        this.annotations = annotations == null ? List.of() : List.copyOf(annotations);
+        this.modifiers = modifiers;
+        this.annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION);
         this.type = type;
         this.name = name;
         this.varargs = varargs;
@@ -37,11 +35,11 @@ public final class ParamDecl extends Declaration {
         if (name != null) name.setParent(this);
     }
 
-    public Set<Modifier> modifiers() {
+    public int modifiers() {
         return modifiers;
     }
 
-    public List<Annotation> annotations() {
+    public Annotation[] annotations() {
         return annotations;
     }
 

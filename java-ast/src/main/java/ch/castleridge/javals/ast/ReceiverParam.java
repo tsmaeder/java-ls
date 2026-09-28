@@ -6,17 +6,16 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class ReceiverParam extends Node {
 
-    private final List<Annotation> annotations;
+    private final Annotation[] annotations;
     private final TypeNode type;
     private final Identifier name;
 
-    public ReceiverParam(List<Annotation> annotations, TypeNode type, Identifier name, SourceRange range) {
+    public ReceiverParam(Annotation[] annotations, TypeNode type, Identifier name, SourceRange range) {
         super(range);
-        this.annotations = annotations == null ? List.of() : List.copyOf(annotations);
+        this.annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION);
         this.type = type;
         this.name = name;
         for (Node __c : this.annotations) __c.setParent(this);
@@ -24,7 +23,7 @@ public final class ReceiverParam extends Node {
         if (name != null) name.setParent(this);
     }
 
-    public List<Annotation> annotations() {
+    public Annotation[] annotations() {
         return annotations;
     }
 

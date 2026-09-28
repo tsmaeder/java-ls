@@ -6,7 +6,6 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class UnnamedPattern extends Pattern {
     public UnnamedPattern(SourceRange range) { super(range); }

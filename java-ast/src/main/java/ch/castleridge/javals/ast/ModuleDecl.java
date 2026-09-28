@@ -6,27 +6,26 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class ModuleDecl extends Node {
 
     private final boolean open;
-    private final List<Annotation> annotations;
-    private final List<Identifier> names;
-    private final List<ModuleDirective> directives;
+    private final Annotation[] annotations;
+    private final Identifier[] names;
+    private final ModuleDirective[] directives;
     private final ModuleSymbol symbol;
 
     public ModuleDecl(boolean open,
-                      List<Annotation> annotations,
-                      List<Identifier> names,
-                      List<ModuleDirective> directives,
+                      Annotation[] annotations,
+                      Identifier[] names,
+                      ModuleDirective[] directives,
                       ModuleSymbol symbol,
                       SourceRange range) {
         super(range);
         this.open = open;
-        this.annotations = annotations == null ? List.of() : List.copyOf(annotations);
-        this.names = names == null ? List.of() : List.copyOf(names);
-        this.directives = directives == null ? List.of() : List.copyOf(directives);
+        this.annotations = EmptyArrays.orEmpty(annotations, EmptyArrays.ANNOTATION);
+        this.names = EmptyArrays.orEmpty(names, EmptyArrays.IDENTIFIER);
+        this.directives = EmptyArrays.orEmpty(directives, EmptyArrays.MODULE_DIRECTIVE);
         this.symbol = symbol;
         for (Node __c : this.annotations) __c.setParent(this);
         for (Node __c : this.names) __c.setParent(this);
@@ -37,15 +36,15 @@ public final class ModuleDecl extends Node {
         return open;
     }
 
-    public List<Annotation> annotations() {
+    public Annotation[] annotations() {
         return annotations;
     }
 
-    public List<Identifier> names() {
+    public Identifier[] names() {
         return names;
     }
 
-    public List<ModuleDirective> directives() {
+    public ModuleDirective[] directives() {
         return directives;
     }
 

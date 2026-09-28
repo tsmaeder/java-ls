@@ -6,7 +6,6 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class ForEachStmt extends Statement {
     private final LocalDeclStmt variable;

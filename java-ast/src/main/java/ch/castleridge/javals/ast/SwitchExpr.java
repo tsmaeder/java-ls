@@ -6,17 +6,16 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class SwitchExpr extends Expression {
 
     private final Expression selector;
-    private final List<SwitchArm> arms;
+    private final SwitchArm[] arms;
 
-    public SwitchExpr(Expression selector, List<SwitchArm> arms, JType type, SourceRange range) {
+    public SwitchExpr(Expression selector, SwitchArm[] arms, JType type, SourceRange range) {
         super(range, type);
         this.selector = selector;
-        this.arms = arms == null ? List.of() : List.copyOf(arms);
+        this.arms = EmptyArrays.orEmpty(arms, EmptyArrays.SWITCH_ARM);
         if (selector != null) selector.setParent(this);
         for (Node __c : this.arms) __c.setParent(this);
     }
@@ -25,7 +24,7 @@ public final class SwitchExpr extends Expression {
         return selector;
     }
 
-    public List<SwitchArm> arms() {
+    public SwitchArm[] arms() {
         return arms;
     }
     @Override

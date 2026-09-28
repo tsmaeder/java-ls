@@ -6,21 +6,20 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class NewExpr extends Expression {
 
     private final Expression enclosing;
     private final TypeNode typeNode;
-    private final List<TypeNode> typeArguments;
-    private final List<Expression> arguments;
+    private final TypeNode[] typeArguments;
+    private final Expression[] arguments;
     private final TypeDecl anonymousBody;
     private final MethodSymbol constructor;
 
     public NewExpr(Expression enclosing,
                    TypeNode typeNode,
-                   List<TypeNode> typeArguments,
-                   List<Expression> arguments,
+                   TypeNode[] typeArguments,
+                   Expression[] arguments,
                    TypeDecl anonymousBody,
                    MethodSymbol constructor,
                    JType type,
@@ -28,8 +27,8 @@ public final class NewExpr extends Expression {
         super(range, coalesce(type, typeNode != null ? typeNode.resolvedType() : null));
         this.enclosing = enclosing;
         this.typeNode = typeNode;
-        this.typeArguments = typeArguments == null ? List.of() : List.copyOf(typeArguments);
-        this.arguments = arguments == null ? List.of() : List.copyOf(arguments);
+        this.typeArguments = EmptyArrays.orEmpty(typeArguments, EmptyArrays.TYPE_NODE);
+        this.arguments = EmptyArrays.orEmpty(arguments, EmptyArrays.EXPRESSION);
         this.anonymousBody = anonymousBody;
         this.constructor = constructor;
         if (enclosing != null) enclosing.setParent(this);
@@ -47,11 +46,11 @@ public final class NewExpr extends Expression {
         return typeNode;
     }
 
-    public List<TypeNode> typeArguments() {
+    public TypeNode[] typeArguments() {
         return typeArguments;
     }
 
-    public List<Expression> arguments() {
+    public Expression[] arguments() {
         return arguments;
     }
 

@@ -6,19 +6,18 @@
  */
 package ch.castleridge.javals.ast;
 
-import java.util.List;
 
 public final class RequiresDirective extends ModuleDirective {
 
     private final boolean transitive;
     private final boolean staticPhase;
-    private final List<Identifier> moduleName;
+    private final Identifier[] moduleName;
 
-    public RequiresDirective(boolean transitive, boolean staticPhase, List<Identifier> moduleName, SourceRange range) {
+    public RequiresDirective(boolean transitive, boolean staticPhase, Identifier[] moduleName, SourceRange range) {
         super(range);
         this.transitive = transitive;
         this.staticPhase = staticPhase;
-        this.moduleName = moduleName == null ? List.of() : List.copyOf(moduleName);
+        this.moduleName = EmptyArrays.orEmpty(moduleName, EmptyArrays.IDENTIFIER);
         for (Node __c : this.moduleName) __c.setParent(this);
     }
 
@@ -30,7 +29,7 @@ public final class RequiresDirective extends ModuleDirective {
         return staticPhase;
     }
 
-    public List<Identifier> moduleName() {
+    public Identifier[] moduleName() {
         return moduleName;
     }
     @Override
