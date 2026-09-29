@@ -69,6 +69,20 @@ public final class ClasspathOrder {
     }
 
     /**
+     * {@link ClasspathEntry#sourceUri()} of the earliest entry that claims
+     * {@code uri}, or {@code null} when none match / under unrestricted order.
+     */
+    public String owningSourceUri(String uri) {
+        if (unrestricted || uri == null) return null;
+        for (ClasspathEntry entry : entries) {
+            if (entry.contains(uri)) {
+                return entry.sourceUri();
+            }
+        }
+        return null;
+    }
+
+    /**
      * Pick the winning {@link T} from a set of candidates. The one with the
      * lowest index in the classpath order is returned. When this order is
      * {@linkplain #UNRESTRICTED unrestricted}, the first candidate is

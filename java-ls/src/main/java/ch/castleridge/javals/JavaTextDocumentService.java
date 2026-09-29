@@ -362,26 +362,42 @@ public class JavaTextDocumentService implements TextDocumentService {
         cancelChecker.checkCanceled();
 
         Set<String> bloomCandidates = new LinkedHashSet<>();
+        int visibilityFiltered = 0;
         Optional<Index> indexOpt = indexService.index();
         if (indexOpt.isPresent()) {
             String simpleName = key.simpleName();
             Map<String, String> sourceJars = indexService.sourceJarByBinaryJar();
             ReferenceSearchScope scope = referenceSearchScope;
+            String originContainer = ReferenceOriginVisibility.originContainer(
+                    indexService.classPathFor(uri), key.originResourceUri().orElse(null));
+            Map<String, Boolean> visibleByContainer = new HashMap<>();
             for (BloomEntry entry : indexOpt.get().bloomFilters()) {
                 String path = entry.resourcePath();
                 if (path == null || !entry.filter().mightContain(simpleName)) continue;
                 if (!scope.include(entry.sourceUri(), path)) continue;
+                String candidateUri = null;
                 if (path.endsWith(".java")) {
-                    String candidateUri = entry.resourceUri();
-                    if (candidateUri != null) bloomCandidates.add(candidateUri);
+                    candidateUri = entry.resourceUri();
                 } else if (path.endsWith(".class")) {
                     // Class bytes are not source. When the container has an
                     // attached sources archive, search that .java instead.
                     // Nested classes share one compilation unit, so the set
                     // collapses Outer$Inner.class onto Outer.java.
-                    AttachedSource.javaUri(entry.resourceUri(), entry.sourceUri(), sourceJars)
-                            .ifPresent(bloomCandidates::add);
+                    candidateUri = AttachedSource.javaUri(
+                            entry.resourceUri(), entry.sourceUri(), sourceJars).orElse(null);
                 }
+                if (candidateUri == null) continue;
+                if (originContainer != null) {
+                    String probe = candidateUri;
+                    boolean visible = visibleByContainer.computeIfAbsent(entry.sourceUri(), container ->
+                            ReferenceOriginVisibility.candidateCanSeeOrigin(
+                                    indexService.classPathFor(probe), originContainer));
+                    if (!visible) {
+                        visibilityFiltered++;
+                        continue;
+                    }
+                }
+                bloomCandidates.add(candidateUri);
             }
         }
         int bloomHits = bloomCandidates.size();
@@ -406,11 +422,15 @@ public class JavaTextDocumentService implements TextDocumentService {
             capNote = ", capped " + candidates.size() + "/" + totalBeforeCap;
         }
 
+        String visibilityNote = visibilityFiltered > 0
+                ? ", visibility filtered " + visibilityFiltered
+                : "";
         ReferenceSearchScope scope = referenceSearchScope;
         server.logMessage(MessageType.Log,
                 "References: '" + key.simpleName() + "' -> " + candidates.size()
                         + " candidates (" + bloomHits + " bloom hits, " + openDocs + " open docs"
                         + ", jars=" + scope.inJars() + ", jdk=" + scope.inJdk()
+                        + visibilityNote
                         + capNote
                         + resolved.originResourceUri().map(u -> ", origin " + u).orElse("") + ")");
 

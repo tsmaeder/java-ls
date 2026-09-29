@@ -13,11 +13,38 @@ package ch.castleridge.javals.indexing.model;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 class ResourceUrisTest {
+
+    @Test
+    void classpathContainerStripsJarBangPath() {
+        String jar = "file:///C:/lib/dep.jar";
+        String resource = "jar:" + jar + "!/com/example/Hello.class";
+        assertEquals(jar, ResourceUris.classpathContainer(resource));
+    }
+
+    @Test
+    void classpathContainerStripsJrtBangPath() {
+        String jrtHome = "jrt:///C:/jdk";
+        String resource = jrtHome + "!/modules/java.base/java/lang/Object.class";
+        assertEquals(jrtHome, ResourceUris.classpathContainer(resource));
+    }
+
+    @Test
+    void classpathContainerKeepsDirectoryResource() {
+        String resource = "file:///C:/proj/src/com/foo/Bar.java";
+        assertEquals(resource, ResourceUris.classpathContainer(resource));
+    }
+
+    @Test
+    void classpathContainerNullAndEmpty() {
+        assertNull(ResourceUris.classpathContainer(null));
+        assertNull(ResourceUris.classpathContainer(""));
+    }
 
     @Test
     void jarEntryCompactsToRelativePath() {

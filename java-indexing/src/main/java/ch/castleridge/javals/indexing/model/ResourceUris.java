@@ -64,6 +64,20 @@ public final class ResourceUris {
     }
 
     /**
+     * Classpath container claimed by {@code resourceUri}: the jar/jrt
+     * prefix before {@code !/} (with a leading {@code jar:} stripped), or
+     * the URI itself for directory resources. Used with
+     * classpath membership checks that match container prefixes.
+     */
+    public static String classpathContainer(String resourceUri) {
+        if (resourceUri == null || resourceUri.isEmpty()) return null;
+        int bang = resourceUri.indexOf("!/");
+        if (bang < 0) return resourceUri;
+        String prefix = resourceUri.substring(0, bang);
+        return prefix.startsWith("jar:") ? prefix.substring(4) : prefix;
+    }
+
+    /**
      * Entry path inside a jar/jrt ({@code !/}-split) or relative to a
      * directory {@code sourceUri}. Returns {@code null} when no relative
      * form can be derived.

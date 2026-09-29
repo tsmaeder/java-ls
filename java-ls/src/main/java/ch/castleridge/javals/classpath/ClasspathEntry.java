@@ -21,6 +21,9 @@ package ch.castleridge.javals.classpath;
  */
 public sealed interface ClasspathEntry permits UriClasspathEntry {
 
+    /** Classpath container URI stamped on index entries this entry owns. */
+    String sourceUri();
+
     /** True if this entry owns {@code sourceUri}. */
     boolean contains(String sourceUri);
 }
