@@ -268,6 +268,42 @@ class EcjAnalysisSessionReferencesTest {
         assertEquals("Integer", onDemand.key().simpleName());
     }
 
+    @Test
+    void findsReferencesFromStaticImportMethodMember() throws Exception {
+        IndexedClasspath env = indexJrt();
+        String source = """
+                package demo;
+
+                import static java.util.Objects.requireNonNull;
+
+                class Use {
+                    Object one(Object value) {
+                        return requireNonNull(value);
+                    }
+
+                    Object two(Object value) {
+                        return requireNonNull(value, "missing");
+                    }
+                }
+                """;
+        AnalysisSession session = new EcjWorkspaceCompiler().analyze(
+                "file:///workspace/demo/Use.java", source, env.index(), env.classpath());
+        assertTrue(session.isUsable(), () -> "diagnostics: " + session.diagnostics());
+
+        String importLine = "import static java.util.Objects.requireNonNull;";
+        ResolvedSymbol resolved = session.resolveAt(new Position(2, importLine.indexOf("requireNonNull")))
+                .orElseThrow(() -> new AssertionError("expected resolve on static import member"));
+        assertEquals("requireNonNull", resolved.simpleName());
+        assertFalse(resolved.fileLocal());
+
+        List<Location> references = session.findReferencesTo(resolved.key());
+        Set<Integer> lines = references.stream()
+                .map(loc -> loc.getRange().getStart().getLine())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        assertEquals(Set.of(2, 6, 10), lines,
+                () -> "expected import + both overload call sites, got " + references);
+    }
+
     /**
      * The open buffer's URI can differ from the indexed {@code resourceUri} by
      * Windows drive-letter case. The declaration must still share the use

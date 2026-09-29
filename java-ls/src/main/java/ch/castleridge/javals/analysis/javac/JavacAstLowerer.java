@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
@@ -306,7 +307,11 @@ final class JavacAstLowerer {
         return new ImportDecl(tree.isStatic(), onDemand, names, range(tree));
     }
 
-    /** Rebuild the last Identifier so it carries the static member symbol (immutable). */
+    /**
+     * Rebuild the last Identifier so it carries the static member symbol
+     * (immutable). Prefers a field over a method. Method static imports use a
+     * name-only {@link SymbolKey} so references match every overload.
+     */
     private Identifier[] withStaticImportSymbol(Identifier[] names, Tree qual) {
         if (names.length < 2) return names;
         Identifier last = names[names.length - 1];
@@ -314,15 +319,47 @@ final class JavacAstLowerer {
         ExpressionTree ownerTree = qual instanceof MemberSelectTree select ? select.getExpression() : null;
         Element owner = elementOf(ownerTree);
         if (!(owner instanceof TypeElement type)) return names;
+        Element field = null;
+        ExecutableElement method = null;
         for (Element enclosed : type.getEnclosedElements()) {
-            if (enclosed.getSimpleName().contentEquals(last.name())
-                    && enclosed.getModifiers().contains(Modifier.STATIC)) {
-                Identifier[] rebound = names.clone();
-                rebound[rebound.length - 1] = new Identifier(last.name(), last.range(), symbolOf(enclosed));
-                return rebound;
+            if (!enclosed.getSimpleName().contentEquals(last.name())
+                    || !enclosed.getModifiers().contains(Modifier.STATIC)) {
+                continue;
+            }
+            ElementKind kind = enclosed.getKind();
+            if (kind == ElementKind.FIELD || kind == ElementKind.ENUM_CONSTANT) {
+                field = enclosed;
+                break;
+            }
+            if (method == null && enclosed instanceof ExecutableElement executable
+                    && kind != ElementKind.CONSTRUCTOR) {
+                method = executable;
             }
         }
-        return names;
+        Element chosen = field != null ? field : method;
+        if (chosen == null) return names;
+        Symbol symbol = field != null
+                ? symbolOf(chosen)
+                : staticImportMethodSymbol(method);
+        if (symbol == null) return names;
+        Identifier[] rebound = names.clone();
+        rebound[rebound.length - 1] = new Identifier(last.name(), last.range(), symbol);
+        return rebound;
+    }
+
+    /**
+     * MethodSymbol for a static import: same shape as the first overload, but
+     * with a name-only key. Not interned, so call-site overload keys stay exact.
+     */
+    private Symbol staticImportMethodSymbol(ExecutableElement executable) {
+        MethodSymbol full = methodSymbol(executable, null);
+        if (full == null) return null;
+        Optional<String> origin = full.key().originResourceUri();
+        TypeSymbol owner = full.owner();
+        if (origin.isEmpty() || owner == null || full.key().fileLocal()) return full;
+        SymbolKey nameKey = SymbolKey.methodName(origin.get(), owner.jvmBinaryName(), full.name());
+        return new MethodSymbol(full.name(), full.returnType(), full.parameterTypes(),
+                owner, nameKey, full.constructor(), full.synthetic());
     }
 
     private TypeDecl lowerType(ClassTree tree) {

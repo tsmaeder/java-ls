@@ -192,7 +192,11 @@ import ch.castleridge.javals.ast.WildcardTypeNode;
 import ch.castleridge.javals.ast.YieldStmt;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.model.FieldEntry;
+import ch.castleridge.javals.indexing.model.MethodEntry;
+import ch.castleridge.javals.indexing.model.Type;
 import ch.castleridge.javals.indexing.model.TypeEntry;
+import ch.castleridge.javals.indexing.model.TypeRef;
 
 final class EcjAstLowerer {
 
@@ -316,7 +320,7 @@ final class EcjAstLowerer {
                 continue;
             }
             if (type != null && last && staticImport && !onDemand) {
-                symbols[i] = null;
+                symbols[i] = staticImportMember(type, name);
                 continue;
             }
             String qualified = jvm.isEmpty() ? name : jvm.replace('/', '.') + "." + name;
@@ -324,6 +328,94 @@ final class EcjAstLowerer {
             jvm = slash;
         }
         return symbols;
+    }
+
+    /**
+     * Bind a single static-import member from the owner's indexed fields/methods.
+     * Prefers a field; methods use a name-only key covering all overloads.
+     */
+    private Symbol staticImportMember(TypeSymbol owner, String name) {
+        if (owner == null || name == null || name.isEmpty()) return null;
+        String jvm = owner.jvmBinaryName().replace('.', '/');
+        TypeEntry entry = indexedEntry(jvm);
+        if (entry == null) return null;
+        Optional<String> originOpt = origin(jvm);
+        if (originOpt.isEmpty()) return null;
+        String originUri = originOpt.get();
+        String ownerBinary = owner.jvmBinaryName();
+
+        for (FieldEntry field : entry.fields()) {
+            if (!name.equals(field.name())) continue;
+            if ((field.modifiers() & ClassFileConstants.AccStatic) == 0) continue;
+            SymbolKey key = SymbolKey.of(
+                    "F:" + originUri + "|" + ownerBinary + "#" + name, name, originUri);
+            return new FieldSymbol(name, indexJType(field.type()), owner, key, false);
+        }
+
+        MethodEntry first = null;
+        for (MethodEntry method : entry.methods()) {
+            if (!name.equals(method.name())) continue;
+            if ((method.modifiers() & ClassFileConstants.AccStatic) == 0) continue;
+            first = method;
+            break;
+        }
+        if (first == null) return null;
+
+        ch.castleridge.javals.indexing.model.ParameterEntry[] parameters = first.parameters();
+        JType[] params = parameters.length == 0
+                ? EmptyArrays.JTYPE
+                : new JType[parameters.length];
+        for (int i = 0; i < parameters.length; i++) {
+            params[i] = indexJType(parameters[i].type());
+        }
+        return new MethodSymbol(name, indexJType(first.returnType()), params, owner,
+                SymbolKey.methodName(originUri, ownerBinary, name), false, false);
+    }
+
+    private static JType indexJType(Type type) {
+        if (type == null) return JType.ERROR;
+        if (type instanceof Type.Annotated annotated) return indexJType(annotated.inner());
+        if (type instanceof Type.Primitive primitive) {
+            return switch (primitive) {
+                case VOID -> JType.VOID;
+                case BOOLEAN -> JType.Primitive.BOOLEAN;
+                case BYTE -> JType.Primitive.BYTE;
+                case SHORT -> JType.Primitive.SHORT;
+                case CHAR -> JType.Primitive.CHAR;
+                case INT -> JType.Primitive.INT;
+                case LONG -> JType.Primitive.LONG;
+                case FLOAT -> JType.Primitive.FLOAT;
+                case DOUBLE -> JType.Primitive.DOUBLE;
+            };
+        }
+        if (type instanceof Type.Array array) return JType.array(indexJType(array.element()));
+        if (type instanceof Type.TypeVariable tv) return new JType.TypeVar(tv.name());
+        if (type instanceof Type.Wildcard wildcard) {
+            return switch (wildcard.kind()) {
+                case UNBOUNDED -> JType.Wildcard.unbounded();
+                case EXTENDS -> new JType.Wildcard(JType.Wildcard.BoundKind.EXTENDS, indexJType(wildcard.bound()));
+                case SUPER -> new JType.Wildcard(JType.Wildcard.BoundKind.SUPER, indexJType(wildcard.bound()));
+            };
+        }
+        if (type instanceof Type.Parameterized parameterized) {
+            String raw = typeRefJvm(parameterized.raw());
+            if (raw == null) return JType.ERROR;
+            Type[] args = parameterized.typeArgs();
+            if (args.length == 0) return JType.Declared.of(raw);
+            JType[] jArgs = new JType[args.length];
+            for (int i = 0; i < args.length; i++) jArgs[i] = indexJType(args[i]);
+            return new JType.Declared(raw, jArgs);
+        }
+        if (type instanceof TypeRef ref) {
+            String jvm = typeRefJvm(ref);
+            return jvm == null ? JType.ERROR : JType.Declared.of(jvm);
+        }
+        return JType.ERROR;
+    }
+
+    private static String typeRefJvm(TypeRef ref) {
+        if (ref instanceof TypeRef.Resolved resolved) return resolved.jvmBinaryName();
+        return null;
     }
 
     private TypeSymbol typeSymbolForJvm(String jvm) {
