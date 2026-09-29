@@ -185,6 +185,50 @@ class EcjAnalysisSessionReferencesTest {
     }
 
     /**
+     * Nested-type qualifiers ({@code Map} in {@code Map.Entry}) must resolve to
+     * the outer type so references from the import and bare uses include that
+     * site. ECJ only attaches {@code resolvedType} to the leaf segment.
+     */
+    @Test
+    void findsNestedTypeQualifierReferences() throws Exception {
+        IndexedClasspath env = indexJrt();
+        String source = """
+                package demo;
+
+                import java.util.Map;
+
+                class Use {
+                    Map.Entry<?, ?> nested;
+                    Map bare;
+                }
+                """;
+        AnalysisSession session = new EcjWorkspaceCompiler().analyze(
+                "file:///workspace/demo/Use.java", source, env.index(), env.classpath());
+        assertTrue(session.isUsable());
+
+        // 'Map' in "Map.Entry<?, ?> nested" (0-based col 4 = 'M')
+        ResolvedSymbol fromQualifier = session.resolveAt(new Position(5, 4)).orElseThrow();
+        assertEquals("Map", fromQualifier.key().simpleName());
+
+        List<Location> fromQualifierRefs = session.findReferencesTo(fromQualifier.key());
+        Set<Integer> qualifierLines = fromQualifierRefs.stream()
+                .map(loc -> loc.getRange().getStart().getLine())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        assertEquals(Set.of(2, 5, 6), qualifierLines,
+                () -> "expected import + Map.Entry qualifier + bare Map, got " + fromQualifierRefs);
+
+        // 'Map' in the import — same key, must include the nested qualifier site
+        ResolvedSymbol fromImport = session.resolveAt(new Position(2, 19)).orElseThrow();
+        assertEquals("Map", fromImport.key().simpleName());
+        List<Location> fromImportRefs = session.findReferencesTo(fromImport.key());
+        Set<Integer> importLines = fromImportRefs.stream()
+                .map(loc -> loc.getRange().getStart().getLine())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        assertEquals(Set.of(2, 5, 6), importLines,
+                () -> "expected import refs to include Map.Entry qualifier, got " + fromImportRefs);
+    }
+
+    /**
      * A file that does not compile cleanly must still report the references
      * that did resolve. ECJ's convenience traverse skips units tagged as having
      * errors — which a malformed member declaration does — so the analysis

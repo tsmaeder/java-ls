@@ -1098,17 +1098,33 @@ final class EcjAstLowerer {
         return new TypeName(names, resolved, range);
     }
 
+    /**
+     * Lower each segment of a qualified type name. ECJ only stores the leaf
+     * {@code resolvedType} on the type reference (no {@code otherBindings}), so
+     * outer type segments such as {@code Field} in {@code Field.Mode} are
+     * recovered by walking {@link ReferenceBinding#enclosingType()} from the
+     * leaf. Package segments left of the outermost type stay unbound.
+     */
     private Identifier[] qualifiedTypeIdents(char[][] tokens, long[] positions, TypeBinding resolved,
                                              Symbol constructorName) {
         if (tokens == null || tokens.length == 0) return EmptyArrays.IDENTIFIER;
+        Symbol[] symbols = new Symbol[tokens.length];
+        TypeBinding leaf = validType(resolved);
+        if (leaf != null) {
+            leaf = leaf.leafComponentType();
+        }
+        ReferenceBinding current = leaf instanceof ReferenceBinding rb && rb.isValidBinding() ? rb : null;
+        for (int i = tokens.length - 1; i >= 0 && current != null; i--) {
+            symbols[i] = i == tokens.length - 1
+                    ? lastTypeSymbol(current, constructorName)
+                    : symbolOf(current);
+            current = current.enclosingType();
+        }
         Identifier[] out = new Identifier[tokens.length];
         for (int i = 0; i < tokens.length; i++) {
             SourceRange nr = positions == null || i >= positions.length
                     ? SourceRange.NONE : posRange(positions[i]);
-            boolean last = i == tokens.length - 1;
-            Binding binding = last ? validType(resolved) : null;
-            Symbol symbol = last ? lastTypeSymbol(binding, constructorName) : symbolOf(binding);
-            out[i] = new Identifier(new String(tokens[i]), nr, symbol);
+            out[i] = new Identifier(new String(tokens[i]), nr, symbols[i]);
         }
         return out;
     }
