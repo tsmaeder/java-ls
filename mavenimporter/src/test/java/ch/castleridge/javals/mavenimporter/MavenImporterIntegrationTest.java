@@ -97,9 +97,16 @@ class MavenImporterIntegrationTest {
     }
 
     @Test
-    void rejectsMissingDirectory() {
-        assertEquals(1, Main.run(new String[] {}));
-        assertEquals(1, Main.run(new String[] {temp.resolve("missing").toString()}));
+    void customOutputPathIsRelativeToInputDirectory() throws Exception {
+        Path workspace = copyFixture("fixtures/single-module");
+        assertEquals(0, Main.run(new String[] {workspace.toString(), "--output", "build/mbt.json"}));
+
+        Path written = workspace.resolve("build/mbt.json");
+        assertTrue(Files.isRegularFile(written));
+        assertFalse(Files.exists(workspace.resolve(".metals/mbt.json")));
+
+        MbtDocument doc = GSON.fromJson(Files.readString(written), MbtDocument.class);
+        assertTrue(doc.namespaces.containsKey("ch.castleridge.fixtures:single-module:1.0.0"));
     }
 
     private Path copyFixture(String resourceRoot) throws Exception {

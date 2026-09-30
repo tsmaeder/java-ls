@@ -12,7 +12,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
 /**
- * Writes a Metals-dialect {@code mbt.json} under {@code <directory>/.metals/}.
+ * Writes a Metals-dialect {@code mbt.json} to a given path.
  */
 public final class MbtJsonWriter {
 
@@ -20,10 +20,17 @@ public final class MbtJsonWriter {
 
     private MbtJsonWriter() {}
 
-    public static Path write(Path workspaceDirectory, MbtDocument document) throws IOException {
-        Path metalsDir = workspaceDirectory.resolve(".metals");
-        Files.createDirectories(metalsDir);
-        Path output = metalsDir.resolve("mbt.json");
+    /**
+     * Writes {@code document} to {@code outputFile}, creating parent directories as needed.
+     *
+     * @return the normalized path written
+     */
+    public static Path write(Path outputFile, MbtDocument document) throws IOException {
+        Path output = outputFile.toAbsolutePath().normalize();
+        Path parent = output.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
         Files.writeString(output, GSON.toJson(document) + "\n", StandardCharsets.UTF_8);
         return output;
     }

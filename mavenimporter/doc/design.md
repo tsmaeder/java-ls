@@ -18,7 +18,7 @@ workspaces we need a reliable way to produce that file from `pom.xml` trees.
 `mavenimporter` is that producer. It packages as `mavenimporter.jar` (shaded, main class
 `ch.castleridge.javals.mavenimporter.Main`) and is copied next to the language server artifact at
 build time. Given a directory, it finds every `pom.xml`, imports each distinct Maven reactor once,
-and emits one aggregated `.metals/mbt.json` under that directory.
+and emits one aggregated `mbt.json` (default: `.metals/mbt.json` under that directory).
 
 The target shape follows the Metals V2
 [`mbt.schema.json`](https://github.com/scalameta/metals/blob/main-v2/docs/build-tools/mbt.schema.json)
@@ -28,13 +28,14 @@ and matches the practical dialect already used in this repository’s `.metals/m
 ## CLI
 
 ```text
-java -jar mavenimporter.jar <directory>
+java -jar mavenimporter.jar <directory> [--output <file>]
 ```
 
 - **Input:** one directory—the workspace root to scan recursively for `pom.xml` files.
-- **Output:** `<directory>/.metals/mbt.json` (creates `.metals` if needed). This path is the second
-  lookup location used by java-ls `IndexService` (after `<root>/mbt.json`) and matches Metals’
-  convention.
+- **Output:** defaults to `<directory>/.metals/mbt.json` (creates parent directories as needed).
+  Clients may override with `--output` / `-o`. A relative output path is resolved against the
+  input directory; an absolute path is used as-is. The default path is the second lookup location
+  used by java-ls `IndexService` (after `<root>/mbt.json`) and matches Metals’ convention.
 - **Exit status:** non-zero if the directory is unreadable or if Maven fails to resolve a chosen
   reactor root.
 

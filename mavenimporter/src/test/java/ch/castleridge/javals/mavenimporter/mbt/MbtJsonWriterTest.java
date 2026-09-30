@@ -34,13 +34,26 @@ class MbtJsonWriterTest {
         ns.classDirectories.add(temp.resolve("target/classes").toString());
         document.namespaces.put("g:a:1.0", ns);
 
-        Path written = MbtJsonWriter.write(temp, document);
-        assertEquals(temp.resolve(".metals/mbt.json"), written);
+        Path output = temp.resolve(".metals/mbt.json");
+        Path written = MbtJsonWriter.write(output, document);
+        assertEquals(output.toAbsolutePath().normalize(), written);
         String json = Files.readString(written);
         assertTrue(json.contains("\"javacOptions\""));
         assertTrue(json.contains("\"classDirectories\""));
         assertTrue(json.contains("\"projectPath\""));
         assertTrue(json.contains("com.google.code.gson:gson:2.11.0"));
+    }
+
+    @Test
+    void writesToExplicitPathCreatingParents() throws Exception {
+        MbtDocument document = new MbtDocument();
+        document.namespaces.put("g:a:1.0", new MbtNamespace());
+
+        Path output = temp.resolve("nested/out/mbt.json");
+        Path written = MbtJsonWriter.write(output, document);
+        assertEquals(output.toAbsolutePath().normalize(), written);
+        assertTrue(Files.isRegularFile(written));
+        assertTrue(Files.readString(written).contains("g:a:1.0"));
     }
 
     @Test
