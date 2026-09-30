@@ -11,4 +11,4 @@ entries in the index. Thus lack of visibility and type shadowing on the class pa
 
 Do not preseve backwards compatibility. Remove obsolete paths instead of adding compatilibity layers, fallbacks or migrations.
 
-New files are copyright by Castle Ridge Software and proprietary (no license)
+New files are copyright by Castle Ridge Software and no license

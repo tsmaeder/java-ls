@@ -15,6 +15,7 @@
     <module>java-indexing</module>
     <module>java-ast</module>
     <module>java-ls</module>
+    <module>mavenimporter</module>
   </modules>
 
   <properties>
