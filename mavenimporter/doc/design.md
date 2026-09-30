@@ -46,20 +46,26 @@ A workspace directory may contain several independent Maven trees (sibling proje
 *todo* set of poms and drains it reactor by reactor:
 
 1. Recursively collect every `pom.xml` under the input directory into a todo set.
-2. Order the set by **path element count** ascending (number of path segments, not string length).
+2. If the output file already exists and **no** scanned pom has a last-modified time *strictly
+   after* the output’s last-modified time, print that the output is up to date and exit without
+   resolving or rewriting. Missing output always triggers a full import. Equal timestamps count
+   as up to date.
+3. Order the set by **path element count** ascending (number of path segments, not string length).
    Shorter paths are preferred so aggregator / parent reactors are imported before nested orphans.
-3. While the todo set is non-empty:
+4. While the todo set is non-empty:
    - Take the pom with the currently shortest path.
    - Load that pom into an embedded Maven session as the reactor root.
    - Walk every project in the reactor and extract namespace and dependency information (see
      mapping below).
    - Remove from the todo set every `pom.xml` that belongs to that reactor, so nested modules are
      not imported again as separate roots.
-4. When the todo set is empty, write one aggregated `mbt.json`, deduplicating top-level
+5. When the todo set is empty, write one aggregated `mbt.json`, deduplicating top-level
    `dependencyModules` by id.
 
 ```text
-scan poms → sort by path segment count
+scan poms → output fresh vs all poms? ──yes──► exit (keep existing mbt.json)
+                ↓ no / missing
+         sort by path segment count
                 ↓
          take shortest pom
                 ↓

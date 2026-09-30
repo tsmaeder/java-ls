@@ -53,6 +53,11 @@ public final class Main {
                 return 1;
             }
 
+            if (OutputUpToDate.isUpToDate(output, todo)) {
+                System.out.println("Up to date: " + output);
+                return 0;
+            }
+
             try (MavenSession session = new MavenSession()) {
                 ReactorImporter importer = new ReactorImporter(session);
                 MbtAggregator aggregator = ReactorLoop.run(todo, importer);

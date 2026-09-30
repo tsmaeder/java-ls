@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -107,6 +108,18 @@ class MavenImporterIntegrationTest {
 
         MbtDocument doc = GSON.fromJson(Files.readString(written), MbtDocument.class);
         assertTrue(doc.namespaces.containsKey("ch.castleridge.fixtures:single-module:1.0.0"));
+    }
+
+    @Test
+    void secondRunSkipsRewriteWhenPomsUnchanged() throws Exception {
+        Path workspace = copyFixture("fixtures/single-module");
+        assertEquals(0, Main.run(new String[] {workspace.toString()}));
+
+        Path output = workspace.resolve(".metals/mbt.json");
+        FileTime before = Files.getLastModifiedTime(output);
+
+        assertEquals(0, Main.run(new String[] {workspace.toString()}));
+        assertEquals(before, Files.getLastModifiedTime(output));
     }
 
     private Path copyFixture(String resourceRoot) throws Exception {
