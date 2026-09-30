@@ -28,7 +28,7 @@ and matches the practical dialect already used in this repository’s `.metals/m
 ## CLI
 
 ```text
-java -jar mavenimporter.jar <directory> [--output <file>]
+java -jar mavenimporter.jar <directory> [--output <file>] [--force]
 ```
 
 - **Input:** one directory—the workspace root to scan recursively for `pom.xml` files.
@@ -36,6 +36,8 @@ java -jar mavenimporter.jar <directory> [--output <file>]
   Clients may override with `--output` / `-o`. A relative output path is resolved against the
   input directory; an absolute path is used as-is. The default path is the second lookup location
   used by java-ls `IndexService` (after `<root>/mbt.json`) and matches Metals’ convention.
+- **Force:** `--force` / `-f` skips the up-to-date check and always re-imports and rewrites the
+  output.
 - **Exit status:** non-zero if the directory is unreadable or if Maven fails to resolve a chosen
   reactor root.
 
@@ -46,10 +48,10 @@ A workspace directory may contain several independent Maven trees (sibling proje
 *todo* set of poms and drains it reactor by reactor:
 
 1. Recursively collect every `pom.xml` under the input directory into a todo set.
-2. If the output file already exists and **no** scanned pom has a last-modified time *strictly
-   after* the output’s last-modified time, print that the output is up to date and exit without
-   resolving or rewriting. Missing output always triggers a full import. Equal timestamps count
-   as up to date.
+2. Unless `--force` was given: if the output file already exists and **no** scanned pom has a
+   last-modified time *strictly after* the output’s last-modified time, print that the output is
+   up to date and exit without resolving or rewriting. Missing output always triggers a full
+   import. Equal timestamps count as up to date.
 3. Order the set by **path element count** ascending (number of path segments, not string length).
    Shorter paths are preferred so aggregator / parent reactors are imported before nested orphans.
 4. While the todo set is non-empty:
@@ -63,8 +65,8 @@ A workspace directory may contain several independent Maven trees (sibling proje
    `dependencyModules` by id.
 
 ```text
-scan poms → output fresh vs all poms? ──yes──► exit (keep existing mbt.json)
-                ↓ no / missing
+scan poms → (!force && output fresh)? ──yes──► exit (keep existing mbt.json)
+                ↓ no / missing / --force
          sort by path segment count
                 ↓
          take shortest pom

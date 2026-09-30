@@ -44,6 +44,14 @@ class MainTest {
     }
 
     @Test
+    void acceptsForceFlagWithMissingPoms() throws Exception {
+        Path workspace = temp.resolve("force-empty");
+        Files.createDirectories(workspace);
+        assertEquals(1, Main.run(new String[] {workspace.toString(), "--force"}));
+        assertEquals(1, Main.run(new String[] {workspace.toString(), "-f"}));
+    }
+
+    @Test
     void rejectsMissingDirectory() {
         assertEquals(1, Main.run(new String[] {temp.resolve("missing").toString()}));
     }

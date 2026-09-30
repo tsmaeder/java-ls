@@ -16,7 +16,7 @@ import ch.castleridge.javals.mavenimporter.mbt.MbtJsonWriter;
  * Entry point for the Maven project importer.
  *
  * <pre>
- * java -jar mavenimporter.jar &lt;directory&gt; [--output &lt;file&gt;]
+ * java -jar mavenimporter.jar &lt;directory&gt; [--output &lt;file&gt;] [--force]
  * </pre>
  */
 public final class Main {
@@ -53,7 +53,7 @@ public final class Main {
                 return 1;
             }
 
-            if (OutputUpToDate.isUpToDate(output, todo)) {
+            if (!parsed.force && OutputUpToDate.isUpToDate(output, todo)) {
                 System.out.println("Up to date: " + output);
                 return 0;
             }
@@ -87,6 +87,7 @@ public final class Main {
     private static ParsedArgs parseArgs(String[] args) {
         String directory = null;
         String output = null;
+        boolean force = false;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -97,6 +98,8 @@ public final class Main {
                     return null;
                 }
                 output = args[++i];
+            } else if ("--force".equals(arg) || "-f".equals(arg)) {
+                force = true;
             } else if (arg.startsWith("-")) {
                 System.err.println("Unknown option: " + arg);
                 printUsage();
@@ -115,12 +118,12 @@ public final class Main {
             return null;
         }
 
-        return new ParsedArgs(directory, output);
+        return new ParsedArgs(directory, output, force);
     }
 
     private static void printUsage() {
-        System.err.println("Usage: java -jar mavenimporter.jar <directory> [--output <file>]");
+        System.err.println("Usage: java -jar mavenimporter.jar <directory> [--output <file>] [--force]");
     }
 
-    private record ParsedArgs(String directory, String output) {}
+    private record ParsedArgs(String directory, String output, boolean force) {}
 }
