@@ -21,9 +21,9 @@ import java.util.Collection;
  */
 public final class IdentifierBloomFilter {
 
-    private static final double TARGET_FPR = 0.01;
+    private static final double TARGET_FPR = 0.001;
     private static final int MIN_BITS = 64;
-    private static final int MAX_HASH_FUNCTIONS = 8;
+    private static final int MAX_HASH_FUNCTIONS = 16;
 
     private final long[] bits;
     private final int bitCount;
@@ -107,18 +107,13 @@ public final class IdentifierBloomFilter {
         return h;
     }
 
-    /** Murmur-ish mixing of length + first/last chars. */
+    /** FNV-1a 32-bit with alternate offset basis; odd so double-hash stride ≠ 0. */
     private static int hash2(CharSequence s) {
-        int h = s.length();
-        if (s.length() > 0) {
-            h = 31 * h + s.charAt(0);
-            h = 31 * h + s.charAt(s.length() - 1);
+        int h = 0xcbf29ce4;
+        for (int i = 0; i < s.length(); i++) {
+            h ^= s.charAt(i);
+            h *= 0x01000193;
         }
-        h ^= h >>> 16;
-        h *= 0x85ebca6b;
-        h ^= h >>> 13;
-        h *= 0xc2b2ae35;
-        h ^= h >>> 16;
-        return h | 1; // avoid zero stride in double hashing
+        return h | 1;
     }
 }
