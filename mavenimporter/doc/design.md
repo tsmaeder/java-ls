@@ -1,12 +1,11 @@
-# Maven Importer: Maven Workspaces to mbt.json
+# Maven Importer: Maven Workspaces to mbt.json.maven
 
 ## tl;dr
 
 `mavenimporter` is an executable shaded jar that scans a directory for Maven projects, resolves
-each reactor with an embedded Maven instance, and writes a single Metals-compatible `mbt.json`.
-java-ls already discovers `mbt.json` (or `.metals/mbt.json`) and builds classpaths from it; this
-module supplies that file for Maven trees without depending on Metals or an external
-classpath-extractor.
+each reactor with an embedded Maven instance, and writes a Metals-compatible fragment
+`.metals/mbt.json.maven`. java-ls runs this jar on startup (when no root `mbt.json` exists),
+merges build-system fragments into `.metals/mbt.json`, and indexes from that file.
 
 ## Purpose
 
@@ -15,10 +14,11 @@ The language server does not read build files. It only understands
 workspace description with external dependency jars and *namespaces* (compilable units). For Maven
 workspaces we need a reliable way to produce that file from `pom.xml` trees.
 
-`mavenimporter` is that producer. It packages as `mavenimporter.jar` (shaded, main class
+`mavenimporter` is the Maven producer. It packages as `mavenimporter.jar` (shaded, main class
 `ch.castleridge.javals.mavenimporter.Main`) and is copied next to the language server artifact at
 build time. Given a directory, it finds every `pom.xml`, imports each distinct Maven reactor once,
-and emits one aggregated `mbt.json` (default: `.metals/mbt.json` under that directory).
+and emits one fragment (default: `.metals/mbt.json.maven` under that directory). java-ls owns
+combining fragments from all supported build systems into `.metals/mbt.json`.
 
 The target shape follows the Metals V2
 [`mbt.schema.json`](https://github.com/scalameta/metals/blob/main-v2/docs/build-tools/mbt.schema.json)
@@ -32,13 +32,14 @@ java -jar mavenimporter.jar <directory> [--output <file>] [--force]
 ```
 
 - **Input:** one directory—the workspace root to scan recursively for `pom.xml` files.
-- **Output:** defaults to `<directory>/.metals/mbt.json` (creates parent directories as needed).
-  Clients may override with `--output` / `-o`. A relative output path is resolved against the
-  input directory; an absolute path is used as-is. The default path is the second lookup location
-  used by java-ls `IndexService` (after `<root>/mbt.json`) and matches Metals’ convention.
+- **Output:** defaults to `<directory>/.metals/mbt.json.maven` (creates parent directories as
+  needed). Clients may override with `--output` / `-o`. A relative output path is resolved against
+  the input directory; an absolute path is used as-is. java-ls always passes this default so the
+  fragment can be merged with other build systems into `.metals/mbt.json`.
 - **Force:** `--force` / `-f` skips the up-to-date check and always re-imports and rewrites the
   output.
-- **Exit status:** non-zero if the directory is unreadable or if Maven fails to resolve a chosen
+- **Exit status:** `0` when there are no `pom.xml` files (and any stale output at the chosen path
+  is deleted). Non-zero if the directory is unreadable or if Maven fails to resolve a chosen
   reactor root.
 
 ## Algorithm
@@ -48,24 +49,28 @@ A workspace directory may contain several independent Maven trees (sibling proje
 *todo* set of poms and drains it reactor by reactor:
 
 1. Recursively collect every `pom.xml` under the input directory into a todo set.
-2. Unless `--force` was given: if the output file already exists and **no** scanned pom has a
+2. If the set is empty: delete the output file when it exists as a regular file, print that no
+   poms were found, and exit `0`.
+3. Unless `--force` was given: if the output file already exists and **no** scanned pom has a
    last-modified time *strictly after* the output’s last-modified time, print that the output is
    up to date and exit without resolving or rewriting. Missing output always triggers a full
    import. Equal timestamps count as up to date.
-3. Order the set by **path element count** ascending (number of path segments, not string length).
+4. Order the set by **path element count** ascending (number of path segments, not string length).
    Shorter paths are preferred so aggregator / parent reactors are imported before nested orphans.
-4. While the todo set is non-empty:
+5. While the todo set is non-empty:
    - Take the pom with the currently shortest path.
    - Load that pom into an embedded Maven session as the reactor root.
    - Walk every project in the reactor and extract namespace and dependency information (see
      mapping below).
    - Remove from the todo set every `pom.xml` that belongs to that reactor, so nested modules are
      not imported again as separate roots.
-5. When the todo set is empty, write one aggregated `mbt.json`, deduplicating top-level
+6. When the todo set is empty, write one aggregated fragment, deduplicating top-level
    `dependencyModules` by id.
 
 ```text
-scan poms → (!force && output fresh)? ──yes──► exit (keep existing mbt.json)
+scan poms → empty? ──yes──► delete stale output if any; exit 0
+                ↓ no
+         (!force && output fresh)? ──yes──► exit (keep existing fragment)
                 ↓ no / missing / --force
          sort by path segment count
                 ↓
@@ -81,7 +86,7 @@ scan poms → (!force && output fresh)? ──yes──► exit (keep existing m
                 │          │
                yes         │
                 ↓          │
-      write .metals/mbt.json
+      write .metals/mbt.json.maven
 ```
 
 Shortest-path-first plus reactor removal is what makes multi-reactor workspaces work: aggregators
@@ -137,17 +142,16 @@ Maven build would see for that reactor.”
 
 **In scope**
 
-- Maven → one Metals-shaped `mbt.json`
+- Maven → one Metals-shaped fragment `.metals/mbt.json.maven`
 - main and test as separate namespaces
 - transitive external jars per target
 - reactor-internal links via `dependsOn`
 - multiple independent reactors under one directory
+- packaging next to java-ls for startup invocation
 
 **Out of scope**
 
-- Gradle, Bazel, or other build systems
-- Invoking the importer from the LSP (packaging and placement of the jar are already handled by
-  the module’s shade / copy plugins; wiring a call from java-ls is separate work)
+- Gradle, Bazel, or other build systems (those get their own importers; java-ls merges fragments)
 - Aligning java-indexing’s Gson DTOs (`MbtTargetInfo` fields `compilerOptions` / `classes`) with
   Metals names (`javacOptions` / `classDirectories`). The importer emits the Metals dialect;
   consumer field-name drift is a follow-up in java-indexing / java-ls.
@@ -157,5 +161,7 @@ Maven build would see for that reactor.”
 - Metals: [mbt.json overview](https://github.com/scalameta/metals/blob/main-v2/docs/build-tools/mbt.json.md),
   [schema](https://github.com/scalameta/metals/blob/main-v2/docs/build-tools/mbt.schema.json)
 - Local notes: [`java-indexing/doc/mbt-json.md`](../../java-indexing/doc/mbt-json.md)
-- Consumer: java-ls `IndexService` loads `<workspace>/mbt.json` or `<workspace>/.metals/mbt.json`
-  and builds a `ClasspathOrder` per namespace from `sources`, `dependsOn`, and `dependencyModules`
+- Consumer: java-ls runs registered importers, merges `.metals/mbt.json.<system>` into
+  `.metals/mbt.json`, then `IndexService` loads `<workspace>/mbt.json` or
+  `<workspace>/.metals/mbt.json` and builds a `ClasspathOrder` per namespace from `sources`,
+  `dependsOn`, and `dependencyModules`

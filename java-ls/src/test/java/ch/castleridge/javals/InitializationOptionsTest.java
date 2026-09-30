@@ -216,6 +216,25 @@ class InitializationOptionsTest {
         assertEquals("ecj", backend.compiler());
     }
 
+    @Test
+    void importerScriptsReadsMapAndJsonObject() {
+        assertTrue(InitializationOptions.importerScripts(Map.of()).isEmpty());
+
+        Map<String, Object> options = Map.of(
+                "importers", Map.of("maven", "/custom/mavenimporter.jar", "gradle", "gradle-import.sh"));
+        Map<String, String> scripts = InitializationOptions.importerScripts(options);
+        assertEquals("/custom/mavenimporter.jar", scripts.get("maven"));
+        assertEquals("gradle-import.sh", scripts.get("gradle"));
+
+        JsonObject json = new JsonObject();
+        JsonObject importers = new JsonObject();
+        importers.addProperty("maven", "C:\\\\tools\\\\m.jar");
+        json.add("importers", importers);
+        InitializeParams params = new InitializeParams();
+        params.setInitializationOptions(json);
+        assertEquals("C:\\\\tools\\\\m.jar", InitializationOptions.importerScripts(params).get("maven"));
+    }
+
     private static OptionalInt capFrom(Map<String, Object> options) {
         return InitializationOptions.referencesCandidateCap(options);
     }

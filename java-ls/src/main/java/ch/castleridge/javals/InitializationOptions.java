@@ -10,6 +10,7 @@
  */
 package ch.castleridge.javals;
 
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -135,6 +136,42 @@ final class InitializationOptions {
         return Optional.empty();
     }
 
+    /**
+     * Per-build-system importer scripts from {@code importers} on the options root.
+     * Keys are build-system ids ({@code maven}, …); values are jar paths or shell command
+     * lines. Absent or non-object {@code importers} yields an empty map (callers apply defaults).
+     */
+    static Map<String, String> importerScripts(InitializeParams params) {
+        return importerScripts(optionsObject(params));
+    }
+
+    static Map<String, String> importerScripts(Object optionsRoot) {
+        if (!hasProperty(optionsRoot, "importers")) {
+            return Map.of();
+        }
+        Object importers = getProperty(optionsRoot, "importers");
+        Map<String, String> out = new LinkedHashMap<>();
+        if (importers instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                if (!(e.getKey() instanceof String key) || key.isBlank()) {
+                    continue;
+                }
+                String value = readString(e.getValue());
+                if (value != null && !value.isBlank()) {
+                    out.put(key, value);
+                }
+            }
+        } else if (importers instanceof JsonObject json) {
+            for (Map.Entry<String, JsonElement> e : json.entrySet()) {
+                String value = readString(e.getValue());
+                if (value != null && !value.isBlank()) {
+                    out.put(e.getKey(), value);
+                }
+            }
+        }
+        return out;
+    }
+
     static Backend backend(InitializeParams params) {
         Object options = params == null ? null : params.getInitializationOptions();
         Object backend = null;
@@ -181,6 +218,17 @@ final class InitializationOptions {
         }
         if (options instanceof JsonObject json) {
             return json.get(key);
+        }
+        return null;
+    }
+
+    private static String readString(Object value) {
+        if (value == null) return null;
+        if (value instanceof String s) return s;
+        if (value instanceof JsonElement el) {
+            if (!el.isJsonPrimitive()) return null;
+            JsonPrimitive p = el.getAsJsonPrimitive();
+            if (p.isString()) return p.getAsString();
         }
         return null;
     }

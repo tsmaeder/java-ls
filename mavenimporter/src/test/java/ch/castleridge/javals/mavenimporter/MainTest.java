@@ -4,6 +4,7 @@
 package ch.castleridge.javals.mavenimporter;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -18,9 +19,9 @@ class MainTest {
     Path temp;
 
     @Test
-    void resolveOutputDefaultsToDotMetalsMbtJson() {
+    void resolveOutputDefaultsToDotMetalsMbtJsonMaven() {
         Path directory = temp.resolve("ws").toAbsolutePath().normalize();
-        assertEquals(directory.resolve(".metals/mbt.json"), Main.resolveOutput(directory, null));
+        assertEquals(directory.resolve(".metals/mbt.json.maven"), Main.resolveOutput(directory, null));
     }
 
     @Test
@@ -44,11 +45,24 @@ class MainTest {
     }
 
     @Test
-    void acceptsForceFlagWithMissingPoms() throws Exception {
+    void emptyWorkspaceExitsZeroWithoutOutput() throws Exception {
         Path workspace = temp.resolve("force-empty");
         Files.createDirectories(workspace);
-        assertEquals(1, Main.run(new String[] {workspace.toString(), "--force"}));
-        assertEquals(1, Main.run(new String[] {workspace.toString(), "-f"}));
+        assertEquals(0, Main.run(new String[] {workspace.toString(), "--force"}));
+        assertEquals(0, Main.run(new String[] {workspace.toString(), "-f"}));
+        assertFalse(Files.exists(workspace.resolve(".metals/mbt.json.maven")));
+    }
+
+    @Test
+    void emptyWorkspaceDeletesStaleOutput() throws Exception {
+        Path workspace = temp.resolve("stale");
+        Path output = workspace.resolve(".metals/mbt.json.maven");
+        Files.createDirectories(output.getParent());
+        Files.writeString(output, "{\"namespaces\":{},\"dependencyModules\":[]}");
+        assertTrue(Files.isRegularFile(output));
+
+        assertEquals(0, Main.run(new String[] {workspace.toString()}));
+        assertFalse(Files.exists(output));
     }
 
     @Test
@@ -57,11 +71,13 @@ class MainTest {
     }
 
     @Test
-    void customRelativeOutputIsCreated() throws Exception {
+    void customRelativeOutputIsAcceptedWhenEmpty() throws Exception {
         Path workspace = temp.resolve("empty-ish");
         Files.createDirectories(workspace);
-        // No poms → fails before write; just ensure parse accepts -o shape via missing-pom path.
-        assertEquals(1, Main.run(new String[] {workspace.toString(), "-o", "custom/mbt.json"}));
-        assertTrue(Files.isDirectory(workspace));
+        Path custom = workspace.resolve("custom/mbt.json");
+        Files.createDirectories(custom.getParent());
+        Files.writeString(custom, "{}");
+        assertEquals(0, Main.run(new String[] {workspace.toString(), "-o", "custom/mbt.json"}));
+        assertFalse(Files.exists(custom));
     }
 }

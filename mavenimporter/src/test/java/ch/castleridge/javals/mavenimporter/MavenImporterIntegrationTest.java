@@ -104,7 +104,7 @@ class MavenImporterIntegrationTest {
 
         Path written = workspace.resolve("build/mbt.json");
         assertTrue(Files.isRegularFile(written));
-        assertFalse(Files.exists(workspace.resolve(".metals/mbt.json")));
+        assertFalse(Files.exists(workspace.resolve(".metals/mbt.json.maven")));
 
         MbtDocument doc = GSON.fromJson(Files.readString(written), MbtDocument.class);
         assertTrue(doc.namespaces.containsKey("ch.castleridge.fixtures:single-module:1.0.0"));
@@ -115,7 +115,7 @@ class MavenImporterIntegrationTest {
         Path workspace = copyFixture("fixtures/single-module");
         assertEquals(0, Main.run(new String[] {workspace.toString()}));
 
-        Path output = workspace.resolve(".metals/mbt.json");
+        Path output = workspace.resolve(".metals/mbt.json.maven");
         FileTime before = Files.getLastModifiedTime(output);
 
         assertEquals(0, Main.run(new String[] {workspace.toString()}));
@@ -152,7 +152,7 @@ class MavenImporterIntegrationTest {
     }
 
     private static MbtDocument readMbt(Path workspace) throws IOException {
-        String json = Files.readString(workspace.resolve(".metals/mbt.json"));
+        String json = Files.readString(workspace.resolve(".metals/mbt.json.maven"));
         return GSON.fromJson(json, MbtDocument.class);
     }
 }

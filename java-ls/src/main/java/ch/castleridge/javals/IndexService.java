@@ -32,6 +32,8 @@ import ch.castleridge.javals.indexing.scan.Scanner;
 import ch.castleridge.javals.classpath.ClasspathEntry;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
+import ch.castleridge.javals.mbtimport.BuildSystemImporter;
+import ch.castleridge.javals.mbtimport.WorkspaceBuildImport;
 import org.eclipse.lsp4j.FileChangeType;
 import org.eclipse.lsp4j.FileEvent;
 import org.eclipse.lsp4j.InitializeParams;
@@ -66,9 +68,23 @@ public final class IndexService {
             ch.castleridge.javals.indexing.source.SourceIndexer.javac();
     private volatile ch.castleridge.javals.indexing.bytecode.BytecodeIndexer bytecodeIndexer =
             ch.castleridge.javals.indexing.bytecode.BytecodeIndexer.asm();
+    private volatile WorkspaceBuildImport buildSystemImporter;
 
     public IndexService(JavaLanguageServer server) {
         this.server = server;
+    }
+
+    /** Package-visible for tests that stub importer invocation. */
+    void setBuildSystemImporter(WorkspaceBuildImport buildSystemImporter) {
+        this.buildSystemImporter = buildSystemImporter;
+    }
+
+    private WorkspaceBuildImport resolveBuildSystemImporter(InitializeParams params) {
+        if (buildSystemImporter != null) {
+            return buildSystemImporter;
+        }
+        return new BuildSystemImporter(
+                BuildSystemImporter.resolveScripts(InitializationOptions.importerScripts(params)));
     }
 
     public void setSourceIndexer(ch.castleridge.javals.indexing.source.SourceIndexer sourceIndexer) {
@@ -182,20 +198,33 @@ public final class IndexService {
     /**
      * Look for an {@code mbt.json} under any of the workspace folders
      * declared in {@code params} (falling back to the deprecated
-     * {@code rootUri}). If found, kick off a background scan and publish
-     * the resulting index/classpath atomically. Returns the future for
-     * tests; production callers can ignore it.
+     * {@code rootUri}). If no root-level {@code mbt.json} exists, run
+     * registered build-system importers and merge fragments into
+     * {@code .metals/mbt.json} first. Then kick off a background scan and
+     * publish the resulting index/classpath atomically. Returns the future
+     * for tests; production callers can ignore it.
      */
     public CompletableFuture<Void> initialize(InitializeParams params) {
         List<Path> roots = workspaceRoots(params);
-        Path mbt = findMbtJson(roots);
-        if (mbt == null) {
-            log(MessageType.Info, "No mbt.json found in workspace roots; index disabled");
-            return CompletableFuture.completedFuture(null);
-        }
-        Path workspacePath = resolveWorkspacePath(params, roots, mbt);
-        log(MessageType.Info, "Loading mbt.json: " + mbt);
-        return CompletableFuture.runAsync(() -> loadFrom(mbt, workspacePath));
+        Path workspacePath = resolveWorkspacePath(params, roots, null);
+        return CompletableFuture.runAsync(() -> {
+            if (!hasRootMbtJson(roots)) {
+                WorkspaceBuildImport importer = resolveBuildSystemImporter(params);
+                if (workspacePath != null) {
+                    importer.importAndMerge(workspacePath, this::log);
+                }
+            }
+            Path mbt = findMbtJson(roots);
+            if (mbt == null) {
+                log(MessageType.Info, "No mbt.json found in workspace roots; index disabled");
+                return;
+            }
+            Path ws = workspacePath != null
+                    ? workspacePath
+                    : resolveWorkspacePath(params, roots, mbt);
+            log(MessageType.Info, "Loading mbt.json: " + mbt);
+            loadFrom(mbt, ws);
+        });
     }
    
     /**
@@ -473,7 +502,19 @@ public final class IndexService {
         if (!roots.isEmpty()) {
             return roots.get(0).toAbsolutePath().normalize();
         }
-        return mbt.toAbsolutePath().normalize().getParent();
+        if (mbt != null) {
+            return mbt.toAbsolutePath().normalize().getParent();
+        }
+        return null;
+    }
+
+    static boolean hasRootMbtJson(List<Path> roots) {
+        for (Path root : roots) {
+            if (Files.isRegularFile(root.resolve("mbt.json"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Path workspacePathFromInitializationOptions(InitializeParams params) {

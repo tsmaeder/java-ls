@@ -21,7 +21,7 @@ import ch.castleridge.javals.mavenimporter.mbt.MbtJsonWriter;
  */
 public final class Main {
 
-    private static final String DEFAULT_OUTPUT = ".metals/mbt.json";
+    private static final String DEFAULT_OUTPUT = ".metals/mbt.json.maven";
 
     private Main() {}
 
@@ -49,8 +49,13 @@ public final class Main {
         try {
             Set<Path> todo = PomScanner.scan(directory);
             if (todo.isEmpty()) {
-                System.err.println("No pom.xml files found under " + directory);
-                return 1;
+                if (Files.isRegularFile(output)) {
+                    Files.delete(output);
+                    System.out.println("No pom.xml files found under " + directory + "; removed stale " + output);
+                } else {
+                    System.out.println("No pom.xml files found under " + directory);
+                }
+                return 0;
             }
 
             if (!parsed.force && OutputUpToDate.isUpToDate(output, todo)) {
@@ -74,7 +79,7 @@ public final class Main {
 
     /**
      * Resolves the output path. Relative paths are resolved against {@code directory}.
-     * When {@code outputArg} is null, defaults to {@code <directory>/.metals/mbt.json}.
+     * When {@code outputArg} is null, defaults to {@code <directory>/.metals/mbt.json.maven}.
      */
     static Path resolveOutput(Path directory, String outputArg) {
         Path output = Path.of(outputArg != null ? outputArg : DEFAULT_OUTPUT);

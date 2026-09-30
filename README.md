@@ -118,6 +118,9 @@ Settings are passed by the client in LSP `initialize` → `initializationOptions
     "sourceIndexer": "javac",
     "classIndexer": "asm",
     "compiler": "javac"
+  },
+  "importers": {
+    "maven": "/path/to/mavenimporter.jar"
   }
 }
 ```
@@ -131,8 +134,9 @@ Settings are passed by the client in LSP `initialize` → `initializationOptions
 | `backend.sourceIndexer` | `"javac"` \| `"ecj"` \| `"turbine"` | `"javac"` | Parser used when indexing sources |
 | `backend.classIndexer` | `"asm"` \| `"turbine"` | `"asm"` | Class-file reader used when indexing jars / JRT |
 | `backend.compiler` | `"javac"` \| `"ecj"` | `"javac"` | Compiler used when analyzing open files (diagnostics, navigation, etc.) |
+| `importers.maven` | string | bundled `mavenimporter.jar` beside `java-ls.jar` | Importer script for Maven: a `.jar` path is run with the server's `java -jar`; any other value is executed as a shell command line. Always receives `<workspace> --output <.metals/mbt.json.maven>`. |
 
-In [vscode-javals](https://github.com/tsmaeder/vscode-javals), these map to `javals.references.inJars`, `javals.references.inJdk`, `javals.backend.sourceIndexer`, `javals.backend.classIndexer`, and `javals.backend.compiler`. Changing `references.*` or `referencesCandidateCap` takes effect on the next `workspace/didChangeConfiguration` notification. Changing `backend.*` still requires restarting the language server.
+In [vscode-javals](https://github.com/tsmaeder/vscode-javals), these map to `javals.references.inJars`, `javals.references.inJdk`, `javals.backend.sourceIndexer`, `javals.backend.classIndexer`, and `javals.backend.compiler`. Changing `references.*` or `referencesCandidateCap` takes effect on the next `workspace/didChangeConfiguration` notification. Changing `backend.*` or `importers.*` still requires restarting the language server.
 
 ## Use with VS Code / Cursor ([vscode-javals](https://github.com/tsmaeder/vscode-javals))
 
