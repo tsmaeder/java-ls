@@ -49,7 +49,7 @@ class MbtFragmentMergeTest {
                 """);
 
         List<String> logs = new ArrayList<>();
-        MbtFragmentMerge.mergeIfNeeded(workspace, BuildSystems.all(), (t, m) -> logs.add(m));
+        MbtFragmentMerge.mergeIfNeeded(workspace, List.of("maven"), (t, m) -> logs.add(m));
 
         Path merged = BuildSystems.mergedPath(workspace);
         assertTrue(Files.isRegularFile(merged));
@@ -83,7 +83,7 @@ class MbtFragmentMergeTest {
         Files.setLastModifiedTime(merged, FileTime.fromMillis(base + 1_000));
 
         AtomicInteger writes = new AtomicInteger();
-        MbtFragmentMerge.mergeIfNeeded(workspace, BuildSystems.all(), (t, m) -> {
+        MbtFragmentMerge.mergeIfNeeded(workspace, List.of("maven"), (t, m) -> {
             if (m.startsWith("Wrote ")) {
                 writes.incrementAndGet();
             }
@@ -106,8 +106,7 @@ class MbtFragmentMergeTest {
                 }
                 """);
 
-        // Simulate a second system fragment path without registering it in BuildSystems.all():
-        // write via mergeFragments directly.
+        // Merge two system fragments via mergeFragments directly.
         Path other = workspace.resolve(".javals/mbt.json.other");
         Files.writeString(other, """
                 {
@@ -135,7 +134,7 @@ class MbtFragmentMergeTest {
         Files.createDirectories(merged.getParent());
         Files.writeString(merged, "{\"namespaces\":{},\"dependencyModules\":[]}");
 
-        MbtFragmentMerge.mergeIfNeeded(workspace, BuildSystems.all(), (t, m) -> {});
+        MbtFragmentMerge.mergeIfNeeded(workspace, List.of("maven"), (t, m) -> {});
         assertFalse(Files.exists(merged));
     }
 

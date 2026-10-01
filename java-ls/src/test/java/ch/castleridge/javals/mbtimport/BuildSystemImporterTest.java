@@ -110,6 +110,49 @@ class BuildSystemImporterTest {
     }
 
     @Test
+    void resolveScriptsRegistersUnknownBuildSystems() {
+        Map<String, String> resolved = BuildSystemImporter.resolveScripts(
+                Map.of("custom", "/tools/custom-importer.jar"));
+        assertEquals(BuildSystemImporter.DEFAULT_MAVEN_IMPORTER, resolved.get(BuildSystems.MAVEN));
+        assertEquals("/tools/custom-importer.jar", resolved.get("custom"));
+    }
+
+    @Test
+    void runsUnknownBuildSystemImporterAndMergesFragment() throws Exception {
+        Path workspace = temp.resolve("ws");
+        Files.createDirectories(workspace);
+        Path customJar = temp.resolve("custom.jar");
+        Files.writeString(customJar, "fake");
+
+        AtomicInteger runs = new AtomicInteger();
+        BuildSystemImporter importer = new BuildSystemImporter(
+                Map.of("custom", customJar.toString()),
+                (command, log) -> {
+                    runs.incrementAndGet();
+                    assertTrue(command.contains(customJar.toString()));
+                    Path output = Path.of(command.get(command.indexOf("--output") + 1));
+                    assertEquals(
+                            BuildSystems.fragmentPath(workspace, "custom").toAbsolutePath().normalize(),
+                            output.toAbsolutePath().normalize());
+                    Files.createDirectories(output.getParent());
+                    Files.writeString(output, """
+                            {
+                              "namespaces": { "custom:ns": { "sources": ["/c"] } },
+                              "dependencyModules": []
+                            }
+                            """);
+                    return 0;
+                });
+
+        importer.importAndMerge(workspace, (t, m) -> {});
+
+        assertEquals(1, runs.get());
+        assertTrue(Files.isRegularFile(BuildSystems.fragmentPath(workspace, "custom")));
+        assertTrue(Files.isRegularFile(BuildSystems.mergedPath(workspace)));
+        assertTrue(Files.readString(BuildSystems.mergedPath(workspace)).contains("custom:ns"));
+    }
+
+    @Test
     void writesGeneratedSourceRulesAndPassesFlag() throws Exception {
         Path workspace = temp.resolve("ws");
         Files.createDirectories(workspace);

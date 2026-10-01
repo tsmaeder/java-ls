@@ -143,8 +143,8 @@ final class InitializationOptions {
 
     /**
      * Per-build-system importer scripts from {@code importers} on the options root.
-     * Keys are build-system ids ({@code maven}, …); values are jar paths or shell command
-     * lines. Absent or non-object {@code importers} yields an empty map (callers apply defaults).
+     * Keys are arbitrary build-system ids; values are jar paths or shell command lines.
+     * Absent or non-object {@code importers} yields an empty map (callers apply defaults).
      */
     static Map<String, String> importerScripts(InitializeParams params) {
         return importerScripts(optionsObject(params));

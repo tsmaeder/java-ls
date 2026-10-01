@@ -12,7 +12,8 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashMap;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -22,10 +23,12 @@ import java.util.function.BiConsumer;
 import org.eclipse.lsp4j.MessageType;
 
 /**
- * Runs registered build-system importers for a workspace directory.
+ * Runs build-system importers for a workspace directory.
  *
- * <p>Each build system has an importer <em>script</em> preference (jar path or
- * shell command). Missing entries use {@link #defaultScripts()}.
+ * <p>The {@code scripts} map is the registry: each key is a build-system id and
+ * each value is an importer script (jar path or shell command). Defaults come
+ * from {@link #defaultScripts()}; user preferences overlay via
+ * {@link #resolveScripts(Map)}.
  */
 public final class BuildSystemImporter implements WorkspaceBuildImport {
 
@@ -59,7 +62,7 @@ public final class BuildSystemImporter implements WorkspaceBuildImport {
 
     public BuildSystemImporter(
             Map<String, String> scripts, String mavenGeneratedSourceRulesJson, ProcessRunner processRunner) {
-        this.scripts = Map.copyOf(scripts);
+        this.scripts = Collections.unmodifiableMap(new LinkedHashMap<>(scripts));
         this.mavenGeneratedSourceRulesJson =
                 mavenGeneratedSourceRulesJson == null || mavenGeneratedSourceRulesJson.isBlank()
                         ? null
@@ -72,10 +75,10 @@ public final class BuildSystemImporter implements WorkspaceBuildImport {
 
     /**
      * Defaults: {@code maven} → {@link #DEFAULT_MAVEN_IMPORTER} (relative to the java-ls
-     * install directory).
+     * install directory). Other build systems are added only via preferences.
      */
     public static Map<String, String> defaultScripts() {
-        Map<String, String> defaults = new HashMap<>();
+        Map<String, String> defaults = new LinkedHashMap<>();
         defaults.put(BuildSystems.MAVEN, DEFAULT_MAVEN_IMPORTER);
         return defaults;
     }
@@ -83,10 +86,10 @@ public final class BuildSystemImporter implements WorkspaceBuildImport {
     /**
      * Merges user preferences over {@link #defaultScripts()}. Blank values are ignored
      * (default kept). Explicit blank-after-merge removal is not supported; omit the key
-     * to keep the default.
+     * to keep the default. Additional keys register unknown build systems.
      */
     public static Map<String, String> resolveScripts(Map<String, String> preferences) {
-        Map<String, String> resolved = new HashMap<>(defaultScripts());
+        Map<String, String> resolved = new LinkedHashMap<>(defaultScripts());
         if (preferences != null) {
             for (Map.Entry<String, String> e : preferences.entrySet()) {
                 if (e.getKey() == null || e.getValue() == null || e.getValue().isBlank()) {
@@ -101,11 +104,12 @@ public final class BuildSystemImporter implements WorkspaceBuildImport {
     @Override
     public void importAndMerge(Path workspace, BiConsumer<MessageType, String> log) {
         Path ws = workspace.toAbsolutePath().normalize();
-        for (String system : BuildSystems.all()) {
+        List<String> systems = List.copyOf(scripts.keySet());
+        for (String system : systems) {
             runOne(system, ws, log);
         }
         try {
-            MbtFragmentMerge.mergeIfNeeded(ws, BuildSystems.all(), log);
+            MbtFragmentMerge.mergeIfNeeded(ws, systems, log);
         } catch (IOException e) {
             log.accept(MessageType.Error, "Failed to merge mbt fragments: " + e.getMessage());
         }

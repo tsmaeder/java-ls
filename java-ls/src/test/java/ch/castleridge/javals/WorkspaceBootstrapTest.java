@@ -67,7 +67,7 @@ class WorkspaceBootstrapTest {
                 Files.writeString(fragment, """
                         {"namespaces":{},"dependencyModules":[]}
                         """);
-                MbtFragmentMerge.mergeIfNeeded(ws, BuildSystems.all(), log);
+                MbtFragmentMerge.mergeIfNeeded(ws, List.of("maven"), log);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
