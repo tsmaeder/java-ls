@@ -71,13 +71,23 @@ class MainTest {
     }
 
     @Test
-    void customRelativeOutputIsAcceptedWhenEmpty() throws Exception {
-        Path workspace = temp.resolve("empty-ish");
-        Files.createDirectories(workspace);
-        Path custom = workspace.resolve("custom/mbt.json");
-        Files.createDirectories(custom.getParent());
-        Files.writeString(custom, "{}");
-        assertEquals(0, Main.run(new String[] {workspace.toString(), "-o", "custom/mbt.json"}));
-        assertFalse(Files.exists(custom));
+    void rejectsMissingGeneratedSourceRulesValue() {
+        assertEquals(1, Main.run(new String[] {temp.toString(), "--generated-source-rules"}));
+    }
+
+    @Test
+    void loadRulesWithoutPathReturnsSeed() throws Exception {
+        assertEquals(ch.castleridge.javals.mavenimporter.maven.generated.GeneratedSourceRules.all(), Main.loadRules(null));
+    }
+
+    @Test
+    void loadRulesReadsDisableEntry() throws Exception {
+        Path rules = temp.resolve("rules.json");
+        Files.writeString(
+                rules,
+                "[{\"pluginKey\":\"org.codehaus.modello:modello-maven-plugin\",\"enabled\":false}]");
+        var resolved = Main.loadRules(rules.toString());
+        assertTrue(resolved.stream()
+                .noneMatch(r -> r.pluginKey().equals("org.codehaus.modello:modello-maven-plugin")));
     }
 }

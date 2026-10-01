@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import com.google.gson.JsonObject;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -233,6 +234,40 @@ class InitializationOptionsTest {
         InitializeParams params = new InitializeParams();
         params.setInitializationOptions(json);
         assertEquals("C:\\\\tools\\\\m.jar", InitializationOptions.importerScripts(params).get("maven"));
+    }
+
+    @Test
+    void mavenGeneratedSourceRulesJsonSerializesNonEmptyArray() {
+        assertTrue(InitializationOptions.mavenGeneratedSourceRulesJson(Map.of()).isEmpty());
+        assertTrue(InitializationOptions.mavenGeneratedSourceRulesJson(
+                        Map.of("maven", Map.of("generatedSourceRules", List.of())))
+                .isEmpty());
+
+        Map<String, Object> options = Map.of(
+                "maven",
+                Map.of(
+                        "generatedSourceRules",
+                        List.of(Map.of(
+                                "pluginKey", "org.codehaus.modello:modello-maven-plugin",
+                                "enabled", false))));
+        Optional<String> json = InitializationOptions.mavenGeneratedSourceRulesJson(options);
+        assertTrue(json.isPresent());
+        assertTrue(json.get().contains("org.codehaus.modello:modello-maven-plugin"));
+        assertTrue(json.get().contains("enabled"));
+
+        JsonObject root = new JsonObject();
+        JsonObject maven = new JsonObject();
+        com.google.gson.JsonArray rules = new com.google.gson.JsonArray();
+        JsonObject entry = new JsonObject();
+        entry.addProperty("pluginKey", "org.antlr:antlr4-maven-plugin");
+        entry.addProperty("scope", "main");
+        entry.addProperty("configPath", "outputDirectory");
+        rules.add(entry);
+        maven.add("generatedSourceRules", rules);
+        root.add("maven", maven);
+        Optional<String> fromJson = InitializationOptions.mavenGeneratedSourceRulesJson(root);
+        assertTrue(fromJson.isPresent());
+        assertTrue(fromJson.get().contains("org.antlr:antlr4-maven-plugin"));
     }
 
     private static OptionalInt capFrom(Map<String, Object> options) {

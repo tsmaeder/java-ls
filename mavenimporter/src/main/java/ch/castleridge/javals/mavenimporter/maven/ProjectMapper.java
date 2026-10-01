@@ -16,7 +16,9 @@ import org.apache.maven.project.MavenProject;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
 import org.eclipse.aether.RepositorySystemSession;
 
+import ch.castleridge.javals.mavenimporter.maven.generated.GeneratedSourceRule;
 import ch.castleridge.javals.mavenimporter.maven.generated.GeneratedSourceRoots;
+import ch.castleridge.javals.mavenimporter.maven.generated.GeneratedSourceRules;
 import ch.castleridge.javals.mavenimporter.mbt.MbtDependencyModule;
 import ch.castleridge.javals.mavenimporter.mbt.MbtDocument;
 import ch.castleridge.javals.mavenimporter.mbt.MbtNamespace;
@@ -27,9 +29,16 @@ import ch.castleridge.javals.mavenimporter.mbt.MbtNamespace;
 public final class ProjectMapper {
 
     private final SourcesResolver sourcesResolver;
+    private final List<GeneratedSourceRule> generatedSourceRules;
 
     public ProjectMapper(SourcesResolver sourcesResolver) {
+        this(sourcesResolver, GeneratedSourceRules.all());
+    }
+
+    public ProjectMapper(SourcesResolver sourcesResolver, List<GeneratedSourceRule> generatedSourceRules) {
         this.sourcesResolver = sourcesResolver;
+        this.generatedSourceRules =
+                generatedSourceRules == null ? GeneratedSourceRules.all() : List.copyOf(generatedSourceRules);
     }
 
     public MbtDocument map(
@@ -103,7 +112,7 @@ public final class ProjectMapper {
         }
     }
 
-    private static MbtNamespace newNamespace(MavenProject project, boolean test) {
+    private MbtNamespace newNamespace(MavenProject project, boolean test) {
         MbtNamespace ns = new MbtNamespace();
         LinkedHashSet<String> sources = new LinkedHashSet<>();
         List<String> roots = test ? project.getTestCompileSourceRoots() : project.getCompileSourceRoots();
@@ -113,7 +122,7 @@ public final class ProjectMapper {
                 sources.add(dir.getAbsolutePath());
             }
         }
-        sources.addAll(GeneratedSourceRoots.collect(project, test));
+        sources.addAll(GeneratedSourceRoots.collect(project, test, generatedSourceRules));
         ns.sources.addAll(sources);
         ns.javacOptions.addAll(javacOptions(project));
         ns.javaHome = System.getProperty("java.home");

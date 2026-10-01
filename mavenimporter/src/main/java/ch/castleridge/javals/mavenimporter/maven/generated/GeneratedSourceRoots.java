@@ -23,16 +23,27 @@ public final class GeneratedSourceRoots {
     private GeneratedSourceRoots() {}
 
     /**
-     * Returns absolute paths for plugin-generated roots for the main or test namespace.
+     * Returns absolute paths for plugin-generated roots for the main or test namespace,
+     * using the seed {@link GeneratedSourceRules} registry.
      * Paths are emitted even when the directories do not yet exist.
      */
     public static List<String> collect(MavenProject project, boolean test) {
+        return collect(project, test, GeneratedSourceRules.all());
+    }
+
+    /**
+     * Returns absolute paths for plugin-generated roots for the main or test namespace
+     * using the given {@code rules}. Paths are emitted even when the directories do not
+     * yet exist.
+     */
+    public static List<String> collect(MavenProject project, boolean test, List<GeneratedSourceRule> rules) {
         if (project == null) {
             return List.of();
         }
+        List<GeneratedSourceRule> effective = rules == null ? List.of() : rules;
         GeneratedSourceScope scope = test ? GeneratedSourceScope.TEST : GeneratedSourceScope.MAIN;
         LinkedHashSet<String> roots = new LinkedHashSet<>();
-        for (GeneratedSourceRule rule : GeneratedSourceRules.all()) {
+        for (GeneratedSourceRule rule : effective) {
             if (rule.scope() != scope) {
                 continue;
             }

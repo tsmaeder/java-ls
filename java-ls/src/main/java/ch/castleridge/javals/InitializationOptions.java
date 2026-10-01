@@ -11,6 +11,7 @@
 package ch.castleridge.javals;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -19,6 +20,8 @@ import java.util.function.UnaryOperator;
 
 import org.eclipse.lsp4j.InitializeParams;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
@@ -28,6 +31,8 @@ import com.google.gson.JsonPrimitive;
  * {@code initializationOptions} or {@code didChangeConfiguration} settings).
  */
 final class InitializationOptions {
+
+    private static final Gson GSON = new Gson();
 
     record Backend(String sourceIndexer, String classIndexer, String compiler) {
         static final Backend DEFAULT = new Backend("javac", "asm", "javac");
@@ -170,6 +175,55 @@ final class InitializationOptions {
             }
         }
         return out;
+    }
+
+    /**
+     * JSON array text for {@code maven.generatedSourceRules}. Empty when the key is absent
+     * or the array is empty (callers then skip the importer flag).
+     */
+    static Optional<String> mavenGeneratedSourceRulesJson(InitializeParams params) {
+        return mavenGeneratedSourceRulesJson(optionsObject(params));
+    }
+
+    static Optional<String> mavenGeneratedSourceRulesJson(Object optionsRoot) {
+        if (!hasProperty(optionsRoot, "maven")) {
+            return Optional.empty();
+        }
+        Object maven = getProperty(optionsRoot, "maven");
+        if (maven == null || (maven instanceof JsonElement el && el.isJsonNull())) {
+            return Optional.empty();
+        }
+        Object rules;
+        if (maven instanceof Map<?, ?> map) {
+            rules = map.get("generatedSourceRules");
+        } else if (maven instanceof JsonObject json) {
+            rules = json.has("generatedSourceRules") ? json.get("generatedSourceRules") : null;
+        } else {
+            return Optional.empty();
+        }
+        if (rules == null || (rules instanceof JsonElement el && el.isJsonNull())) {
+            return Optional.empty();
+        }
+        if (rules instanceof List<?> list) {
+            if (list.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(GSON.toJson(list));
+        }
+        if (rules instanceof JsonArray array) {
+            if (array.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(GSON.toJson(array));
+        }
+        if (rules instanceof JsonElement el && el.isJsonArray()) {
+            JsonArray array = el.getAsJsonArray();
+            if (array.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(GSON.toJson(array));
+        }
+        return Optional.empty();
     }
 
     static Backend backend(InitializeParams params) {

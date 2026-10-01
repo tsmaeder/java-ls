@@ -16,6 +16,8 @@ import org.apache.maven.project.ProjectBuildingResult;
 import org.eclipse.aether.RepositorySystemSession;
 
 import ch.castleridge.javals.mavenimporter.ReactorLoop;
+import ch.castleridge.javals.mavenimporter.maven.generated.GeneratedSourceRule;
+import ch.castleridge.javals.mavenimporter.maven.generated.GeneratedSourceRules;
 import ch.castleridge.javals.mavenimporter.mbt.MbtDocument;
 
 /**
@@ -28,8 +30,12 @@ public final class WorkspaceImporter {
     private final ProjectMapper mapper;
 
     public WorkspaceImporter(MavenSession session) {
+        this(session, GeneratedSourceRules.all());
+    }
+
+    public WorkspaceImporter(MavenSession session, List<GeneratedSourceRule> generatedSourceRules) {
         this.session = session;
-        this.mapper = new ProjectMapper(new SourcesResolver(session.aether()));
+        this.mapper = new ProjectMapper(new SourcesResolver(session.aether()), generatedSourceRules);
     }
 
     public MbtDocument importWorkspace(Set<Path> todo) throws Exception {

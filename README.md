@@ -121,6 +121,20 @@ Settings are passed by the client in LSP `initialize` → `initializationOptions
   },
   "importers": {
     "maven": "/path/to/mavenimporter.jar"
+  },
+  "maven": {
+    "generatedSourceRules": [
+      {
+        "pluginKey": "org.antlr:antlr4-maven-plugin",
+        "scope": "main",
+        "configPath": "outputDirectory",
+        "defaultPath": "${project.build.directory}/generated-sources/antlr4"
+      },
+      {
+        "pluginKey": "org.codehaus.modello:modello-maven-plugin",
+        "enabled": false
+      }
+    ]
   }
 }
 ```
@@ -135,8 +149,9 @@ Settings are passed by the client in LSP `initialize` → `initializationOptions
 | `backend.classIndexer` | `"asm"` \| `"turbine"` | `"asm"` | Class-file reader used when indexing jars / JRT |
 | `backend.compiler` | `"javac"` \| `"ecj"` | `"javac"` | Compiler used when analyzing open files (diagnostics, navigation, etc.) |
 | `importers.maven` | string | bundled `mavenimporter.jar` beside `java-ls.jar` | Importer script for Maven: a `.jar` path is run with the server's `java -jar`; any other value is executed as a shell command line. Always receives `<workspace> --output <.metals/mbt.json.maven>`. |
+| `maven.generatedSourceRules` | array of objects | `[]` (seed built-ins only) | Extra / overridden Maven generated-source rules. Full rule objects are appended; entries with `"enabled": false` disable matching built-ins (`pluginKey` required; optional `scope` / `goals` / `configPath` narrow the match). |
 
-In [vscode-javals](https://github.com/tsmaeder/vscode-javals), these map to `javals.references.inJars`, `javals.references.inJdk`, `javals.backend.sourceIndexer`, `javals.backend.classIndexer`, and `javals.backend.compiler`. Changing `references.*` or `referencesCandidateCap` takes effect on the next `workspace/didChangeConfiguration` notification. Changing `backend.*` or `importers.*` still requires restarting the language server.
+In [vscode-javals](https://github.com/tsmaeder/vscode-javals), these map to `javals.references.inJars`, `javals.references.inJdk`, `javals.backend.sourceIndexer`, `javals.backend.classIndexer`, `javals.backend.compiler`, and `javals.maven.generatedSourceRules`. Changing `references.*` or `referencesCandidateCap` takes effect on the next `workspace/didChangeConfiguration` notification. Changing `backend.*`, `importers.*`, or `maven.generatedSourceRules` still requires restarting the language server.
 
 ## Use with VS Code / Cursor ([vscode-javals](https://github.com/tsmaeder/vscode-javals))
 

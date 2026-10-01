@@ -66,4 +66,22 @@ class OutputUpToDateTest {
 
         assertFalse(OutputUpToDate.isUpToDate(output, List.of(pom)));
     }
+
+    @Test
+    void newerRulesFileMeansNotUpToDate() throws Exception {
+        Path pom = temp.resolve("pom.xml");
+        Path rules = temp.resolve("rules.json");
+        Path output = temp.resolve("mbt.json");
+        Files.writeString(pom, "<project/>");
+        Files.writeString(rules, "[]");
+        Files.writeString(output, "{}");
+
+        FileTime older = FileTime.from(1_000_000L, TimeUnit.SECONDS);
+        FileTime newer = FileTime.from(2_000_000L, TimeUnit.SECONDS);
+        Files.setLastModifiedTime(pom, older);
+        Files.setLastModifiedTime(output, older);
+        Files.setLastModifiedTime(rules, newer);
+
+        assertFalse(OutputUpToDate.isUpToDate(output, List.of(pom, rules)));
+    }
 }

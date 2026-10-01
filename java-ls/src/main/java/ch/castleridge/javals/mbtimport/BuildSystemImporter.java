@@ -7,11 +7,13 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.BiConsumer;
 
 import org.eclipse.lsp4j.MessageType;
@@ -24,6 +26,9 @@ import org.eclipse.lsp4j.MessageType;
  */
 public final class BuildSystemImporter implements WorkspaceBuildImport {
 
+    /** Written under {@code .metals/} when {@code maven.generatedSourceRules} is non-empty. */
+    public static final String GENERATED_SOURCE_RULES_FILE = "generated-source-rules.json";
+
     @FunctionalInterface
     public interface ProcessRunner {
         /**
@@ -34,14 +39,28 @@ public final class BuildSystemImporter implements WorkspaceBuildImport {
     }
 
     private final Map<String, String> scripts;
+    private final String mavenGeneratedSourceRulesJson;
     private final ProcessRunner processRunner;
 
     public BuildSystemImporter(Map<String, String> scripts) {
-        this(scripts, BuildSystemImporter::runProcess);
+        this(scripts, null, BuildSystemImporter::runProcess);
+    }
+
+    public BuildSystemImporter(Map<String, String> scripts, String mavenGeneratedSourceRulesJson) {
+        this(scripts, mavenGeneratedSourceRulesJson, BuildSystemImporter::runProcess);
     }
 
     public BuildSystemImporter(Map<String, String> scripts, ProcessRunner processRunner) {
+        this(scripts, null, processRunner);
+    }
+
+    public BuildSystemImporter(
+            Map<String, String> scripts, String mavenGeneratedSourceRulesJson, ProcessRunner processRunner) {
         this.scripts = Map.copyOf(scripts);
+        this.mavenGeneratedSourceRulesJson =
+                mavenGeneratedSourceRulesJson == null || mavenGeneratedSourceRulesJson.isBlank()
+                        ? null
+                        : mavenGeneratedSourceRulesJson;
         this.processRunner = Objects.requireNonNull(processRunner);
     }
 
@@ -94,7 +113,12 @@ public final class BuildSystemImporter implements WorkspaceBuildImport {
         }
 
         Path output = BuildSystems.fragmentPath(workspace, system);
-        List<String> command = ImporterCommand.build(script, workspace, output);
+        Path rulesFile = null;
+        if (BuildSystems.MAVEN.equals(system)) {
+            Optional<Path> written = writeMavenGeneratedSourceRules(workspace, log);
+            rulesFile = written.orElse(null);
+        }
+        List<String> command = ImporterCommand.build(script, workspace, output, rulesFile);
         log.accept(MessageType.Info, "Running " + system + " importer: " + String.join(" ", command));
         try {
             int code = processRunner.run(command, log);
@@ -106,6 +130,21 @@ public final class BuildSystemImporter implements WorkspaceBuildImport {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.accept(MessageType.Error, system + " importer interrupted");
+        }
+    }
+
+    private Optional<Path> writeMavenGeneratedSourceRules(Path workspace, BiConsumer<MessageType, String> log) {
+        if (mavenGeneratedSourceRulesJson == null) {
+            return Optional.empty();
+        }
+        Path rulesFile = workspace.resolve(".metals").resolve(GENERATED_SOURCE_RULES_FILE);
+        try {
+            Files.createDirectories(rulesFile.getParent());
+            Files.writeString(rulesFile, mavenGeneratedSourceRulesJson, StandardCharsets.UTF_8);
+            return Optional.of(rulesFile);
+        } catch (IOException e) {
+            log.accept(MessageType.Error, "Failed to write generated-source-rules: " + e.getMessage());
+            return Optional.empty();
         }
     }
 

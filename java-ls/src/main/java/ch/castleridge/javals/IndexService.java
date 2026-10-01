@@ -84,7 +84,8 @@ public final class IndexService {
             return buildSystemImporter;
         }
         return new BuildSystemImporter(
-                BuildSystemImporter.resolveScripts(InitializationOptions.importerScripts(params)));
+                BuildSystemImporter.resolveScripts(InitializationOptions.importerScripts(params)),
+                InitializationOptions.mavenGeneratedSourceRulesJson(params).orElse(null));
     }
 
     public void setSourceIndexer(ch.castleridge.javals.indexing.source.SourceIndexer sourceIndexer) {

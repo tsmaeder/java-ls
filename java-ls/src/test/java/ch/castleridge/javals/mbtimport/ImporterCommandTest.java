@@ -32,6 +32,16 @@ class ImporterCommandTest {
     }
 
     @Test
+    void jarPreferenceAppendsGeneratedSourceRules() {
+        Path ws = temp.resolve("ws");
+        Path out = temp.resolve("out.json");
+        Path rules = temp.resolve("rules.json");
+        List<String> command = ImporterCommand.build("/opt/tools/importer.jar", ws, out, rules);
+        assertEquals("--generated-source-rules", command.get(6));
+        assertEquals(rules.toAbsolutePath().normalize().toString(), command.get(7));
+    }
+
+    @Test
     void quotedJarStillDetected() {
         assertTrue(ImporterCommand.isJar("\"C:\\\\tools\\\\x.JAR\""));
         List<String> command = ImporterCommand.build("'./x.jar'", temp, temp.resolve("o.json"));

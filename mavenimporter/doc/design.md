@@ -171,8 +171,12 @@ importer walks that registry:
 | same (`add-test-source`) | `sources/source` (list) | none | test |
 
 To support another generator (antlr, jaxb, protobuf, …), add a `GeneratedSourceRule` with
-that plugin’s coordinates, config element, and documented default. No importer lifecycle
-changes are required.
+that plugin’s coordinates, config element, and documented default — or supply the same shape
+via language-server `maven.generatedSourceRules` (VS Code: `javals.maven.generatedSourceRules`).
+Entries with `"enabled": false` disable matching seed rules (`pluginKey` required; optional
+`scope` / `goals` / `configPath` narrow the match). The server writes the array to
+`.metals/generated-source-rules.json` and passes `--generated-source-rules` to the importer.
+No importer lifecycle changes are required.
 
 ### Embedded Maven responsibilities
 

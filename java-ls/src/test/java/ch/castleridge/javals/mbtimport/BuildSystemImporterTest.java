@@ -99,4 +99,38 @@ class BuildSystemImporterTest {
                 Map.of(BuildSystems.MAVEN, "/custom/importer.jar"));
         assertEquals("/custom/importer.jar", resolved.get(BuildSystems.MAVEN));
     }
+
+    @Test
+    void writesGeneratedSourceRulesAndPassesFlag() throws Exception {
+        Path workspace = temp.resolve("ws");
+        Files.createDirectories(workspace);
+        Path fakeJar = temp.resolve("mavenimporter.jar");
+        Files.writeString(fakeJar, "fake");
+
+        AtomicReference<List<String>> seen = new AtomicReference<>();
+        String rulesJson = "[{\"pluginKey\":\"org.example:x\",\"enabled\":false}]";
+        BuildSystemImporter importer = new BuildSystemImporter(
+                Map.of(BuildSystems.MAVEN, fakeJar.toString()),
+                rulesJson,
+                (command, log) -> {
+                    seen.set(List.copyOf(command));
+                    Path output = Path.of(command.get(command.indexOf("--output") + 1));
+                    Files.createDirectories(output.getParent());
+                    Files.writeString(output, """
+                            {"namespaces":{},"dependencyModules":[]}
+                            """);
+                    return 0;
+                });
+
+        importer.importAndMerge(workspace, (t, m) -> {});
+
+        Path rulesFile = workspace.resolve(".metals").resolve(BuildSystemImporter.GENERATED_SOURCE_RULES_FILE);
+        assertTrue(Files.isRegularFile(rulesFile));
+        assertEquals(rulesJson, Files.readString(rulesFile));
+        List<String> command = seen.get();
+        assertTrue(command.contains("--generated-source-rules"));
+        assertEquals(
+                rulesFile.toAbsolutePath().normalize().toString(),
+                command.get(command.indexOf("--generated-source-rules") + 1));
+    }
 }
