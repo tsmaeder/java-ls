@@ -124,7 +124,7 @@ class BuildSystemImporterTest {
 
         importer.importAndMerge(workspace, (t, m) -> {});
 
-        Path rulesFile = workspace.resolve(".metals").resolve(BuildSystemImporter.GENERATED_SOURCE_RULES_FILE);
+        Path rulesFile = workspace.resolve(".javals").resolve(BuildSystemImporter.GENERATED_SOURCE_RULES_FILE);
         assertTrue(Files.isRegularFile(rulesFile));
         assertEquals(rulesJson, Files.readString(rulesFile));
         List<String> command = seen.get();

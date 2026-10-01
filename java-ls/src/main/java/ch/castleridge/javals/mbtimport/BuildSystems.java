@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * Supported build systems and the fragment file name each writes under {@code .metals/}.
+ * Supported build systems and the fragment file name each writes under {@code .javals/}.
  */
 public final class BuildSystems {
 
@@ -22,13 +22,13 @@ public final class BuildSystems {
         return ALL;
     }
 
-    /** Fragment path: {@code <workspace>/.metals/mbt.json.<system>}. */
+    /** Fragment path: {@code <workspace>/.javals/mbt.json.<system>}. */
     public static Path fragmentPath(Path workspace, String system) {
-        return workspace.resolve(".metals").resolve("mbt.json." + system);
+        return workspace.resolve(".javals").resolve("mbt.json." + system);
     }
 
-    /** Merged path: {@code <workspace>/.metals/mbt.json}. */
+    /** Merged path: {@code <workspace>/.javals/mbt.json}. */
     public static Path mergedPath(Path workspace) {
-        return workspace.resolve(".metals").resolve("mbt.json");
+        return workspace.resolve(".javals").resolve("mbt.json");
     }
 }

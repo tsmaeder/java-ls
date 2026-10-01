@@ -24,7 +24,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 /**
- * Merges {@code .metals/mbt.json.<system>} fragments into {@code .metals/mbt.json}.
+ * Merges {@code .javals/mbt.json.<system>} fragments into {@code .javals/mbt.json}.
  */
 public final class MbtFragmentMerge {
 
@@ -35,7 +35,7 @@ public final class MbtFragmentMerge {
     /**
      * Applies merge rules for {@code workspace}:
      * <ul>
-     *   <li>No fragments → delete merged {@code .metals/mbt.json} if present.</li>
+     *   <li>No fragments → delete merged {@code .javals/mbt.json} if present.</li>
      *   <li>Merged missing, or any fragment newer than merged → rewrite merged from fragments.</li>
      * </ul>
      */

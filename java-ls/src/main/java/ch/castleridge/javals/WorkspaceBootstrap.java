@@ -21,7 +21,8 @@ import ch.castleridge.javals.mbtimport.WorkspaceBuildImport;
 /**
  * Ensures an {@code mbt.json} is available for indexing: when no root-level
  * {@code mbt.json} exists, runs registered build-system importers and merges
- * fragments into {@code .metals/mbt.json}, then locates the file to load.
+ * fragments into {@code .javals/mbt.json}, then locates the file to load
+ * (preferring {@code .javals/mbt.json}, with {@code .metals/mbt.json} as fallback).
  */
 public final class WorkspaceBootstrap {
 
@@ -125,6 +126,8 @@ public final class WorkspaceBootstrap {
     private static Path findMbtJson(List<Path> roots) {
         for (Path root : roots) {
             Path candidate = root.resolve("mbt.json");
+            if (Files.isRegularFile(candidate)) return candidate;
+            candidate = root.resolve(".javals", "mbt.json");
             if (Files.isRegularFile(candidate)) return candidate;
             candidate = root.resolve(".metals", "mbt.json");
             if (Files.isRegularFile(candidate)) return candidate;

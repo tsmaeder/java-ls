@@ -3,12 +3,14 @@
  */
 package ch.castleridge.javals;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.eclipse.lsp4j.InitializeParams;
@@ -84,11 +86,62 @@ class WorkspaceBootstrapTest {
     @Test
     void hasRootMbtJsonDetectsRootFileOnly() throws Exception {
         Path workspace = temp.resolve("ws");
-        Files.createDirectories(workspace.resolve(".metals"));
-        Files.writeString(workspace.resolve(".metals/mbt.json"), "{}");
+        Files.createDirectories(workspace.resolve(".javals"));
+        Files.writeString(workspace.resolve(".javals/mbt.json"), "{}");
         assertFalse(WorkspaceBootstrap.hasRootMbtJson(List.of(workspace)));
 
         Files.writeString(workspace.resolve("mbt.json"), "{}");
         assertTrue(WorkspaceBootstrap.hasRootMbtJson(List.of(workspace)));
+    }
+
+    @Test
+    void findsJavalsMbtJson() throws Exception {
+        Path workspace = temp.resolve("ws");
+        Path mbt = workspace.resolve(".javals/mbt.json");
+        Files.createDirectories(mbt.getParent());
+        Files.writeString(mbt, "{\"namespaces\":{},\"dependencyModules\":[]}");
+
+        Optional<WorkspaceBootstrap.PreparedWorkspace> prepared = prepareWithNoopImporter(workspace);
+        assertTrue(prepared.isPresent());
+        assertEquals(mbt.toAbsolutePath().normalize(), prepared.get().mbtJson().toAbsolutePath().normalize());
+    }
+
+    @Test
+    void fallsBackToMetalsMbtJson() throws Exception {
+        Path workspace = temp.resolve("ws");
+        Path mbt = workspace.resolve(".metals/mbt.json");
+        Files.createDirectories(mbt.getParent());
+        Files.writeString(mbt, "{\"namespaces\":{},\"dependencyModules\":[]}");
+
+        Optional<WorkspaceBootstrap.PreparedWorkspace> prepared = prepareWithNoopImporter(workspace);
+        assertTrue(prepared.isPresent());
+        assertEquals(mbt.toAbsolutePath().normalize(), prepared.get().mbtJson().toAbsolutePath().normalize());
+    }
+
+    @Test
+    void prefersJavalsOverMetalsMbtJson() throws Exception {
+        Path workspace = temp.resolve("ws");
+        Path javals = workspace.resolve(".javals/mbt.json");
+        Path metals = workspace.resolve(".metals/mbt.json");
+        Files.createDirectories(javals.getParent());
+        Files.createDirectories(metals.getParent());
+        Files.writeString(javals, "{\"namespaces\":{},\"dependencyModules\":[]}");
+        Files.writeString(metals, "{\"namespaces\":{},\"dependencyModules\":[]}");
+
+        Optional<WorkspaceBootstrap.PreparedWorkspace> prepared = prepareWithNoopImporter(workspace);
+        assertTrue(prepared.isPresent());
+        assertEquals(javals.toAbsolutePath().normalize(), prepared.get().mbtJson().toAbsolutePath().normalize());
+    }
+
+    private Optional<WorkspaceBootstrap.PreparedWorkspace> prepareWithNoopImporter(Path workspace) {
+        WorkspaceBootstrap bootstrap = new WorkspaceBootstrap();
+        bootstrap.setBuildSystemImporter((ws, log) -> {});
+
+        InitializeParams params = new InitializeParams();
+        WorkspaceFolder folder = new WorkspaceFolder();
+        folder.setUri(workspace.toUri().toString());
+        params.setWorkspaceFolders(List.of(folder));
+
+        return bootstrap.prepare(params, (t, m) -> {});
     }
 }

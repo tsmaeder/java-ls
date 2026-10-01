@@ -105,7 +105,7 @@ class MbtFragmentMergeTest {
 
         // Simulate a second system fragment path without registering it in BuildSystems.all():
         // write via mergeFragments directly.
-        Path other = workspace.resolve(".metals/mbt.json.other");
+        Path other = workspace.resolve(".javals/mbt.json.other");
         Files.writeString(other, """
                 {
                   "namespaces": { "other:ns": { "sources": ["/o"] } },

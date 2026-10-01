@@ -27,7 +27,7 @@ import ch.castleridge.javals.mavenimporter.mbt.MbtJsonWriter;
  */
 public final class Main {
 
-    private static final String DEFAULT_OUTPUT = ".metals/mbt.json.maven";
+    private static final String DEFAULT_OUTPUT = ".javals/mbt.json.maven";
 
     private Main() {}
 
@@ -97,7 +97,7 @@ public final class Main {
 
     /**
      * Resolves the output path. Relative paths are resolved against {@code directory}.
-     * When {@code outputArg} is null, defaults to {@code <directory>/.metals/mbt.json.maven}.
+     * When {@code outputArg} is null, defaults to {@code <directory>/.javals/mbt.json.maven}.
      */
     static Path resolveOutput(Path directory, String outputArg) {
         Path output = Path.of(outputArg != null ? outputArg : DEFAULT_OUTPUT);

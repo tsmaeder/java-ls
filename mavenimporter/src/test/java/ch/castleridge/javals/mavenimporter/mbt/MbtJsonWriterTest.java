@@ -18,7 +18,7 @@ class MbtJsonWriterTest {
     Path temp;
 
     @Test
-    void writesMetalsDialectUnderDotMetals() throws Exception {
+    void writesMetalsDialectUnderDotJavals() throws Exception {
         MbtDocument document = new MbtDocument();
         document.dependencyModules.add(new MbtDependencyModule(
                 "com.google.code.gson:gson:2.11.0",
@@ -34,7 +34,7 @@ class MbtJsonWriterTest {
         ns.classDirectories.add(temp.resolve("target/classes").toString());
         document.namespaces.put("g:a:1.0", ns);
 
-        Path output = temp.resolve(".metals/mbt.json");
+        Path output = temp.resolve(".javals/mbt.json");
         Path written = MbtJsonWriter.write(output, document);
         assertEquals(output.toAbsolutePath().normalize(), written);
         String json = Files.readString(written);

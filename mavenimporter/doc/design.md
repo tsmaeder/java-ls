@@ -4,8 +4,8 @@
 
 `mavenimporter` is an executable shaded jar that scans a directory for Maven projects, resolves
 each reactor with an embedded Maven instance, and writes a Metals-compatible fragment
-`.metals/mbt.json.maven`. java-ls runs this jar on startup (when no root `mbt.json` exists),
-merges build-system fragments into `.metals/mbt.json`, and indexes from that file.
+`.javals/mbt.json.maven`. java-ls runs this jar on startup (when no root `mbt.json` exists),
+merges build-system fragments into `.javals/mbt.json`, and indexes from that file.
 
 ## Purpose
 
@@ -17,12 +17,12 @@ workspaces we need a reliable way to produce that file from `pom.xml` trees.
 `mavenimporter` is the Maven producer. It packages as `mavenimporter.jar` (shaded, main class
 `ch.castleridge.javals.mavenimporter.Main`) and is copied next to the language server artifact at
 build time. Given a directory, it finds every `pom.xml`, imports each distinct Maven reactor once,
-and emits one fragment (default: `.metals/mbt.json.maven` under that directory). java-ls owns
-combining fragments from all supported build systems into `.metals/mbt.json`.
+and emits one fragment (default: `.javals/mbt.json.maven` under that directory). java-ls owns
+combining fragments from all supported build systems into `.javals/mbt.json`.
 
 The target shape follows the Metals V2
 [`mbt.schema.json`](https://github.com/scalameta/metals/blob/main-v2/docs/build-tools/mbt.schema.json)
-and matches the practical dialect already used in this repository’s `.metals/mbt.json`
+and matches the practical dialect already used in this repository’s `.javals/mbt.json`
 (`javacOptions`, absolute source/`javaHome` paths, `file:` URIs for jars).
 
 ## CLI
@@ -32,10 +32,10 @@ java -jar mavenimporter.jar <directory> [--output <file>] [--force]
 ```
 
 - **Input:** one directory—the workspace root to scan recursively for `pom.xml` files.
-- **Output:** defaults to `<directory>/.metals/mbt.json.maven` (creates parent directories as
+- **Output:** defaults to `<directory>/.javals/mbt.json.maven` (creates parent directories as
   needed). Clients may override with `--output` / `-o`. A relative output path is resolved against
   the input directory; an absolute path is used as-is. java-ls always passes this default so the
-  fragment can be merged with other build systems into `.metals/mbt.json`.
+  fragment can be merged with other build systems into `.javals/mbt.json`.
 - **Force:** `--force` / `-f` skips the up-to-date check and always re-imports and rewrites the
   output.
 - **Exit status:** `0` when there are no `pom.xml` files (and any stale output at the chosen path
@@ -78,7 +78,7 @@ scan poms → empty? ──yes──► delete stale output if any; exit 0
                 ↓
          map namespaces / dependsOn / dependencyModules
                 ↓
-      write .metals/mbt.json.maven
+      write .javals/mbt.json.maven
 ```
 
 Shortest-path-first plus reactor removal is what makes multi-reactor workspaces work during the
@@ -114,7 +114,7 @@ sources on the classpath the same way Metals wires cross-module relationships to
 
 ### Fields emitted per namespace
 
-Aligned with the Metals schema and existing `.metals/mbt.json` emission:
+Aligned with the Metals schema and existing `.javals/mbt.json` emission:
 
 - `sources` — absolute paths to source roots (conventional compile roots that exist on
   disk, plus plugin-generated roots from the registry below—even when those directories
@@ -175,7 +175,7 @@ that plugin’s coordinates, config element, and documented default — or suppl
 via language-server `maven.generatedSourceRules` (VS Code: `javals.maven.generatedSourceRules`).
 Entries with `"enabled": false` disable matching seed rules (`pluginKey` required; optional
 `scope` / `goals` / `configPath` narrow the match). The server writes the array to
-`.metals/generated-source-rules.json` and passes `--generated-source-rules` to the importer.
+`.javals/generated-source-rules.json` and passes `--generated-source-rules` to the importer.
 No importer lifecycle changes are required.
 
 ### Embedded Maven responsibilities
@@ -190,7 +190,7 @@ modules preferred over the local repository.
 
 **In scope**
 
-- Maven → one Metals-shaped fragment `.metals/mbt.json.maven`
+- Maven → one Metals-shaped fragment `.javals/mbt.json.maven`
 - main and test as separate namespaces
 - transitive external jars per target
 - reactor-internal and cross-reactor workspace links via `dependsOn`
@@ -214,7 +214,8 @@ modules preferred over the local repository.
 - Metals: [mbt.json overview](https://github.com/scalameta/metals/blob/main-v2/docs/build-tools/mbt.json.md),
   [schema](https://github.com/scalameta/metals/blob/main-v2/docs/build-tools/mbt.schema.json)
 - Local notes: [`java-indexing/doc/mbt-json.md`](../../java-indexing/doc/mbt-json.md)
-- Consumer: java-ls runs registered importers, merges `.metals/mbt.json.<system>` into
-  `.metals/mbt.json`, then `IndexService` loads `<workspace>/mbt.json` or
-  `<workspace>/.metals/mbt.json` and builds a `ClasspathOrder` per namespace from `sources`,
+- Consumer: java-ls runs registered importers, merges `.javals/mbt.json.<system>` into
+  `.javals/mbt.json`, then `IndexService` loads `<workspace>/mbt.json`,
+  `<workspace>/.javals/mbt.json`, or (fallback) `<workspace>/.metals/mbt.json` and builds a
+  `ClasspathOrder` per namespace from `sources`,
   `dependsOn`, and `dependencyModules`

@@ -19,9 +19,9 @@ class MainTest {
     Path temp;
 
     @Test
-    void resolveOutputDefaultsToDotMetalsMbtJsonMaven() {
+    void resolveOutputDefaultsToDotJavalsMbtJsonMaven() {
         Path directory = temp.resolve("ws").toAbsolutePath().normalize();
-        assertEquals(directory.resolve(".metals/mbt.json.maven"), Main.resolveOutput(directory, null));
+        assertEquals(directory.resolve(".javals/mbt.json.maven"), Main.resolveOutput(directory, null));
     }
 
     @Test
@@ -50,13 +50,13 @@ class MainTest {
         Files.createDirectories(workspace);
         assertEquals(0, Main.run(new String[] {workspace.toString(), "--force"}));
         assertEquals(0, Main.run(new String[] {workspace.toString(), "-f"}));
-        assertFalse(Files.exists(workspace.resolve(".metals/mbt.json.maven")));
+        assertFalse(Files.exists(workspace.resolve(".javals/mbt.json.maven")));
     }
 
     @Test
     void emptyWorkspaceDeletesStaleOutput() throws Exception {
         Path workspace = temp.resolve("stale");
-        Path output = workspace.resolve(".metals/mbt.json.maven");
+        Path output = workspace.resolve(".javals/mbt.json.maven");
         Files.createDirectories(output.getParent());
         Files.writeString(output, "{\"namespaces\":{},\"dependencyModules\":[]}");
         assertTrue(Files.isRegularFile(output));

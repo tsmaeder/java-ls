@@ -26,7 +26,7 @@ import org.eclipse.lsp4j.MessageType;
  */
 public final class BuildSystemImporter implements WorkspaceBuildImport {
 
-    /** Written under {@code .metals/} when {@code maven.generatedSourceRules} is non-empty. */
+    /** Written under {@code .javals/} when {@code maven.generatedSourceRules} is non-empty. */
     public static final String GENERATED_SOURCE_RULES_FILE = "generated-source-rules.json";
 
     @FunctionalInterface
@@ -137,7 +137,7 @@ public final class BuildSystemImporter implements WorkspaceBuildImport {
         if (mavenGeneratedSourceRulesJson == null) {
             return Optional.empty();
         }
-        Path rulesFile = workspace.resolve(".metals").resolve(GENERATED_SOURCE_RULES_FILE);
+        Path rulesFile = workspace.resolve(".javals").resolve(GENERATED_SOURCE_RULES_FILE);
         try {
             Files.createDirectories(rulesFile.getParent());
             Files.writeString(rulesFile, mavenGeneratedSourceRulesJson, StandardCharsets.UTF_8);

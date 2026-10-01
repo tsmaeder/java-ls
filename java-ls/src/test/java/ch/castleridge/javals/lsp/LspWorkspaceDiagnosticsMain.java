@@ -211,14 +211,14 @@ public final class LspWorkspaceDiagnosticsMain {
 
     /**
      * Directory names that hold build output or tooling caches rather than
-     * real workspace sources. {@code .metals/out} in particular contains
-     * JDK/library sources that metals extracted for navigation; compiling them
-     * re-declares types that the index already provides (e.g. a second
+     * real workspace sources. {@code .metals/out} and {@code .javals} in particular
+     * hold tooling caches rather than project sources; metals-extracted JDK sources
+     * re-declare types that the index already provides (e.g. a second
      * {@code java.lang.Object}), which is a self-shadowing artifact unrelated
      * to workspace diagnostics — so we never want them in the measurement.
      */
     private static final java.util.Set<String> EXCLUDED_DIRS =
-            java.util.Set.of(".metals", ".bloop", "target", "build", "out", "bin",
+            java.util.Set.of(".metals", ".javals", ".bloop", "target", "build", "out", "bin",
                     "node_modules", ".git", ".gradle", ".idea");
 
     private static List<Path> collectJavaFiles(Path workspaceRoot) throws IOException {
