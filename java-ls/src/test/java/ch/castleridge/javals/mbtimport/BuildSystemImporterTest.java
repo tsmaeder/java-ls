@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
+import java.nio.file.attribute.FileTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -135,5 +135,68 @@ class BuildSystemImporterTest {
         assertEquals(
                 rulesFile.toAbsolutePath().normalize().toString(),
                 command.get(command.indexOf("--generated-source-rules") + 1));
+    }
+
+    @Test
+    void preservesGeneratedSourceRulesMtimeWhenContentUnchanged() throws Exception {
+        Path workspace = temp.resolve("ws");
+        Files.createDirectories(workspace);
+        Path fakeJar = temp.resolve("mavenimporter.jar");
+        Files.writeString(fakeJar, "fake");
+
+        String rulesJson = "[{\"pluginKey\":\"org.example:x\",\"enabled\":false}]";
+        BuildSystemImporter.ProcessRunner runner = (command, log) -> {
+            Path output = Path.of(command.get(command.indexOf("--output") + 1));
+            Files.createDirectories(output.getParent());
+            Files.writeString(output, """
+                    {"namespaces":{},"dependencyModules":[]}
+                    """);
+            return 0;
+        };
+        BuildSystemImporter importer =
+                new BuildSystemImporter(Map.of(BuildSystems.MAVEN, fakeJar.toString()), rulesJson, runner);
+
+        importer.importAndMerge(workspace, (t, m) -> {});
+
+        Path rulesFile = workspace.resolve(".javals").resolve(BuildSystemImporter.GENERATED_SOURCE_RULES_FILE);
+        FileTime mtimeAfterFirst = Files.getLastModifiedTime(rulesFile);
+        Thread.sleep(15);
+
+        importer.importAndMerge(workspace, (t, m) -> {});
+
+        assertEquals(mtimeAfterFirst, Files.getLastModifiedTime(rulesFile));
+        assertEquals(rulesJson, Files.readString(rulesFile));
+    }
+
+    @Test
+    void rewritesGeneratedSourceRulesWhenContentChanges() throws Exception {
+        Path workspace = temp.resolve("ws");
+        Files.createDirectories(workspace);
+        Path fakeJar = temp.resolve("mavenimporter.jar");
+        Files.writeString(fakeJar, "fake");
+
+        BuildSystemImporter.ProcessRunner runner = (command, log) -> {
+            Path output = Path.of(command.get(command.indexOf("--output") + 1));
+            Files.createDirectories(output.getParent());
+            Files.writeString(output, """
+                    {"namespaces":{},"dependencyModules":[]}
+                    """);
+            return 0;
+        };
+
+        String firstRules = "[{\"pluginKey\":\"org.example:x\",\"enabled\":false}]";
+        new BuildSystemImporter(Map.of(BuildSystems.MAVEN, fakeJar.toString()), firstRules, runner)
+                .importAndMerge(workspace, (t, m) -> {});
+
+        Path rulesFile = workspace.resolve(".javals").resolve(BuildSystemImporter.GENERATED_SOURCE_RULES_FILE);
+        FileTime mtimeAfterFirst = Files.getLastModifiedTime(rulesFile);
+        Thread.sleep(15);
+
+        String secondRules = "[{\"pluginKey\":\"org.example:y\",\"enabled\":false}]";
+        new BuildSystemImporter(Map.of(BuildSystems.MAVEN, fakeJar.toString()), secondRules, runner)
+                .importAndMerge(workspace, (t, m) -> {});
+
+        assertEquals(secondRules, Files.readString(rulesFile));
+        assertTrue(Files.getLastModifiedTime(rulesFile).compareTo(mtimeAfterFirst) > 0);
     }
 }

@@ -142,6 +142,10 @@ public final class BuildSystemImporter implements WorkspaceBuildImport {
         }
         Path rulesFile = workspace.resolve(".javals").resolve(GENERATED_SOURCE_RULES_FILE);
         try {
+            if (Files.isRegularFile(rulesFile)
+                    && mavenGeneratedSourceRulesJson.equals(Files.readString(rulesFile, StandardCharsets.UTF_8))) {
+                return Optional.of(rulesFile);
+            }
             Files.createDirectories(rulesFile.getParent());
             Files.writeString(rulesFile, mavenGeneratedSourceRulesJson, StandardCharsets.UTF_8);
             return Optional.of(rulesFile);
