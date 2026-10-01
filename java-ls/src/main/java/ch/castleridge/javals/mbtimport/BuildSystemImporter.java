@@ -67,13 +67,16 @@ public final class BuildSystemImporter implements WorkspaceBuildImport {
         this.processRunner = Objects.requireNonNull(processRunner);
     }
 
+    /** Default Maven importer preference: resolved against the java-ls install directory. */
+    public static final String DEFAULT_MAVEN_IMPORTER = "mavenimporter.jar";
+
     /**
-     * Defaults: {@code maven} → bundled {@code mavenimporter.jar} when found beside java-ls.
+     * Defaults: {@code maven} → {@link #DEFAULT_MAVEN_IMPORTER} (relative to the java-ls
+     * install directory).
      */
     public static Map<String, String> defaultScripts() {
         Map<String, String> defaults = new HashMap<>();
-        ImporterJarLocator.locateMavenImporter(ch.castleridge.javals.App.class)
-                .ifPresent(jar -> defaults.put(BuildSystems.MAVEN, jar.toString()));
+        defaults.put(BuildSystems.MAVEN, DEFAULT_MAVEN_IMPORTER);
         return defaults;
     }
 
@@ -158,6 +161,11 @@ public final class BuildSystemImporter implements WorkspaceBuildImport {
     static int runProcess(List<String> command, BiConsumer<MessageType, String> log)
             throws IOException, InterruptedException {
         ProcessBuilder pb = new ProcessBuilder(command);
+        // Relative shell-script paths resolve against the java-ls install directory.
+        Path installDir = ImporterJarLocator.installDirectory(ch.castleridge.javals.App.class);
+        if (installDir != null) {
+            pb.directory(installDir.toFile());
+        }
         pb.redirectErrorStream(true);
         Process process = pb.start();
         try (BufferedReader reader =

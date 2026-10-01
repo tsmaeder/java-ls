@@ -15,8 +15,9 @@ import java.util.Locale;
  * Builds the process argv for an importer preference string.
  *
  * <p>If the preference looks like a jar ({@code .jar} suffix), runs it with the
- * current JVM's {@code java} executable. Otherwise treats the preference as a
- * shell command line and appends {@code <workspace> --output <fragment>} (and
+ * current JVM's {@code java} executable. Relative jar paths are resolved against
+ * the java-ls install directory. Otherwise treats the preference as a shell
+ * command line and appends {@code <workspace> --output <fragment>} (and
  * optionally {@code --generated-source-rules <file>}).
  */
 public final class ImporterCommand {
@@ -27,7 +28,7 @@ public final class ImporterCommand {
      * @param script preference string (jar path or shell command line); must be non-blank
      */
     public static List<String> build(String script, Path workspace, Path output) {
-        return build(script, workspace, output, null);
+        return build(script, workspace, output, null, defaultRelativeBase());
     }
 
     /**
@@ -36,6 +37,15 @@ public final class ImporterCommand {
      *        {@code --generated-source-rules <path>}
      */
     public static List<String> build(String script, Path workspace, Path output, Path generatedSourceRules) {
+        return build(script, workspace, output, generatedSourceRules, defaultRelativeBase());
+    }
+
+    /**
+     * @param relativeBase directory used to resolve relative jar paths; may be {@code null}
+     *        (relative paths then left unchanged)
+     */
+    public static List<String> build(
+            String script, Path workspace, Path output, Path generatedSourceRules, Path relativeBase) {
         String trimmed = stripQuotes(script.trim());
         Path ws = workspace.toAbsolutePath().normalize();
         Path out = output.toAbsolutePath().normalize();
@@ -46,7 +56,7 @@ public final class ImporterCommand {
             List<String> command = new ArrayList<>(rules == null ? 6 : 8);
             command.add(javaExecutable());
             command.add("-jar");
-            command.add(trimmed);
+            command.add(resolveAgainstBase(trimmed, relativeBase));
             command.add(ws.toString());
             command.add("--output");
             command.add(out.toString());
@@ -54,6 +64,26 @@ public final class ImporterCommand {
             return command;
         }
         return shellCommand(trimmed, ws, out, rules);
+    }
+
+    /**
+     * Resolves {@code path} against {@code relativeBase} when it is not absolute.
+     * Absolute paths are returned as-is; when {@code relativeBase} is null, relative
+     * paths are left unchanged.
+     */
+    static String resolveAgainstBase(String path, Path relativeBase) {
+        Path p = Path.of(path);
+        if (p.isAbsolute()) {
+            return path;
+        }
+        if (relativeBase == null) {
+            return path;
+        }
+        return relativeBase.resolve(p).normalize().toString();
+    }
+
+    static Path defaultRelativeBase() {
+        return ImporterJarLocator.installDirectory(ch.castleridge.javals.App.class);
     }
 
     static boolean isJar(String script) {

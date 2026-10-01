@@ -104,6 +104,12 @@ class BuildSystemImporterTest {
     }
 
     @Test
+    void resolveScriptsKeepsMavenImporterJarDefault() {
+        Map<String, String> resolved = BuildSystemImporter.resolveScripts(Map.of());
+        assertEquals(BuildSystemImporter.DEFAULT_MAVEN_IMPORTER, resolved.get(BuildSystems.MAVEN));
+    }
+
+    @Test
     void writesGeneratedSourceRulesAndPassesFlag() throws Exception {
         Path workspace = temp.resolve("ws");
         Files.createDirectories(workspace);

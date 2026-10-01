@@ -25,10 +25,11 @@ class ImporterCommandTest {
     void jarPreferenceUsesCurrentJava() {
         Path ws = temp.resolve("ws");
         Path out = temp.resolve("out.json");
-        List<String> command = ImporterCommand.build("/opt/tools/importer.jar", ws, out);
+        Path jar = temp.resolve("importer.jar").toAbsolutePath().normalize();
+        List<String> command = ImporterCommand.build(jar.toString(), ws, out, null, temp);
         assertEquals(ImporterCommand.javaExecutable(), command.get(0));
         assertEquals("-jar", command.get(1));
-        assertEquals("/opt/tools/importer.jar", command.get(2));
+        assertEquals(jar.toString(), command.get(2));
         assertEquals(ws.toAbsolutePath().normalize().toString(), command.get(3));
         assertEquals("--output", command.get(4));
         assertEquals(out.toAbsolutePath().normalize().toString(), command.get(5));
@@ -39,7 +40,8 @@ class ImporterCommandTest {
         Path ws = temp.resolve("ws");
         Path out = temp.resolve("out.json");
         Path rules = temp.resolve("rules.json");
-        List<String> command = ImporterCommand.build("/opt/tools/importer.jar", ws, out, rules);
+        Path jar = temp.resolve("importer.jar").toAbsolutePath().normalize();
+        List<String> command = ImporterCommand.build(jar.toString(), ws, out, rules, temp);
         assertEquals("--generated-source-rules", command.get(6));
         assertEquals(rules.toAbsolutePath().normalize().toString(), command.get(7));
     }
@@ -47,9 +49,23 @@ class ImporterCommandTest {
     @Test
     void quotedJarStillDetected() {
         assertTrue(ImporterCommand.isJar("\"C:\\\\tools\\\\x.JAR\""));
-        List<String> command = ImporterCommand.build("'./x.jar'", temp, temp.resolve("o.json"));
+        List<String> command = ImporterCommand.build("'./x.jar'", temp, temp.resolve("o.json"), null, temp);
         assertEquals("-jar", command.get(1));
-        assertEquals("./x.jar", command.get(2));
+        assertEquals(temp.resolve("x.jar").normalize().toString(), command.get(2));
+    }
+
+    @Test
+    void relativeJarResolvesAgainstBase() {
+        List<String> command =
+                ImporterCommand.build("mavenimporter.jar", temp, temp.resolve("o.json"), null, temp);
+        assertEquals(temp.resolve("mavenimporter.jar").normalize().toString(), command.get(2));
+    }
+
+    @Test
+    void relativeJarLeftUnchangedWhenBaseNull() {
+        List<String> command =
+                ImporterCommand.build("mavenimporter.jar", temp, temp.resolve("o.json"), null, null);
+        assertEquals("mavenimporter.jar", command.get(2));
     }
 
     @Test
