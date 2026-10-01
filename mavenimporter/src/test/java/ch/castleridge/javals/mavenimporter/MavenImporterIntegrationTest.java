@@ -88,6 +88,38 @@ class MavenImporterIntegrationTest {
     }
 
     @Test
+    void snapshotMultiModuleUsesDependsOnWithoutInstall() throws Exception {
+        Path workspace = copyFixture("fixtures/snapshot-multi");
+        assertEquals(0, Main.run(new String[] {workspace.toString()}));
+
+        MbtDocument doc = readMbt(workspace);
+        String a = "ch.castleridge.fixtures:snapshot-a:1.0-SNAPSHOT";
+        String b = "ch.castleridge.fixtures:snapshot-b:1.0-SNAPSHOT";
+        assertTrue(doc.namespaces.containsKey(a));
+        assertTrue(doc.namespaces.containsKey(b));
+
+        MbtNamespace modB = doc.namespaces.get(b);
+        assertTrue(modB.dependsOn.contains(a));
+        assertFalse(modB.dependencyModules.contains(a));
+    }
+
+    @Test
+    void crossReactorSnapshotUsesDependsOn() throws Exception {
+        Path workspace = copyFixture("fixtures/cross-reactor");
+        assertEquals(0, Main.run(new String[] {workspace.toString()}));
+
+        MbtDocument doc = readMbt(workspace);
+        String lib = "ch.castleridge.fixtures:cross-lib:1.0-SNAPSHOT";
+        String app = "ch.castleridge.fixtures:cross-app:1.0-SNAPSHOT";
+        assertTrue(doc.namespaces.containsKey(lib));
+        assertTrue(doc.namespaces.containsKey(app));
+
+        MbtNamespace appNs = doc.namespaces.get(app);
+        assertTrue(appNs.dependsOn.contains(lib));
+        assertFalse(appNs.dependencyModules.contains(lib));
+    }
+
+    @Test
     void nestedOrphanImportedAsSecondReactor() throws Exception {
         Path workspace = copyFixture("fixtures/nested-orphan");
         assertEquals(0, Main.run(new String[] {workspace.toString()}));

@@ -13,7 +13,7 @@ import org.apache.maven.artifact.Artifact;
 import org.apache.maven.project.MavenProject;
 
 /**
- * Classifies resolved artifacts as reactor modules ({@code dependsOn}) vs external jars.
+ * Classifies resolved artifacts as workspace modules ({@code dependsOn}) vs external jars.
  */
 public final class ArtifactClassifier {
 
@@ -24,12 +24,18 @@ public final class ArtifactClassifier {
 
     private ArtifactClassifier() {}
 
-    public static Classification classify(MavenProject project, Map<String, MavenProject> reactorByGav, boolean testClasspath) {
+    public static Classification classify(
+            MavenProject project, Map<String, MavenProject> workspaceByGav, boolean testClasspath) {
         Set<String> dependsOnMain = new LinkedHashSet<>();
         Set<String> dependsOnTest = new LinkedHashSet<>();
         Map<String, Artifact> external = new LinkedHashMap<>();
 
-        for (Artifact artifact : project.getArtifacts()) {
+        Set<Artifact> artifacts = project.getArtifacts();
+        if (artifacts == null || artifacts.isEmpty()) {
+            return new Classification(dependsOnMain, dependsOnTest, external);
+        }
+
+        for (Artifact artifact : artifacts) {
             if (!testClasspath && !isMainScope(artifact.getScope())) {
                 continue;
             }
@@ -38,8 +44,8 @@ public final class ArtifactClassifier {
             }
 
             String gav = ReactorImporter.gavKey(artifact.getGroupId(), artifact.getArtifactId(), artifact.getVersion());
-            MavenProject reactorProject = reactorByGav.get(gav);
-            if (reactorProject != null) {
+            MavenProject workspaceProject = workspaceByGav.get(gav);
+            if (workspaceProject != null) {
                 String mainId = gav;
                 if ("tests".equals(artifact.getClassifier()) || "test-jar".equals(artifact.getType())) {
                     dependsOnTest.add(mainId + ":test");

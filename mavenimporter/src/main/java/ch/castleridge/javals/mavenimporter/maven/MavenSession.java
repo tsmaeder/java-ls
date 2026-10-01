@@ -7,6 +7,7 @@ import java.io.File;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -15,15 +16,22 @@ import java.util.Set;
 
 import org.apache.maven.DefaultMaven;
 import org.apache.maven.Maven;
+import org.apache.maven.RepositoryUtils;
+import org.apache.maven.artifact.Artifact;
 import org.apache.maven.execution.DefaultMavenExecutionRequest;
 import org.apache.maven.execution.MavenExecutionRequest;
 import org.apache.maven.execution.MavenExecutionRequestPopulator;
 import org.apache.maven.extension.internal.CoreExports;
 import org.apache.maven.extension.internal.CoreExtensionEntry;
+import org.apache.maven.project.DefaultDependencyResolutionRequest;
 import org.apache.maven.project.DefaultProjectBuildingRequest;
+import org.apache.maven.project.DependencyResolutionException;
+import org.apache.maven.project.DependencyResolutionResult;
+import org.apache.maven.project.MavenProject;
 import org.apache.maven.project.ProjectBuilder;
 import org.apache.maven.project.ProjectBuildingRequest;
 import org.apache.maven.project.ProjectBuildingResult;
+import org.apache.maven.project.ProjectDependenciesResolver;
 import org.apache.maven.settings.Settings;
 import org.apache.maven.settings.building.DefaultSettingsBuildingRequest;
 import org.apache.maven.settings.building.SettingsBuilder;
@@ -36,6 +44,7 @@ import org.codehaus.plexus.classworlds.ClassWorld;
 import org.codehaus.plexus.classworlds.realm.ClassRealm;
 import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.RepositorySystemSession;
+import org.eclipse.aether.repository.LocalRepositoryManager;
 import org.slf4j.ILoggerFactory;
 import org.slf4j.LoggerFactory;
 
@@ -49,10 +58,13 @@ public final class MavenSession implements AutoCloseable {
     private final DefaultPlexusContainer container;
     private final ClassLoader previousContextClassLoader;
     private final ProjectBuilder projectBuilder;
+    private final ProjectDependenciesResolver projectDependenciesResolver;
     private final MavenExecutionRequestPopulator requestPopulator;
     private final SettingsBuilder settingsBuilder;
     private final RepositorySystem aetherRepositorySystem;
     private final DefaultMaven defaultMaven;
+
+    private RepositorySystemSession lastRepositorySession;
 
     public MavenSession() throws Exception {
         previousContextClassLoader = Thread.currentThread().getContextClassLoader();
@@ -85,13 +97,17 @@ public final class MavenSession implements AutoCloseable {
         Thread.currentThread().setContextClassLoader(container.getContainerRealm());
 
         projectBuilder = container.lookup(ProjectBuilder.class);
+        projectDependenciesResolver = container.lookup(ProjectDependenciesResolver.class);
         requestPopulator = container.lookup(MavenExecutionRequestPopulator.class);
         settingsBuilder = container.lookup(SettingsBuilder.class);
         aetherRepositorySystem = container.lookup(RepositorySystem.class);
         defaultMaven = (DefaultMaven) container.lookup(Maven.class);
     }
 
-    public List<ProjectBuildingResult> buildReactor(Path pom) throws Exception {
+    /**
+     * Builds the reactor rooted at {@code pom} without resolving project dependencies.
+     */
+    public List<ProjectBuildingResult> buildReactorModels(Path pom) throws Exception {
         File pomFile = pom.toAbsolutePath().normalize().toFile();
         File basedir = pomFile.getParentFile();
         System.setProperty("maven.multiModuleProjectDirectory", basedir.getAbsolutePath());
@@ -101,7 +117,7 @@ public final class MavenSession implements AutoCloseable {
 
         ProjectBuildingRequest buildingRequest = new DefaultProjectBuildingRequest();
         buildingRequest.setRepositorySession(repoSession);
-        buildingRequest.setResolveDependencies(true);
+        buildingRequest.setResolveDependencies(false);
         buildingRequest.setProcessPlugins(true);
         buildingRequest.setLocalRepository(execRequest.getLocalRepository());
         buildingRequest.setRemoteRepositories(execRequest.getRemoteRepositories());
@@ -117,7 +133,55 @@ public final class MavenSession implements AutoCloseable {
         return results;
     }
 
-    private RepositorySystemSession lastRepositorySession;
+    /**
+     * Opens a repository session that prefers {@code index} for workspace artifacts.
+     */
+    public RepositorySystemSession openResolveSession(WorkspacePomIndex index) throws Exception {
+        MavenExecutionRequest execRequest = newDefaultExecutionRequest(null, new File("."));
+        execRequest.setWorkspaceReader(new WorkspacePomReader(index));
+        RepositorySystemSession repoSession = defaultMaven.newRepositorySession(execRequest);
+        lastRepositorySession = repoSession;
+        return repoSession;
+    }
+
+    /**
+     * Resolves the transitive classpath for {@code project} and sets {@code project.artifacts}.
+     * Mirrors {@code DefaultProjectBuilder}'s dependency-resolution step.
+     */
+    public DependencyResolutionResult resolveDependencies(MavenProject project, RepositorySystemSession repoSession)
+            throws DependencyResolutionException {
+        DefaultDependencyResolutionRequest resolutionRequest =
+                new DefaultDependencyResolutionRequest(project, repoSession);
+        DependencyResolutionResult result;
+        try {
+            result = projectDependenciesResolver.resolve(resolutionRequest);
+        } catch (DependencyResolutionException e) {
+            result = e.getResult();
+            applyResolvedArtifacts(project, result, repoSession);
+            throw e;
+        }
+        applyResolvedArtifacts(project, result, repoSession);
+        return result;
+    }
+
+    private static void applyResolvedArtifacts(
+            MavenProject project, DependencyResolutionResult result, RepositorySystemSession repoSession) {
+        Set<Artifact> artifacts = new LinkedHashSet<>();
+        if (result != null && result.getDependencyGraph() != null) {
+            List<String> trail = Collections.singletonList(project.getArtifact().getId());
+            RepositoryUtils.toArtifacts(
+                    artifacts, result.getDependencyGraph().getChildren(), trail, null);
+            LocalRepositoryManager lrm = repoSession.getLocalRepositoryManager();
+            for (Artifact artifact : artifacts) {
+                if (!artifact.isResolved()) {
+                    String path = lrm.getPathForLocalArtifact(RepositoryUtils.toArtifact(artifact));
+                    artifact.setFile(new File(lrm.getRepository().getBasedir(), path));
+                }
+            }
+        }
+        project.setResolvedArtifacts(artifacts);
+        project.setArtifacts(artifacts);
+    }
 
     public RepositorySystemSession lastRepositorySession() {
         return lastRepositorySession;
@@ -129,7 +193,9 @@ public final class MavenSession implements AutoCloseable {
 
     private MavenExecutionRequest newDefaultExecutionRequest(File pomFile, File basedir) throws Exception {
         MavenExecutionRequest request = new DefaultMavenExecutionRequest();
-        request.setPom(pomFile);
+        if (pomFile != null) {
+            request.setPom(pomFile);
+        }
         request.setBaseDirectory(basedir);
         request.setInteractiveMode(false);
         request.setSystemProperties(systemAndEnvProperties());

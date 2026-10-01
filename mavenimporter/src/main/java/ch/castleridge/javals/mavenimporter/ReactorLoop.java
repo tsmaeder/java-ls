@@ -15,6 +15,15 @@ import ch.castleridge.javals.mavenimporter.mbt.MbtDocument;
 public final class ReactorLoop {
 
     @FunctionalInterface
+    public interface ReactorHandler {
+        /**
+         * Handles one reactor rooted at {@code pom} and returns every pom.xml that belongs to that
+         * reactor (so they can be removed from the todo set).
+         */
+        Set<Path> handle(Path pom) throws Exception;
+    }
+
+    @FunctionalInterface
     public interface ReactorImporter {
         /**
          * Imports one reactor rooted at {@code pom} and returns the partial mbt document plus
@@ -27,21 +36,28 @@ public final class ReactorLoop {
 
     private ReactorLoop() {}
 
-    public static MbtAggregator run(Set<Path> todo, ReactorImporter importer) throws Exception {
-        MbtAggregator aggregator = new MbtAggregator();
+    public static void drain(Set<Path> todo, ReactorHandler handler) throws Exception {
         while (!todo.isEmpty()) {
             Path next = PomScanner.takeShortest(todo);
             if (next == null) {
                 break;
             }
-            ImportResult result = importer.importReactor(next);
-            aggregator.add(result.document());
-            for (Path reactorPom : result.reactorPoms()) {
+            Set<Path> reactorPoms = handler.handle(next);
+            for (Path reactorPom : reactorPoms) {
                 todo.remove(reactorPom.toAbsolutePath().normalize());
             }
-            // Always remove the chosen root even if the importer forgot it.
+            // Always remove the chosen root even if the handler forgot it.
             todo.remove(next.toAbsolutePath().normalize());
         }
+    }
+
+    public static MbtAggregator run(Set<Path> todo, ReactorImporter importer) throws Exception {
+        MbtAggregator aggregator = new MbtAggregator();
+        drain(todo, pom -> {
+            ImportResult result = importer.importReactor(pom);
+            aggregator.add(result.document());
+            return result.reactorPoms();
+        });
         return aggregator;
     }
 }

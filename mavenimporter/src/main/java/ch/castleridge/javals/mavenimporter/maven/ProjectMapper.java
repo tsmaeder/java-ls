@@ -13,7 +13,6 @@ import java.util.Set;
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.model.Plugin;
 import org.apache.maven.project.MavenProject;
-import org.apache.maven.project.ProjectBuildingResult;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
 import org.eclipse.aether.RepositorySystemSession;
 
@@ -33,13 +32,12 @@ public final class ProjectMapper {
     }
 
     public MbtDocument map(
-            List<ProjectBuildingResult> results,
-            Map<String, MavenProject> reactorByGav,
+            List<MavenProject> projects,
+            Map<String, MavenProject> workspaceByGav,
             RepositorySystemSession repoSession) {
         MbtDocument document = new MbtDocument();
 
-        for (ProjectBuildingResult result : results) {
-            MavenProject project = result.getProject();
+        for (MavenProject project : projects) {
             if (project == null || "pom".equals(project.getPackaging())) {
                 continue;
             }
@@ -48,9 +46,9 @@ public final class ProjectMapper {
             String testId = mainId + ":test";
 
             ArtifactClassifier.Classification mainClass =
-                    ArtifactClassifier.classify(project, reactorByGav, false);
+                    ArtifactClassifier.classify(project, workspaceByGav, false);
             ArtifactClassifier.Classification testClass =
-                    ArtifactClassifier.classify(project, reactorByGav, true);
+                    ArtifactClassifier.classify(project, workspaceByGav, true);
 
             MbtNamespace mainNs = newNamespace(project, false);
             mainNs.dependsOn.addAll(orderedUnique(mainClass.dependsOnMainIds(), mainClass.dependsOnTestIds()));

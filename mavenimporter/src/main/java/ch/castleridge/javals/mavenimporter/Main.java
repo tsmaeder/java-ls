@@ -8,8 +8,8 @@ import java.nio.file.Path;
 import java.util.Set;
 
 import ch.castleridge.javals.mavenimporter.maven.MavenSession;
-import ch.castleridge.javals.mavenimporter.maven.ReactorImporter;
-import ch.castleridge.javals.mavenimporter.mbt.MbtAggregator;
+import ch.castleridge.javals.mavenimporter.maven.WorkspaceImporter;
+import ch.castleridge.javals.mavenimporter.mbt.MbtDocument;
 import ch.castleridge.javals.mavenimporter.mbt.MbtJsonWriter;
 
 /**
@@ -64,9 +64,9 @@ public final class Main {
             }
 
             try (MavenSession session = new MavenSession()) {
-                ReactorImporter importer = new ReactorImporter(session);
-                MbtAggregator aggregator = ReactorLoop.run(todo, importer);
-                Path written = MbtJsonWriter.write(output, aggregator.toDocument());
+                WorkspaceImporter importer = new WorkspaceImporter(session);
+                MbtDocument document = importer.importWorkspace(todo);
+                Path written = MbtJsonWriter.write(output, document);
                 System.out.println("Wrote " + written);
             }
             return 0;
