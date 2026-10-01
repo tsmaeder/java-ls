@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URL;
@@ -152,6 +153,27 @@ class MavenImporterIntegrationTest {
 
         assertEquals(0, Main.run(new String[] {workspace.toString()}));
         assertEquals(before, Files.getLastModifiedTime(output));
+    }
+
+    @Test
+    void generatedSourcePluginsEmitConfiguredAndDefaultRoots() throws Exception {
+        Path workspace = copyFixture("fixtures/generated-sources");
+        assertEquals(0, Main.run(new String[] {workspace.toString()}));
+
+        MbtDocument doc = readMbt(workspace);
+        String mainId = "ch.castleridge.fixtures:generated-sources:1.0.0";
+        String testId = mainId + ":test";
+        MbtNamespace main = doc.namespaces.get(mainId);
+        MbtNamespace test = doc.namespaces.get(testId);
+
+        assertTrue(main.sources.stream().anyMatch(s -> s.endsWith("src" + File.separator + "main" + File.separator + "java")
+                || s.replace('\\', '/').endsWith("src/main/java")));
+        assertTrue(main.sources.stream().anyMatch(s -> s.replace('\\', '/').endsWith("target/custom-annotations")));
+        assertTrue(main.sources.stream().anyMatch(s -> s.replace('\\', '/').endsWith("target/generated-sources/modello")));
+        assertTrue(main.sources.stream().anyMatch(s -> s.replace('\\', '/').endsWith("src/gen/java")));
+
+        assertTrue(test.sources.stream().anyMatch(s -> s.replace('\\', '/').endsWith("target/custom-test-annotations")));
+        assertTrue(test.sources.stream().anyMatch(s -> s.replace('\\', '/').endsWith("src/gen/test")));
     }
 
     private Path copyFixture(String resourceRoot) throws Exception {

@@ -16,6 +16,7 @@ import org.apache.maven.project.MavenProject;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
 import org.eclipse.aether.RepositorySystemSession;
 
+import ch.castleridge.javals.mavenimporter.maven.generated.GeneratedSourceRoots;
 import ch.castleridge.javals.mavenimporter.mbt.MbtDependencyModule;
 import ch.castleridge.javals.mavenimporter.mbt.MbtDocument;
 import ch.castleridge.javals.mavenimporter.mbt.MbtNamespace;
@@ -104,13 +105,16 @@ public final class ProjectMapper {
 
     private static MbtNamespace newNamespace(MavenProject project, boolean test) {
         MbtNamespace ns = new MbtNamespace();
+        LinkedHashSet<String> sources = new LinkedHashSet<>();
         List<String> roots = test ? project.getTestCompileSourceRoots() : project.getCompileSourceRoots();
         for (String root : roots) {
             File dir = new File(root);
             if (dir.isDirectory()) {
-                ns.sources.add(dir.getAbsolutePath());
+                sources.add(dir.getAbsolutePath());
             }
         }
+        sources.addAll(GeneratedSourceRoots.collect(project, test));
+        ns.sources.addAll(sources);
         ns.javacOptions.addAll(javacOptions(project));
         ns.javaHome = System.getProperty("java.home");
         ns.projectPath = project.getBasedir().getAbsolutePath();

@@ -116,12 +116,63 @@ sources on the classpath the same way Metals wires cross-module relationships to
 
 Aligned with the Metals schema and existing `.metals/mbt.json` emission:
 
-- `sources` — absolute paths to source roots
+- `sources` — absolute paths to source roots (conventional compile roots that exist on
+  disk, plus plugin-generated roots from the registry below—even when those directories
+  do not exist yet)
 - `javacOptions` — Java compiler options for the project
 - `dependencyModules` — ids into the top-level array (external jars only)
 - `javaHome` — JDK used for this project when known (toolchain / Maven Java home)
 - `dependsOn` — other namespace ids in the same `mbt.json`
 - optionally `classDirectories` / `projectPath` when useful for tooling parity with Metals
+
+### Generated source roots
+
+`ProjectBuilder` with `processPlugins=true` configures plugins but does **not** run
+`generate-sources` / compiler annotation processing. Roots that those mojos would add via
+`MavenProject.addCompileSourceRoot` therefore never appear in
+`getCompileSourceRoots()`. The importer does not execute the lifecycle either: instead it
+keeps a static registry of rules that map known plugins to a POM configuration path and a
+default directory.
+
+For each non-`pom` project, after collecting existing conventional source roots, the
+importer walks that registry:
+
+1. Look up the plugin on the effective model (`MavenProject.getPlugin("groupId:artifactId")`).
+2. If the rule lists goals, only executions whose goals intersect apply (e.g. build-helper
+   `add-source`); otherwise plugin-level config applies, and any execution that sets the
+   config path is merged in as well.
+3. Read the configured value under `<configuration>` using the rule’s slash-separated path
+   (execution config overrides plugin-level). If absent, use the rule’s default when one
+   exists; if the rule requires an explicit value and none is set, skip.
+4. Interpolate `${project.build.directory}` / `${project.basedir}`, resolve relative paths
+   against the module basedir, and append absolute paths to the namespace `sources` list
+   (deduplicated). Plugin-derived paths are always emitted even when the directory is
+   missing, so a later `mvn generate-sources` / compile can populate them and java-ls
+   watchers can pick them up. (`IndexService` already skips non-directories at index time.)
+
+**Rule shape** (see `GeneratedSourceRule` / `GeneratedSourceRules`):
+
+- `pluginKey` — `groupId:artifactId`
+- `goals` — optional; empty means plugin-level (plus executions that set the path)
+- `scope` — main or test namespace
+- `configPath` — e.g. `outputDirectory`, `generatedSourcesDirectory`, `sources/source`
+- `list` — single value vs repeated child elements
+- `defaultPath` — property-style default, or none
+- `required` — skip when neither config nor default yields a path
+
+**Seed plugins (v1):**
+
+| Plugin | Config | Default | Scope |
+| --- | --- | --- | --- |
+| `org.codehaus.modello:modello-maven-plugin` | `outputDirectory` | `${project.build.directory}/generated-sources/modello` | main |
+| `org.apache.maven.plugins:maven-compiler-plugin` | `generatedSourcesDirectory` | `…/generated-sources/annotations` | main |
+| same | `generatedTestSourcesDirectory` | `…/generated-test-sources/test-annotations` | test |
+| `org.codehaus.mojo:build-helper-maven-plugin` (`add-source`) | `sources/source` (list) | none | main |
+| same (`add-test-source`) | `sources/source` (list) | none | test |
+
+To support another generator (antlr, jaxb, protobuf, …), add a `GeneratedSourceRule` with
+that plugin’s coordinates, config element, and documented default. No importer lifecycle
+changes are required.
 
 ### Embedded Maven responsibilities
 
@@ -142,6 +193,8 @@ modules preferred over the local repository.
 - workspace `WorkspaceReader` so SNAPSHOT modules resolve from disk
 - multiple independent reactors under one directory
 - packaging next to java-ls for startup invocation
+- generated source roots from a plugin-config registry (modello, compiler APT,
+  build-helper, …) without executing those mojos
 
 **Out of scope**
 
@@ -149,6 +202,8 @@ modules preferred over the local repository.
 - Aligning java-indexing’s Gson DTOs (`MbtTargetInfo` fields `compilerOptions` / `classes`) with
   Metals names (`javacOptions` / `classDirectories`). The importer emits the Metals dialect;
   consumer field-name drift is a follow-up in java-indexing / java-ls.
+- Running generate-sources / annotation-processing mojos, or inventing roots for plugins not
+  listed in the registry
 
 ## References
 
