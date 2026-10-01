@@ -17,7 +17,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -32,22 +31,18 @@ import ch.castleridge.javals.indexing.scan.Scanner;
 import ch.castleridge.javals.classpath.ClasspathEntry;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
-import ch.castleridge.javals.mbtimport.BuildSystemImporter;
-import ch.castleridge.javals.mbtimport.WorkspaceBuildImport;
 import org.eclipse.lsp4j.FileChangeType;
 import org.eclipse.lsp4j.FileEvent;
-import org.eclipse.lsp4j.InitializeParams;
 import org.eclipse.lsp4j.MessageType;
-import org.eclipse.lsp4j.WorkspaceFolder;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.index.UriCoding;
 
 /**
- * Bootstraps the workspace {@link Index} by locating an {@code mbt.json}
- * in one of the workspace folders and asynchronously running the
- * {@link Scanner} over the {@link InputSource}s it describes.
+ * Manages the workspace {@link Index}: loads an {@code mbt.json}, runs the
+ * {@link Scanner} over the {@link InputSource}s it describes, and applies
+ * watched-file updates.
  *
  * <p>While the scan is running {@link #index()} returns the live index,
  * which grows incrementally as each {@link InputSource} is merged. Callers
@@ -68,24 +63,9 @@ public final class IndexService {
             ch.castleridge.javals.indexing.source.SourceIndexer.javac();
     private volatile ch.castleridge.javals.indexing.bytecode.BytecodeIndexer bytecodeIndexer =
             ch.castleridge.javals.indexing.bytecode.BytecodeIndexer.asm();
-    private volatile WorkspaceBuildImport buildSystemImporter;
 
     public IndexService(JavaLanguageServer server) {
         this.server = server;
-    }
-
-    /** Package-visible for tests that stub importer invocation. */
-    void setBuildSystemImporter(WorkspaceBuildImport buildSystemImporter) {
-        this.buildSystemImporter = buildSystemImporter;
-    }
-
-    private WorkspaceBuildImport resolveBuildSystemImporter(InitializeParams params) {
-        if (buildSystemImporter != null) {
-            return buildSystemImporter;
-        }
-        return new BuildSystemImporter(
-                BuildSystemImporter.resolveScripts(InitializationOptions.importerScripts(params)),
-                InitializationOptions.mavenGeneratedSourceRulesJson(params).orElse(null));
     }
 
     public void setSourceIndexer(ch.castleridge.javals.indexing.source.SourceIndexer sourceIndexer) {
@@ -150,7 +130,7 @@ public final class IndexService {
     }
 
     private void applyOneWatchedFile(Index index, List<SourceRoot> sourceRoots, FileEvent event) {
-        Path file = pathFromClientString(UriCoding.decode(event.getUri()));
+        Path file = ClientPaths.fromClientString(UriCoding.decode(event.getUri()));
         if (file == null) return;
         file = file.toAbsolutePath().normalize();
         String fileName = file.getFileName() == null ? "" : file.getFileName().toString();
@@ -197,38 +177,6 @@ public final class IndexService {
     }
 
     /**
-     * Look for an {@code mbt.json} under any of the workspace folders
-     * declared in {@code params} (falling back to the deprecated
-     * {@code rootUri}). If no root-level {@code mbt.json} exists, run
-     * registered build-system importers and merge fragments into
-     * {@code .metals/mbt.json} first. Then kick off a background scan and
-     * publish the resulting index/classpath atomically. Returns the future
-     * for tests; production callers can ignore it.
-     */
-    public CompletableFuture<Void> initialize(InitializeParams params) {
-        List<Path> roots = workspaceRoots(params);
-        Path workspacePath = resolveWorkspacePath(params, roots, null);
-        return CompletableFuture.runAsync(() -> {
-            if (!hasRootMbtJson(roots)) {
-                WorkspaceBuildImport importer = resolveBuildSystemImporter(params);
-                if (workspacePath != null) {
-                    importer.importAndMerge(workspacePath, this::log);
-                }
-            }
-            Path mbt = findMbtJson(roots);
-            if (mbt == null) {
-                log(MessageType.Info, "No mbt.json found in workspace roots; index disabled");
-                return;
-            }
-            Path ws = workspacePath != null
-                    ? workspacePath
-                    : resolveWorkspacePath(params, roots, mbt);
-            log(MessageType.Info, "Loading mbt.json: " + mbt);
-            loadFrom(mbt, ws);
-        });
-    }
-   
-    /**
      * Classpath to compile {@code uri} against: the one of the namespace that
      * <em>owns</em> the file, i.e. lists it under its own source roots.
      *
@@ -258,8 +206,10 @@ public final class IndexService {
         return best == null ? ClasspathOrder.UNRESTRICTED : best;
     }
 
-
-    private void loadFrom(Path mbt, Path workspacePath) {
+    /**
+     * Load {@code mbt.json} and scan its input sources into the workspace index.
+     */
+    public void loadFrom(Path mbt, Path workspacePath) {
         try {
             MbtInfo info = MbtJson.read(mbt);
             Map<String, String> sourceJarByBinaryJar = new HashMap<>();
@@ -493,83 +443,6 @@ public final class IndexService {
                 classpathEntries.add(UriClasspathEntry.of(jarPath.toUri().toString()));
             }
         }
-    }
-
-    private static Path resolveWorkspacePath(InitializeParams params, List<Path> roots, Path mbt) {
-        Path fromOptions = workspacePathFromInitializationOptions(params);
-        if (fromOptions != null) {
-            return fromOptions.toAbsolutePath().normalize();
-        }
-        if (!roots.isEmpty()) {
-            return roots.get(0).toAbsolutePath().normalize();
-        }
-        if (mbt != null) {
-            return mbt.toAbsolutePath().normalize().getParent();
-        }
-        return null;
-    }
-
-    static boolean hasRootMbtJson(List<Path> roots) {
-        for (Path root : roots) {
-            if (Files.isRegularFile(root.resolve("mbt.json"))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static Path workspacePathFromInitializationOptions(InitializeParams params) {
-        return InitializationOptions.workspacePath(params)
-                .map(IndexService::pathFromClientString)
-                .orElse(null);
-    }
-
-    private static List<Path> workspaceRoots(InitializeParams params) {
-        List<Path> roots = new ArrayList<>();
-        if (params == null) return roots;
-        List<WorkspaceFolder> folders = params.getWorkspaceFolders();
-        if (folders != null) {
-            for (WorkspaceFolder f : folders) {
-                Path p = pathFromClientString(f.getUri());
-                if (p != null) roots.add(p);
-            }
-        }
-        if (roots.isEmpty()) {
-            @SuppressWarnings("deprecation")
-            String rootUri = params.getRootUri();
-            Path p = pathFromClientString(rootUri);
-            if (p != null) roots.add(p);
-            if (p == null) {
-                @SuppressWarnings("deprecation")
-                String rootPath = params.getRootPath();
-                if (rootPath != null && !rootPath.isBlank()) {
-                    roots.add(Paths.get(rootPath));
-                }
-            }
-        }
-        return roots;
-    }
-
-    private static Path pathFromClientString(String s) {
-        if (s == null || s.isBlank()) return null;
-        if (s.startsWith("file:") || s.contains("://")) {
-            try {
-                return Paths.get(URI.create(s));
-            } catch (IllegalArgumentException | java.nio.file.FileSystemNotFoundException e) {
-                return null;
-            }
-        }
-        return Paths.get(s);
-    }
-
-    private static Path findMbtJson(List<Path> roots) {
-        for (Path root : roots) {
-            Path candidate = root.resolve("mbt.json");
-            if (Files.isRegularFile(candidate)) return candidate;
-            candidate = root.resolve(".metals", "mbt.json");
-            if (Files.isRegularFile(candidate)) return candidate;
-        }
-        return null;
     }
 
     private void log(MessageType type, String message) {

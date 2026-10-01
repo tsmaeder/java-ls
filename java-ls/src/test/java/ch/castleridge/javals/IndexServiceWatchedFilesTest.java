@@ -23,8 +23,6 @@ import java.util.concurrent.TimeUnit;
 
 import org.eclipse.lsp4j.FileChangeType;
 import org.eclipse.lsp4j.FileEvent;
-import org.eclipse.lsp4j.InitializeParams;
-import org.eclipse.lsp4j.WorkspaceFolder;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -67,12 +65,8 @@ class IndexServiceWatchedFilesTest {
         Files.writeString(tempDir.resolve("mbt.json"), mbt, StandardCharsets.UTF_8);
 
         IndexService service = new IndexService(null);
-        InitializeParams params = new InitializeParams();
-        WorkspaceFolder folder = new WorkspaceFolder();
-        folder.setUri(tempDir.toUri().toString());
-        folder.setName("ws");
-        params.setWorkspaceFolders(List.of(folder));
-        service.initialize(params).get(60, TimeUnit.SECONDS);
+        Path mbtPath = tempDir.resolve("mbt.json");
+        service.loadFrom(mbtPath, tempDir);
 
         Index index = service.index().orElseThrow();
         assertTrue(index.contains("com/example/Foo"));

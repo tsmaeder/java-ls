@@ -30,6 +30,7 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     private final TextDocumentService textDocumentService;
     private final WorkspaceService workspaceService;
     private final IndexService indexService;
+    private final WorkspaceBootstrap workspaceBootstrap;
     private LanguageClient client;
     private int errorCode = 1;
     private volatile String compilerBackend = "javac";
@@ -39,6 +40,7 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
 
     public JavaLanguageServer() {
         this.indexService = new IndexService(this);
+        this.workspaceBootstrap = new WorkspaceBootstrap();
         this.textDocumentService = new JavaTextDocumentService(this, indexService);
         this.workspaceService = new JavaWorkspaceService(this);
         indexService.addIndexChangedListener(this::rebindWorkspaceCompiler);
@@ -107,7 +109,10 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
                         + ", classIndexer=" + backend.classIndexer()
                         + ", compiler=" + backend.compiler());
 
-        indexService.initialize(params);
+        CompletableFuture.runAsync(() -> {
+            workspaceBootstrap.prepare(params, this::logMessage)
+                    .ifPresent(p -> indexService.loadFrom(p.mbtJson(), p.workspace()));
+        });
         applyReferencesFromOptions(params.getInitializationOptions(), false);
 
         // Set up server capabilities

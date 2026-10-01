@@ -20,7 +20,7 @@ import ch.castleridge.javals.mbtimport.BuildSystems;
 import ch.castleridge.javals.mbtimport.MbtFragmentMerge;
 import ch.castleridge.javals.mbtimport.WorkspaceBuildImport;
 
-class IndexServiceBuildImportTest {
+class WorkspaceBootstrapTest {
 
     @TempDir
     Path temp;
@@ -36,15 +36,15 @@ class IndexServiceBuildImportTest {
         AtomicBoolean imported = new AtomicBoolean(false);
         WorkspaceBuildImport stub = (ws, log) -> imported.set(true);
 
-        IndexService service = new IndexService(null);
-        service.setBuildSystemImporter(stub);
+        WorkspaceBootstrap bootstrap = new WorkspaceBootstrap();
+        bootstrap.setBuildSystemImporter(stub);
 
         InitializeParams params = new InitializeParams();
         WorkspaceFolder folder = new WorkspaceFolder();
         folder.setUri(workspace.toUri().toString());
         params.setWorkspaceFolders(List.of(folder));
 
-        service.initialize(params).join();
+        assertTrue(bootstrap.prepare(params, (t, m) -> {}).isPresent());
         assertFalse(imported.get());
     }
 
@@ -68,15 +68,15 @@ class IndexServiceBuildImportTest {
             }
         };
 
-        IndexService service = new IndexService(null);
-        service.setBuildSystemImporter(stub);
+        WorkspaceBootstrap bootstrap = new WorkspaceBootstrap();
+        bootstrap.setBuildSystemImporter(stub);
 
         InitializeParams params = new InitializeParams();
         WorkspaceFolder folder = new WorkspaceFolder();
         folder.setUri(workspace.toUri().toString());
         params.setWorkspaceFolders(List.of(folder));
 
-        service.initialize(params).join();
+        assertTrue(bootstrap.prepare(params, (t, m) -> {}).isPresent());
         assertTrue(imported.get());
         assertTrue(Files.isRegularFile(BuildSystems.mergedPath(workspace)));
     }
@@ -86,9 +86,9 @@ class IndexServiceBuildImportTest {
         Path workspace = temp.resolve("ws");
         Files.createDirectories(workspace.resolve(".metals"));
         Files.writeString(workspace.resolve(".metals/mbt.json"), "{}");
-        assertFalse(IndexService.hasRootMbtJson(List.of(workspace)));
+        assertFalse(WorkspaceBootstrap.hasRootMbtJson(List.of(workspace)));
 
         Files.writeString(workspace.resolve("mbt.json"), "{}");
-        assertTrue(IndexService.hasRootMbtJson(List.of(workspace)));
+        assertTrue(WorkspaceBootstrap.hasRootMbtJson(List.of(workspace)));
     }
 }
