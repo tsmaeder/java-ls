@@ -13,6 +13,9 @@ package ch.castleridge.javals.analysis;
 import java.util.List;
 import java.util.Optional;
 
+import org.eclipse.lsp4j.CallHierarchyIncomingCall;
+import org.eclipse.lsp4j.CallHierarchyItem;
+import org.eclipse.lsp4j.CallHierarchyOutgoingCall;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.Position;
@@ -71,6 +74,22 @@ public interface AnalysisSession {
      * discovered by scanning the index (and sealed {@code permits}).
      */
     List<TypeHierarchyItem> typeHierarchySubtypes(TypeHierarchyItem item);
+
+    /**
+     * Root call hierarchy item for the method/constructor at {@code position}.
+     */
+    Optional<CallHierarchyItem> prepareCallHierarchy(Position position);
+
+    /**
+     * Direct outgoing calls from {@code item}'s method body in this unit.
+     */
+    List<CallHierarchyOutgoingCall> outgoingCalls(CallHierarchyItem item);
+
+    /**
+     * Call sites in this unit targeting {@code key}, grouped by enclosing
+     * callable (incoming call hierarchy edges).
+     */
+    List<CallHierarchyIncomingCall> incomingCallsInUnit(SymbolKey key);
 
     /**
      * True when the session has a usable attributed AST.

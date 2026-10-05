@@ -32,8 +32,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import ch.castleridge.javals.analysis.AnalysisSession;
 import ch.castleridge.javals.analysis.AstDeclarationLocator;
-import ch.castleridge.javals.analysis.AttachedSource;
 import ch.castleridge.javals.analysis.BackendFactory;
+import ch.castleridge.javals.analysis.CallHierarchySupport;
 import ch.castleridge.javals.analysis.HoverInfo;
 import ch.castleridge.javals.analysis.JavadocMarkdown;
 import ch.castleridge.javals.analysis.PublishedDiagnostic;
@@ -44,7 +44,6 @@ import ch.castleridge.javals.analysis.ecj.EcjDietSources;
 import ch.castleridge.javals.analysis.javac.JavacDietSources;
 import ch.castleridge.javals.ast.SymbolKey;
 import ch.castleridge.javals.classpath.ClasspathOrder;
-import ch.castleridge.javals.indexing.bloom.BloomEntry;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.UriCoding;
 
@@ -382,74 +381,29 @@ public class JavaTextDocumentService implements TextDocumentService {
 
         cancelChecker.checkCanceled();
 
-        Set<String> bloomCandidates = new LinkedHashSet<>();
-        int visibilityFiltered = 0;
         Optional<Index> indexOpt = indexService.index();
-        if (indexOpt.isPresent()) {
-            String simpleName = key.simpleName();
-            Map<String, String> sourceJars = indexService.sourceJarByBinaryJar();
-            ReferenceSearchScope scope = referenceSearchScope;
-            String originContainer = ReferenceOriginVisibility.originContainer(
-                    indexService.classPathFor(uri), key.originResourceUri().orElse(null));
-            Map<String, Boolean> visibleByContainer = new HashMap<>();
-            for (BloomEntry entry : indexOpt.get().bloomFilters()) {
-                String path = entry.resourcePath();
-                if (path == null || !entry.filter().mightContain(simpleName)) continue;
-                if (!scope.include(entry.sourceUri(), path)) continue;
-                String candidateUri = null;
-                if (path.endsWith(".java")) {
-                    candidateUri = entry.resourceUri();
-                } else if (path.endsWith(".class")) {
-                    // Class bytes are not source. When the container has an
-                    // attached sources archive, search that .java instead.
-                    // Nested classes share one compilation unit, so the set
-                    // collapses Outer$Inner.class onto Outer.java.
-                    candidateUri = AttachedSource.javaUri(
-                            entry.resourceUri(), entry.sourceUri(), sourceJars).orElse(null);
-                }
-                if (candidateUri == null) continue;
-                if (originContainer != null) {
-                    String probe = candidateUri;
-                    boolean visible = visibleByContainer.computeIfAbsent(entry.sourceUri(), container ->
-                            ReferenceOriginVisibility.candidateCanSeeOrigin(
-                                    indexService.classPathFor(probe), originContainer));
-                    if (!visible) {
-                        visibilityFiltered++;
-                        continue;
-                    }
-                }
-                bloomCandidates.add(candidateUri);
-            }
-        }
-        int bloomHits = bloomCandidates.size();
-        int openDocs = documents.size();
+        ReferenceCandidateSearch.Result search = ReferenceCandidateSearch.find(
+                indexOpt.orElse(null),
+                key,
+                uri,
+                indexService.sourceJarByBinaryJar(),
+                indexService::classPathFor,
+                referenceSearchScope,
+                documents.keySet(),
+                referencesCandidateCap);
 
-        Set<String> candidates = new LinkedHashSet<>(bloomCandidates);
-        candidates.addAll(documents.keySet());
-        resolved.originResourceUri().filter(u -> u.endsWith(".java")).ifPresent(candidates::add);
-
-        int totalBeforeCap = candidates.size();
-        String capNote = "";
-        if (referencesCandidateCap > 0 && candidates.size() > referencesCandidateCap) {
-            Set<String> capped = new LinkedHashSet<>(documents.keySet());
-            resolved.originResourceUri().filter(u -> u.endsWith(".java")).ifPresent(capped::add);
-            for (String candidateUri : bloomCandidates) {
-                if (capped.size() >= referencesCandidateCap) {
-                    break;
-                }
-                capped.add(candidateUri);
-            }
-            candidates = capped;
-            capNote = ", capped " + candidates.size() + "/" + totalBeforeCap;
-        }
-
-        String visibilityNote = visibilityFiltered > 0
-                ? ", visibility filtered " + visibilityFiltered
+        Set<String> candidates = search.candidates();
+        String visibilityNote = search.visibilityFiltered() > 0
+                ? ", visibility filtered " + search.visibilityFiltered()
                 : "";
-        ReferenceSearchScope scope = referenceSearchScope;
+        String capNote = search.capped()
+                ? ", capped " + candidates.size() + "/" + search.totalBeforeCap()
+                : "";
+        ReferenceSearchScope scope = search.scope();
         server.logMessage(MessageType.Log,
                 "References: '" + key.simpleName() + "' -> " + candidates.size()
-                        + " candidates (" + bloomHits + " bloom hits, " + openDocs + " open docs"
+                        + " candidates (" + search.bloomHits() + " bloom hits, " + documents.size()
+                        + " open docs"
                         + ", jars=" + scope.inJars() + ", jdk=" + scope.inJdk()
                         + visibilityNote
                         + capNote
@@ -603,6 +557,92 @@ public class JavaTextDocumentService implements TextDocumentService {
         return session.typeHierarchySubtypes(item);
     }
 
+    @Override
+    public CompletableFuture<List<CallHierarchyItem>> prepareCallHierarchy(CallHierarchyPrepareParams params) {
+        String uri = UriCoding.decode(params.getTextDocument().getUri());
+        Position position = params.getPosition();
+        return CompletableFuture.supplyAsync(() -> computePrepareCallHierarchy(uri, position));
+    }
+
+    @Override
+    public CompletableFuture<List<CallHierarchyIncomingCall>> callHierarchyIncomingCalls(
+            CallHierarchyIncomingCallsParams params) {
+        CallHierarchyItem item = params.getItem();
+        return CompletableFuture.supplyAsync(() -> computeIncomingCalls(item));
+    }
+
+    @Override
+    public CompletableFuture<List<CallHierarchyOutgoingCall>> callHierarchyOutgoingCalls(
+            CallHierarchyOutgoingCallsParams params) {
+        CallHierarchyItem item = params.getItem();
+        return CompletableFuture.supplyAsync(() -> computeOutgoingCalls(item));
+    }
+
+    private List<CallHierarchyItem> computePrepareCallHierarchy(String uri, Position position) {
+        CachedCompile cached = compileCache.get(uri);
+        if (cached == null || cached.session() == null || !cached.session().isUsable()) {
+            return List.of();
+        }
+        return cached.session().prepareCallHierarchy(position).map(List::of).orElse(List.of());
+    }
+
+    private List<CallHierarchyOutgoingCall> computeOutgoingCalls(CallHierarchyItem item) {
+        if (item == null) return List.of();
+        AnalysisSession session = sessionForCallHierarchyItem(item);
+        if (session == null) return List.of();
+        return session.outgoingCalls(item);
+    }
+
+    private List<CallHierarchyIncomingCall> computeIncomingCalls(CallHierarchyItem item) {
+        if (item == null) return List.of();
+        Optional<SymbolKey> keyOpt = CallHierarchySupport.keyFromItem(item);
+        if (keyOpt.isEmpty()) return List.of();
+        SymbolKey key = keyOpt.get();
+
+        String queryUri = item.getUri() == null ? null : UriCoding.decode(item.getUri());
+        Optional<Index> indexOpt = indexService.index();
+        ReferenceCandidateSearch.Result search = ReferenceCandidateSearch.find(
+                indexOpt.orElse(null),
+                key,
+                queryUri,
+                indexService.sourceJarByBinaryJar(),
+                indexService::classPathFor,
+                referenceSearchScope,
+                documents.keySet(),
+                referencesCandidateCap);
+
+        Map<String, MergedIncoming> merged = new LinkedHashMap<>();
+        for (String candidateUri : search.candidates()) {
+            AnalysisSession session = sessionForUri(candidateUri);
+            if (session == null || !session.isUsable()) continue;
+            for (CallHierarchyIncomingCall call : session.incomingCallsInUnit(key)) {
+                if (call == null || call.getFrom() == null) continue;
+                String mergeKey = incomingMergeKey(call.getFrom());
+                MergedIncoming acc = merged.computeIfAbsent(mergeKey, k -> new MergedIncoming(call.getFrom()));
+                if (call.getFromRanges() != null) {
+                    for (Range range : call.getFromRanges()) {
+                        if (range != null && !acc.ranges.contains(range)) {
+                            acc.ranges.add(range);
+                        }
+                    }
+                }
+            }
+        }
+
+        List<CallHierarchyIncomingCall> out = new ArrayList<>(merged.size());
+        for (MergedIncoming acc : merged.values()) {
+            out.add(new CallHierarchyIncomingCall(acc.from, List.copyOf(acc.ranges)));
+        }
+        return out;
+    }
+
+    private static String incomingMergeKey(CallHierarchyItem from) {
+        String key = CallHierarchySupport.keyFromItem(from)
+                .map(SymbolKey::matchKey)
+                .orElse("");
+        return key + "|" + from.getUri();
+    }
+
     /**
      * Prefer an open document's session so locators share parse caches; otherwise
      * synthesize a session against the item's URI so index walks still work.
@@ -621,6 +661,25 @@ public class JavaTextDocumentService implements TextDocumentService {
                 return cached.session();
             }
         }
+        return analyzeUri(uri);
+    }
+
+    private AnalysisSession sessionForCallHierarchyItem(CallHierarchyItem item) {
+        String uri = item.getUri() == null ? null : UriCoding.decode(item.getUri());
+        return sessionForUri(uri);
+    }
+
+    /** Open-document session for {@code uri}, or a freshly analyzed one. */
+    private AnalysisSession sessionForUri(String uri) {
+        if (uri == null) return null;
+        CachedCompile cached = compileCache.get(uri);
+        if (cached != null && cached.session() != null && cached.session().isUsable()) {
+            return cached.session();
+        }
+        return analyzeUri(uri);
+    }
+
+    private AnalysisSession analyzeUri(String uri) {
         Optional<Index> indexOpt = indexService.index();
         if (indexOpt.isEmpty() || uri == null) return null;
         String text = textForUri(uri);
@@ -628,8 +687,17 @@ public class JavaTextDocumentService implements TextDocumentService {
         try {
             return workspaceCompiler.analyze(uri, text, indexOpt.get(), indexService.classPathFor(uri));
         } catch (RuntimeException e) {
-            server.logMessage(MessageType.Error, "Type hierarchy session failed for " + uri + ": " + describe(e));
+            server.logMessage(MessageType.Error, "Hierarchy session failed for " + uri + ": " + describe(e));
             return null;
+        }
+    }
+
+    private static final class MergedIncoming {
+        final CallHierarchyItem from;
+        final List<Range> ranges = new ArrayList<>();
+
+        MergedIncoming(CallHierarchyItem from) {
+            this.from = from;
         }
     }
 

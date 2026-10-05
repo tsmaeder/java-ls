@@ -12,6 +12,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import org.eclipse.lsp4j.CallHierarchyIncomingCall;
+import org.eclipse.lsp4j.CallHierarchyItem;
+import org.eclipse.lsp4j.CallHierarchyOutgoingCall;
 import org.eclipse.lsp4j.CompletionItem;
 import org.eclipse.lsp4j.Location;
 import org.eclipse.lsp4j.Position;
@@ -23,6 +26,7 @@ import ch.castleridge.javals.ast.CompilationUnit;
 import ch.castleridge.javals.ast.Declaration;
 import ch.castleridge.javals.ast.EmptyArrays;
 import ch.castleridge.javals.ast.Identifier;
+import ch.castleridge.javals.ast.MethodSymbol;
 import ch.castleridge.javals.ast.SourceFile;
 import ch.castleridge.javals.ast.SourceRange;
 import ch.castleridge.javals.ast.Symbol;
@@ -160,6 +164,35 @@ public final class AstAnalysisSession implements AnalysisSession {
     public List<TypeHierarchyItem> typeHierarchySubtypes(TypeHierarchyItem item) {
         if (index == null) return List.of();
         return TypeHierarchySupport.directSubtypes(item, index, classpath, this::locateTypeEntry);
+    }
+
+    @Override
+    public Optional<CallHierarchyItem> prepareCallHierarchy(Position position) {
+        Optional<ResolvedSymbol> resolved = resolveAt(position);
+        if (resolved.isEmpty() || !(resolved.get() instanceof AstResolvedSymbol ast)
+                || !(ast.symbol() instanceof MethodSymbol method)) {
+            return Optional.empty();
+        }
+        Optional<Location> location = definitionOf(ast);
+        if (location.isEmpty()) return Optional.empty();
+        return CallHierarchySupport.itemFor(method, location.get());
+    }
+
+    @Override
+    public List<CallHierarchyOutgoingCall> outgoingCalls(CallHierarchyItem item) {
+        Optional<SymbolKey> key = CallHierarchySupport.keyFromItem(item);
+        if (key.isEmpty() || !isUsable()) return List.of();
+        return CallHierarchySupport.outgoingInUnit(cu, key.get(), this::definitionOfMethod);
+    }
+
+    @Override
+    public List<CallHierarchyIncomingCall> incomingCallsInUnit(SymbolKey key) {
+        if (!isUsable() || key == null || key.fileLocal()) return List.of();
+        return CallHierarchySupport.incomingInUnit(cu, key, this::definitionOfMethod);
+    }
+
+    private Optional<Location> definitionOfMethod(MethodSymbol method) {
+        return definitionOf(method);
     }
 
     private Optional<Location> locateTypeEntry(TypeEntry entry) {
