@@ -135,6 +135,38 @@ class EcjHoverTest {
     }
 
     @Test
+    void voidMethodHoverShowsVoidNotError(@TempDir Path workspace) throws Exception {
+        Index index = new InMemoryIndex();
+        JrtInput jrt = new JrtInput(Path.of(System.getProperty("java.home")));
+        assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
+        ClasspathOrder classpath =
+                new ClasspathOrder(List.of(UriClasspathEntry.of(jrt.sourceUri())), false);
+
+        String source = """
+                package demo;
+
+                class Use {
+                    public static void main(String[] args) {
+                    }
+
+                    void call() {
+                        main(null);
+                    }
+                }
+                """;
+        AnalysisSession session = new EcjWorkspaceCompiler(
+                new AstDeclarationLocator(EcjDietSources::lower), Map.of())
+                .analyze("file:///workspace/demo/Use.java", source, index, classpath);
+        assertTrue(session.isUsable(), () -> session.diagnostics().toString());
+
+        HoverInfo decl = hoverAt(session, tokenAt(source, "main(String"));
+        assertEquals("void main(java.lang.String[])", decl.signature());
+
+        HoverInfo use = hoverAt(session, tokenAt(source, "main(null)"));
+        assertEquals("void main(java.lang.String[])", use.signature());
+    }
+
+    @Test
     void attachedSourceHoverIncludesJavadoc(@TempDir Path workspace) throws Exception {
         Dependency dependency = buildDependency(workspace, GREETER_WITH_DOC);
         Index index = new InMemoryIndex();

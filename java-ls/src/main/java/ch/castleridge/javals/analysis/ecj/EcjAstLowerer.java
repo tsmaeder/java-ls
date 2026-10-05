@@ -1442,7 +1442,8 @@ final class EcjAstLowerer {
 
     private JType jtype(TypeBinding binding) {
         if (binding == null || !binding.isValidBinding()) return JType.ERROR;
-        if (binding.isPrimitiveType()) {
+        // isBaseType covers primitives, void, and null; isPrimitiveType excludes void/null.
+        if (binding.isBaseType()) {
             return switch (binding.id) {
                 case TypeIds.T_boolean -> JType.Primitive.BOOLEAN;
                 case TypeIds.T_byte -> JType.Primitive.BYTE;
@@ -1453,6 +1454,7 @@ final class EcjAstLowerer {
                 case TypeIds.T_float -> JType.Primitive.FLOAT;
                 case TypeIds.T_double -> JType.Primitive.DOUBLE;
                 case TypeIds.T_void -> JType.VOID;
+                case TypeIds.T_null -> JType.NULL;
                 default -> JType.ERROR;
             };
         }
@@ -1700,6 +1702,7 @@ final class EcjAstLowerer {
         static final int T_float = org.eclipse.jdt.internal.compiler.lookup.TypeIds.T_float;
         static final int T_double = org.eclipse.jdt.internal.compiler.lookup.TypeIds.T_double;
         static final int T_void = org.eclipse.jdt.internal.compiler.lookup.TypeIds.T_void;
+        static final int T_null = org.eclipse.jdt.internal.compiler.lookup.TypeIds.T_null;
         static final int T_JavaLangString = org.eclipse.jdt.internal.compiler.lookup.TypeIds.T_JavaLangString;
     }
 
