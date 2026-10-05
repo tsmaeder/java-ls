@@ -34,6 +34,8 @@ import ch.castleridge.javals.analysis.AnalysisSession;
 import ch.castleridge.javals.analysis.AstDeclarationLocator;
 import ch.castleridge.javals.analysis.AttachedSource;
 import ch.castleridge.javals.analysis.BackendFactory;
+import ch.castleridge.javals.analysis.HoverInfo;
+import ch.castleridge.javals.analysis.JavadocMarkdown;
 import ch.castleridge.javals.analysis.PublishedDiagnostic;
 import ch.castleridge.javals.analysis.ResolvedSymbol;
 import ch.castleridge.javals.analysis.SourceText;
@@ -275,19 +277,38 @@ public class JavaTextDocumentService implements TextDocumentService {
     @Override
     public CompletableFuture<Hover> hover(HoverParams params) {
         String uri = UriCoding.decode(params.getTextDocument().getUri());
-        TextDocumentItem doc = documents.get(uri);
+        Position position = params.getPosition();
+        return CompletableFuture.supplyAsync(() -> computeHover(uri, position));
+    }
 
-        if (doc != null) {
-            MarkupContent content = new MarkupContent();
-            content.setKind(MarkupKind.MARKDOWN);
-            content.setValue("**Java Language Server**\n\nHover information at position: " +
-                    params.getPosition().getLine() + ":" + params.getPosition().getCharacter());
+    private Hover computeHover(String uri, Position position) {
+        Optional<ResolvedSymbol> resolved = resolveSymbolAt(uri, position);
+        if (resolved.isEmpty()) return null;
 
-            Hover hover = new Hover(content);
-            return CompletableFuture.completedFuture(hover);
+        CachedCompile cached = compileCache.get(uri);
+        if (cached == null || cached.session() == null) return null;
+
+        Optional<HoverInfo> info = cached.session().hoverInfo(resolved.get());
+        if (info.isEmpty()) return null;
+
+        HoverInfo hoverInfo = info.get();
+        StringBuilder markdown = new StringBuilder();
+        if (!hoverInfo.signature().isBlank()) {
+            markdown.append("```java\n").append(hoverInfo.signature()).append("\n```");
         }
+        if (hoverInfo.hasJavadoc()) {
+            String rendered = JavadocMarkdown.toMarkdown(hoverInfo.javadoc());
+            if (!rendered.isBlank()) {
+                if (markdown.length() > 0) markdown.append("\n\n");
+                markdown.append(rendered);
+            }
+        }
+        if (markdown.length() == 0) return null;
 
-        return CompletableFuture.completedFuture(null);
+        MarkupContent content = new MarkupContent();
+        content.setKind(MarkupKind.MARKDOWN);
+        content.setValue(markdown.toString());
+        return new Hover(content);
     }
 
     @Override

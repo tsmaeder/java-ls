@@ -106,24 +106,55 @@ public final class SourceFile {
     }
 
     /**
-     * Leading javadoc immediately before {@code start}, skipping only
-     * whitespace between the comment and that offset.
+     * Leading javadoc for a declaration whose range starts at {@code start}.
+     * Skips whitespace and a simple declaration header (modifiers, type,
+     * annotations, type parameters) so diet-parse ranges that begin at the
+     * declared name still find the comment.
      */
     public String javadocBefore(int start) {
         int i = Math.min(text.length(), Math.max(0, start));
-        int ws = i;
-        while (ws > 0 && Character.isWhitespace(text.charAt(ws - 1))) ws--;
-        if (ws < 2 || text.charAt(ws - 1) != '/' || text.charAt(ws - 2) != '*') return "";
-        int from = ws - 2;
+        int at = skipDeclarationHeaderLeft(i);
+        if (at < 2 || text.charAt(at - 1) != '/' || text.charAt(at - 2) != '*') return "";
+        int from = at - 2;
         while (from > 0 && !(text.charAt(from) == '/' && text.charAt(from + 1) == '*'
-                && (from + 2 >= ws || text.charAt(from + 2) == '*'))) {
+                && (from + 2 >= at || text.charAt(from + 2) == '*'))) {
             from--;
         }
-        if (from + 2 >= ws || text.charAt(from) != '/' || text.charAt(from + 1) != '*'
+        if (from + 2 >= at || text.charAt(from) != '/' || text.charAt(from + 1) != '*'
                 || text.charAt(from + 2) != '*') {
             return "";
         }
-        return text.substring(from, ws);
+        return text.substring(from, at);
+    }
+
+    /**
+     * Walk left from {@code start} through whitespace and declaration-header
+     * tokens until the end of a preceding block comment or a hard stop such as
+     * a semicolon or closing brace.
+     */
+    private int skipDeclarationHeaderLeft(int start) {
+        int p = start;
+        while (p > 0 && Character.isWhitespace(text.charAt(p - 1))) p--;
+        while (p > 0) {
+            char c = text.charAt(p - 1);
+            if (Character.isWhitespace(c) || Character.isJavaIdentifierPart(c)
+                    || c == '.' || c == '[' || c == ']' || c == '<' || c == '>'
+                    || c == ',' || c == '@' || c == '?' || c == '&'
+                    || c == '(' || c == ')') {
+                p--;
+                continue;
+            }
+            if (c == '*') {
+                // Generics star, or the '*' of a closing '*/'
+                if (p >= 2 && text.charAt(p - 2) == '/') {
+                    return p; // pointing after '*/'
+                }
+                p--;
+                continue;
+            }
+            break;
+        }
+        return p;
     }
 
     /**

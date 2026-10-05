@@ -20,6 +20,7 @@ import org.eclipse.lsp4j.TypeHierarchyItem;
 
 import ch.castleridge.javals.ast.AstVisitor;
 import ch.castleridge.javals.ast.CompilationUnit;
+import ch.castleridge.javals.ast.Declaration;
 import ch.castleridge.javals.ast.EmptyArrays;
 import ch.castleridge.javals.ast.Identifier;
 import ch.castleridge.javals.ast.SourceFile;
@@ -117,6 +118,27 @@ public final class AstAnalysisSession implements AnalysisSession {
     }
 
     @Override
+    public Optional<HoverInfo> hoverInfo(ResolvedSymbol symbol) {
+        Symbol ast = astSymbol(symbol);
+        if (ast == null) return Optional.empty();
+        String signature = AstSignatures.of(ast);
+        String javadoc = "";
+        Identifier inFile = declarationIdent(ast);
+        if (inFile != null && AstSymbols.isDeclarationName(inFile)) {
+            Declaration decl = AstDeclarationLocator.declarationOwning(inFile);
+            if (decl != null) javadoc = decl.javadoc();
+        } else {
+            TypeEntry owner = ownerEntry(ast);
+            if (owner != null && locator != null) {
+                javadoc = locator.declarationOf(ast, owner, sourceJarByBinaryJar)
+                        .map(site -> site.declaration().javadoc())
+                        .orElse("");
+            }
+        }
+        return Optional.of(new HoverInfo(signature, javadoc));
+    }
+
+    @Override
     public Optional<TypeHierarchyItem> prepareTypeHierarchy(Position position) {
         Optional<ResolvedSymbol> resolved = resolveAt(position);
         if (resolved.isEmpty() || !(resolved.get() instanceof AstResolvedSymbol ast)
@@ -142,7 +164,7 @@ public final class AstAnalysisSession implements AnalysisSession {
 
     private Optional<Location> locateTypeEntry(TypeEntry entry) {
         if (locator == null) return Optional.empty();
-        return locator.locateType(entry, sourceJarByBinaryJar);
+        return locator.declarationOf(entry, sourceJarByBinaryJar).map(AstDeclarationLocator.DeclaredSite::toLocation);
     }
 
     private Optional<Location> definitionOf(Symbol symbol) {
@@ -153,7 +175,8 @@ public final class AstAnalysisSession implements AnalysisSession {
         }
         TypeEntry owner = ownerEntry(symbol);
         if (owner == null || locator == null) return Optional.empty();
-        return locator.locate(symbol, owner, sourceJarByBinaryJar);
+        return locator.declarationOf(symbol, owner, sourceJarByBinaryJar)
+                .map(AstDeclarationLocator.DeclaredSite::toLocation);
     }
 
     private List<Location> locationsMatching(Symbol exact, SymbolKey key) {

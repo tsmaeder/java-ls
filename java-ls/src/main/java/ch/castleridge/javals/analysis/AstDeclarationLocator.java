@@ -24,6 +24,7 @@ import ch.castleridge.javals.ast.Identifier;
 import ch.castleridge.javals.ast.MethodDecl;
 import ch.castleridge.javals.ast.MethodSymbol;
 import ch.castleridge.javals.ast.JType;
+import ch.castleridge.javals.ast.Node;
 import ch.castleridge.javals.ast.ParamDecl;
 import ch.castleridge.javals.ast.RecordComponentDecl;
 import ch.castleridge.javals.ast.Symbol;
@@ -44,6 +45,16 @@ public final class AstDeclarationLocator {
         CompilationUnit lower(String uri);
     }
 
+    /**
+     * A declaration found in workspace or attached source, with the name
+     * identifier used for LSP ranges.
+     */
+    public record DeclaredSite(String uri, CompilationUnit unit, Declaration declaration, Identifier name) {
+        public Location toLocation() {
+            return AstPositions.location(uri, unit.source(), name.range());
+        }
+    }
+
     private static final int DEFAULT_CAPACITY = 64;
 
     private final DietLowerer lowerer;
@@ -62,7 +73,7 @@ public final class AstDeclarationLocator {
         if (uri != null) cache.remove(uri);
     }
 
-    public Optional<Location> locateType(TypeEntry entry, Map<String, String> sourceJarByBinaryJar) {
+    public Optional<DeclaredSite> declarationOf(TypeEntry entry, Map<String, String> sourceJarByBinaryJar) {
         if (entry == null) return Optional.empty();
         Optional<String> sourceUri = AttachedSource.javaUri(
                 entry.resourceUri(), entry.sourceUri(), sourceJarByBinaryJar);
@@ -70,11 +81,11 @@ public final class AstDeclarationLocator {
         CompilationUnit cu = unit(sourceUri.get());
         if (cu == null) return Optional.empty();
         TypeDecl type = findType(cu, entry.jvmOwnerName());
-        if (type == null || type.name() == null) return Optional.empty();
-        return Optional.of(AstPositions.location(sourceUri.get(), cu.source(), type.name().range()));
+        if (type == null || type.name() == null || !type.name().range().isPresent()) return Optional.empty();
+        return Optional.of(new DeclaredSite(sourceUri.get(), cu, type, type.name()));
     }
 
-    public Optional<Location> locate(Symbol symbol, TypeEntry owner, Map<String, String> sourceJarByBinaryJar) {
+    public Optional<DeclaredSite> declarationOf(Symbol symbol, TypeEntry owner, Map<String, String> sourceJarByBinaryJar) {
         if (symbol == null || owner == null) return Optional.empty();
         Optional<String> sourceUri = AttachedSource.javaUri(
                 owner.resourceUri(), owner.sourceUri(), sourceJarByBinaryJar);
@@ -87,8 +98,26 @@ public final class AstDeclarationLocator {
         if (name == null || !name.range().isPresent()) {
             name = type.name();
         }
-        if (name == null) return Optional.empty();
-        return Optional.of(AstPositions.location(sourceUri.get(), cu.source(), name.range()));
+        if (name == null || !name.range().isPresent()) return Optional.empty();
+        Declaration declaration = declarationOwning(name);
+        if (declaration == null) declaration = type;
+        return Optional.of(new DeclaredSite(sourceUri.get(), cu, declaration, name));
+    }
+
+    /**
+     * Owning {@link Declaration} for a declaring-name identifier.
+     */
+    static Declaration declarationOwning(Identifier name) {
+        if (name == null) return null;
+        Node parent = name.parent();
+        return switch (parent) {
+            case Declaration d -> d;
+            case VarFragment fragment -> {
+                FieldDecl field = fragment.enclosing(FieldDecl.class);
+                yield field;
+            }
+            case null, default -> null;
+        };
     }
 
     private CompilationUnit unit(String uri) {

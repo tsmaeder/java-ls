@@ -51,6 +51,11 @@ public interface AnalysisSession {
     Optional<Location> definitionOf(ResolvedSymbol symbol);
 
     /**
+     * Hover signature and optional javadoc for {@code symbol}.
+     */
+    Optional<HoverInfo> hoverInfo(ResolvedSymbol symbol);
+
+    /**
      * Root type hierarchy item for the type at {@code position}, if any.
      */
     Optional<TypeHierarchyItem> prepareTypeHierarchy(Position position);

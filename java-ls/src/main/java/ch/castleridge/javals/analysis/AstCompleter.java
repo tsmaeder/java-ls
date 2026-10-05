@@ -57,7 +57,6 @@ import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.SourceTypeEntry;
-import ch.castleridge.javals.indexing.model.Type;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
 final class AstCompleter {
@@ -335,7 +334,7 @@ final class AstCompleter {
             if (!field.name().startsWith(prefix)) continue;
             boolean isStatic = (field.modifiers() & Opcodes.ACC_STATIC) != 0;
             if (staticOnly && !isStatic) continue;
-            items.putIfAbsent("F:" + field.name(), fieldItem(field.name(), typeString(field.type())));
+            items.putIfAbsent("F:" + field.name(), fieldItem(field.name(), AstSignatures.typeString(field.type())));
         }
         for (MethodEntry method : entry.methods()) {
             if (method.name().startsWith("<")) continue;
@@ -524,35 +523,6 @@ final class AstCompleter {
         };
     }
 
-    private static String typeString(Type type) {
-        if (type == null) return "";
-        Type plain = type instanceof Type.Annotated annotated ? annotated.unwrap() : type;
-        return switch (plain) {
-            case Type.Primitive primitive -> primitive == Type.Primitive.VOID
-                    ? "void" : primitive.name().toLowerCase();
-            case Type.Array array -> typeString(array.element()) + "[]";
-            case Type.TypeVariable variable -> variable.name();
-            case Type.Wildcard wild -> switch (wild.kind()) {
-                case UNBOUNDED -> "?";
-                case EXTENDS -> "? extends " + typeString(wild.bound());
-                case SUPER -> "? super " + typeString(wild.bound());
-            };
-            case Type.Parameterized parameterized -> {
-                StringBuilder sb = new StringBuilder(typeString(parameterized.raw())).append('<');
-                Type[] args = parameterized.typeArgs();
-                for (int i = 0; i < args.length; i++) {
-                    if (i > 0) sb.append(", ");
-                    sb.append(typeString(args[i]));
-                }
-                yield sb.append('>').toString();
-            }
-            case ch.castleridge.javals.indexing.model.TypeRef.Resolved resolved ->
-                    resolved.jvmBinaryName().replace('/', '.').replace('$', '.');
-            case ch.castleridge.javals.indexing.model.TypeRef.Unresolved unresolved -> unresolved.simpleName();
-            default -> plain.toString();
-        };
-    }
-
     private static CompletionItem fieldItem(String name, String detail) {
         CompletionItem item = new CompletionItem(name);
         item.setKind(CompletionItemKind.Field);
@@ -581,7 +551,7 @@ final class AstCompleter {
     }
 
     private static CompletionItem methodItem(MethodSymbol symbol, String name) {
-        String detail = symbol == null ? name + "()" : signature(symbol);
+        String detail = symbol == null ? name + "()" : AstSignatures.method(symbol);
         CompletionItem item = new CompletionItem(name);
         item.setKind(CompletionItemKind.Method);
         item.setDetail(detail);
@@ -594,7 +564,7 @@ final class AstCompleter {
     private static CompletionItem methodItem(MethodEntry method, String owner) {
         CompletionItem item = new CompletionItem(method.name());
         item.setKind(CompletionItemKind.Method);
-        item.setDetail(signature(method));
+        item.setDetail(AstSignatures.method(method));
         item.setInsertText(method.name() + "($0)");
         item.setInsertTextFormat(InsertTextFormat.Snippet);
         item.setSortText("0_" + method.name());
@@ -632,37 +602,13 @@ final class AstCompleter {
         return CompletionItemKind.Class;
     }
 
-    private static String signature(MethodSymbol symbol) {
-        StringBuilder sb = new StringBuilder();
-        if (!symbol.constructor()) sb.append(symbol.returnType()).append(' ');
-        sb.append(symbol.name()).append('(');
-        JType[] params = symbol.parameterTypes();
-        for (int i = 0; i < params.length; i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(params[i]);
-        }
-        return sb.append(')').toString();
-    }
-
-    private static String signature(MethodEntry method) {
-        StringBuilder sb = new StringBuilder();
-        if (!"<init>".equals(method.name())) sb.append(typeString(method.returnType())).append(' ');
-        sb.append(method.name()).append('(');
-        Type[] params = method.paramTypes();
-        for (int i = 0; i < params.length; i++) {
-            if (i > 0) sb.append(", ");
-            sb.append(typeString(params[i]));
-        }
-        return sb.append(')').toString();
-    }
-
     private static String methodKey(MethodSymbol symbol, String name) {
         if (symbol == null) return "M:" + name;
-        return "M:" + name + signature(symbol);
+        return "M:" + name + AstSignatures.method(symbol);
     }
 
     private static String methodKey(MethodEntry method) {
-        return "M:" + method.name() + signature(method);
+        return "M:" + method.name() + AstSignatures.method(method);
     }
 
     private record Qualifier(String jvmOwner, boolean typeName, boolean array, String packageJvm) {
