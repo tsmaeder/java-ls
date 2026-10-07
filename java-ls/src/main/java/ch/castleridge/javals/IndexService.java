@@ -363,7 +363,10 @@ public final class IndexService {
 
         Path jdk = Path.of(System.getProperty("java.home"));
         if (targetInfo.javaHome != null && !targetInfo.javaHome.isBlank()) {
-            jdk = pathFromUri(targetInfo.javaHome);
+            Path parsed = pathFromUri(targetInfo.javaHome);
+            if (parsed != null) {
+                jdk = parsed;
+            }
         }
         JrtInput jrtInput = new JrtInput(jdk, collector);
 
@@ -414,7 +417,10 @@ public final class IndexService {
             return;
         }
         for (String source : roots) {
-            Path sourcePath = workspacePath.resolve(source);
+            if (source == null || source.isBlank()) {
+                continue;
+            }
+            Path sourcePath = resolveWorkspacePath(workspacePath, source);
             if (Files.isDirectory(sourcePath)) {
                 String sourceUri = sourcePath.toUri().toString();
                 classpathEntries.add(UriClasspathEntry.of(sourceUri));
@@ -476,18 +482,30 @@ public final class IndexService {
         return out.isEmpty() ? Map.of() : Map.copyOf(out);
     }
 
+    /** Resolves a workspace-relative (forward-slash) or absolute source path. */
+    private static Path resolveWorkspacePath(Path workspacePath, String source) {
+        Path path = Path.of(source.replace('/', java.io.File.separatorChar));
+        if (path.isAbsolute()) {
+            return path.toAbsolutePath().normalize();
+        }
+        return workspacePath.resolve(path).toAbsolutePath().normalize();
+    }
+
     private static Path pathFromUri(String s) {
         if (s == null || s.isBlank()) return null;
-        try {
-            return Path.of(URI.create(s)).toAbsolutePath().normalize();
-        } catch (IllegalArgumentException | java.nio.file.FileSystemNotFoundException e) {
-            // Not a parseable file URI (e.g. a raw OS path like
-            // "C:\Program Files\...\jdk"); fall back to treating it as a path.
+        String trimmed = s.trim();
+        if (trimmed.contains("://") || trimmed.startsWith("file:")) {
             try {
-                return Path.of(s).toAbsolutePath().normalize();
-            } catch (java.nio.file.InvalidPathException ex) {
+                return Path.of(URI.create(trimmed)).toAbsolutePath().normalize();
+            } catch (IllegalArgumentException | java.nio.file.FileSystemNotFoundException e) {
                 return null;
             }
+        }
+        // Bare filesystem path (e.g. javaHome from mbt.schema.json).
+        try {
+            return Path.of(trimmed).toAbsolutePath().normalize();
+        } catch (java.nio.file.InvalidPathException ex) {
+            return null;
         }
     }
     private record State(Index index, Map<String, ClasspathOrder> classpathsByNamespace,

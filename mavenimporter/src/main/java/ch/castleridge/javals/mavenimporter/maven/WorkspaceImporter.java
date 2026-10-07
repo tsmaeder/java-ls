@@ -30,7 +30,7 @@ import ch.castleridge.javals.mavenimporter.mbt.MbtDocument;
 public final class WorkspaceImporter {
 
     private final MavenSession session;
-    private final ProjectMapper mapper;
+    private final List<GeneratedSourceRule> generatedSourceRules;
 
     public WorkspaceImporter(MavenSession session) {
         this(session, GeneratedSourceRules.all());
@@ -38,10 +38,13 @@ public final class WorkspaceImporter {
 
     public WorkspaceImporter(MavenSession session, List<GeneratedSourceRule> generatedSourceRules) {
         this.session = session;
-        this.mapper = new ProjectMapper(new SourcesResolver(session.aether()), generatedSourceRules);
+        this.generatedSourceRules =
+                generatedSourceRules == null ? GeneratedSourceRules.all() : List.copyOf(generatedSourceRules);
     }
 
-    public MbtDocument importWorkspace(Set<Path> todo) throws Exception {
+    public MbtDocument importWorkspace(Path workspaceRoot, Set<Path> todo) throws Exception {
+        ProjectMapper mapper =
+                new ProjectMapper(new SourcesResolver(session.aether()), generatedSourceRules, workspaceRoot);
         WorkspacePomIndex index = new WorkspacePomIndex();
         List<MavenProject> projects = new ArrayList<>();
 

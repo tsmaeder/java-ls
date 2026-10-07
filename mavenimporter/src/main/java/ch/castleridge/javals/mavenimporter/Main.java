@@ -86,7 +86,7 @@ public final class Main {
 
             try (MavenSession session = new MavenSession()) {
                 WorkspaceImporter importer = new WorkspaceImporter(session, rules);
-                MbtDocument document = importer.importWorkspace(todo);
+                MbtDocument document = importer.importWorkspace(directory, todo);
                 Path written = MbtJsonWriter.write(output, document);
                 System.out.println("Wrote " + written);
             }

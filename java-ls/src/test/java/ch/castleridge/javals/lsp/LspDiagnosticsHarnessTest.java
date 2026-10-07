@@ -1133,10 +1133,10 @@ class LspDiagnosticsHarnessTest {
                 {
                   "namespaces": {
                     "org.example:demo:1.0:main": {
-                      "compilerOptions": ["-source", "21"],
+                      "javacOptions": ["-source", "21"],
                       "sources": ["src/main/java"],
-                      "classes": ["target/classes"],
-                      "dependencyModules": []
+                      "dependencyModules": [],
+                      "dependsOn": []
                     }
                   },
                   "dependencyModules": []

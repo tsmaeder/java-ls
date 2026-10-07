@@ -7,6 +7,7 @@
 package ch.castleridge.javals.mavenimporter.maven;
 
 import java.io.File;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -27,21 +28,28 @@ import ch.castleridge.javals.mavenimporter.mbt.MbtDocument;
 import ch.castleridge.javals.mavenimporter.mbt.MbtNamespace;
 
 /**
- * Maps Maven projects in a reactor to Metals-dialect mbt namespaces.
+ * Maps Maven projects in a reactor to Metals-schema mbt namespaces.
  */
 public final class ProjectMapper {
 
     private final SourcesResolver sourcesResolver;
     private final List<GeneratedSourceRule> generatedSourceRules;
+    private final Path workspaceRoot;
 
-    public ProjectMapper(SourcesResolver sourcesResolver) {
-        this(sourcesResolver, GeneratedSourceRules.all());
+    public ProjectMapper(SourcesResolver sourcesResolver, Path workspaceRoot) {
+        this(sourcesResolver, GeneratedSourceRules.all(), workspaceRoot);
     }
 
-    public ProjectMapper(SourcesResolver sourcesResolver, List<GeneratedSourceRule> generatedSourceRules) {
+    public ProjectMapper(
+            SourcesResolver sourcesResolver,
+            List<GeneratedSourceRule> generatedSourceRules,
+            Path workspaceRoot) {
         this.sourcesResolver = sourcesResolver;
         this.generatedSourceRules =
                 generatedSourceRules == null ? GeneratedSourceRules.all() : List.copyOf(generatedSourceRules);
+        this.workspaceRoot = workspaceRoot == null
+                ? null
+                : workspaceRoot.toAbsolutePath().normalize();
     }
 
     public MbtDocument map(
@@ -122,21 +130,29 @@ public final class ProjectMapper {
         for (String root : roots) {
             File dir = new File(root);
             if (dir.isDirectory()) {
-                sources.add(dir.getAbsolutePath());
+                sources.add(toWorkspaceRelative(dir.toPath()));
             }
         }
-        sources.addAll(GeneratedSourceRoots.collect(project, test, generatedSourceRules));
+        for (String generated : GeneratedSourceRoots.collect(project, test, generatedSourceRules)) {
+            sources.add(toWorkspaceRelative(Path.of(generated)));
+        }
         ns.sources.addAll(sources);
         ns.javacOptions.addAll(javacOptions(project));
         ns.javaHome = System.getProperty("java.home");
-        ns.projectPath = project.getBasedir().getAbsolutePath();
-        String classes = test
-                ? project.getBuild().getTestOutputDirectory()
-                : project.getBuild().getOutputDirectory();
-        if (classes != null) {
-            ns.classDirectories.add(new File(classes).getAbsolutePath());
-        }
         return ns;
+    }
+
+    /**
+     * Workspace-relative path with forward slashes per Metals MBT schema.
+     * Falls back to an absolute forward-slash path when outside the workspace.
+     */
+    String toWorkspaceRelative(Path path) {
+        Path abs = path.toAbsolutePath().normalize();
+        if (workspaceRoot != null && abs.startsWith(workspaceRoot)) {
+            String relative = workspaceRoot.relativize(abs).toString();
+            return relative.replace('\\', '/');
+        }
+        return abs.toString().replace('\\', '/');
     }
 
     static List<String> javacOptions(MavenProject project) {

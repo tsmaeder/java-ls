@@ -7,6 +7,7 @@
 package ch.castleridge.javals.mavenimporter.mbt;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -21,20 +22,19 @@ class MbtJsonWriterTest {
     Path temp;
 
     @Test
-    void writesMetalsDialectUnderDotJavals() throws Exception {
+    void writesMetalsSchemaUnderDotJavals() throws Exception {
         MbtDocument document = new MbtDocument();
         document.dependencyModules.add(new MbtDependencyModule(
                 "com.google.code.gson:gson:2.11.0",
                 "file:/repo/gson-2.11.0.jar",
                 "file:/repo/gson-2.11.0-sources.jar"));
         MbtNamespace ns = new MbtNamespace();
-        ns.sources.add(temp.resolve("src/main/java").toString());
+        ns.sources.add("src/main/java");
         ns.javacOptions.add("-release");
         ns.javacOptions.add("25");
         ns.dependencyModules.add("com.google.code.gson:gson:2.11.0");
         ns.javaHome = "C:/jdk";
-        ns.projectPath = temp.toString();
-        ns.classDirectories.add(temp.resolve("target/classes").toString());
+        ns.dependsOn.add("other:ns:1.0");
         document.namespaces.put("g:a:1.0", ns);
 
         Path output = temp.resolve(".javals/mbt.json");
@@ -42,9 +42,10 @@ class MbtJsonWriterTest {
         assertEquals(output.toAbsolutePath().normalize(), written);
         String json = Files.readString(written);
         assertTrue(json.contains("\"javacOptions\""));
-        assertTrue(json.contains("\"classDirectories\""));
-        assertTrue(json.contains("\"projectPath\""));
+        assertTrue(json.contains("\"src/main/java\""));
         assertTrue(json.contains("com.google.code.gson:gson:2.11.0"));
+        assertFalse(json.contains("\"classDirectories\""));
+        assertFalse(json.contains("\"projectPath\""));
     }
 
     @Test

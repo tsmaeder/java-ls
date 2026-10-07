@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URL;
@@ -169,14 +168,27 @@ class MavenImporterIntegrationTest {
         MbtNamespace main = doc.namespaces.get(mainId);
         MbtNamespace test = doc.namespaces.get(testId);
 
-        assertTrue(main.sources.stream().anyMatch(s -> s.endsWith("src" + File.separator + "main" + File.separator + "java")
-                || s.replace('\\', '/').endsWith("src/main/java")));
-        assertTrue(main.sources.stream().anyMatch(s -> s.replace('\\', '/').endsWith("target/custom-annotations")));
-        assertTrue(main.sources.stream().anyMatch(s -> s.replace('\\', '/').endsWith("target/generated-sources/modello")));
-        assertTrue(main.sources.stream().anyMatch(s -> s.replace('\\', '/').endsWith("src/gen/java")));
+        assertTrue(main.sources.contains("src/main/java"));
+        assertTrue(main.sources.contains("target/custom-annotations"));
+        assertTrue(main.sources.contains("target/generated-sources/modello"));
+        assertTrue(main.sources.contains("src/gen/java"));
 
-        assertTrue(test.sources.stream().anyMatch(s -> s.replace('\\', '/').endsWith("target/custom-test-annotations")));
-        assertTrue(test.sources.stream().anyMatch(s -> s.replace('\\', '/').endsWith("src/gen/test")));
+        assertTrue(test.sources.contains("target/custom-test-annotations"));
+        assertTrue(test.sources.contains("src/gen/test"));
+    }
+
+    @Test
+    void sourcePathsAreWorkspaceRelativeWithForwardSlashes() throws Exception {
+        Path workspace = copyFixture("fixtures/single-module");
+        assertEquals(0, Main.run(new String[] {workspace.toString()}));
+
+        MbtDocument doc = readMbt(workspace);
+        MbtNamespace main = doc.namespaces.get("ch.castleridge.fixtures:single-module:1.0.0");
+        assertFalse(main.sources.isEmpty());
+        for (String source : main.sources) {
+            assertFalse(Path.of(source).isAbsolute(), () -> "expected relative source path: " + source);
+            assertFalse(source.contains("\\"), () -> "expected forward slashes: " + source);
+        }
     }
 
     private Path copyFixture(String resourceRoot) throws Exception {

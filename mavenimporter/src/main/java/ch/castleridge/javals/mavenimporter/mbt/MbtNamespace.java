@@ -10,7 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * One namespace (build target) in Metals-dialect {@code mbt.json}.
+ * One namespace (build target) in Metals-schema {@code mbt.json}.
  */
 public final class MbtNamespace {
     public List<String> sources = new ArrayList<>();
@@ -18,6 +18,4 @@ public final class MbtNamespace {
     public List<String> dependencyModules = new ArrayList<>();
     public String javaHome;
     public List<String> dependsOn = new ArrayList<>();
-    public List<String> classDirectories = new ArrayList<>();
-    public String projectPath;
 }

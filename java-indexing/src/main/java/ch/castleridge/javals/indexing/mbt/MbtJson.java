@@ -30,9 +30,8 @@ import ch.castleridge.javals.indexing.scan.JarInput;
 import ch.castleridge.javals.indexing.scan.JrtInput;
 
 /**
- * Reads {@code mbt.json} files (as emitted by the classpath-extractor
- * project) and projects them into the {@link InputSource}s that the
- * scanner consumes.
+ * Reads {@code mbt.json} files (Metals MBT schema) and projects them into the
+ * {@link InputSource}s that the scanner consumes.
  */
 public final class MbtJson {
 
@@ -50,20 +49,17 @@ public final class MbtJson {
      * Convert an {@link MbtInfo} into the ordered, deduplicated list of
      * {@link InputSource}s to feed to {@code Scanner.scanAll}.
      *
-     * <p>Paths in {@code sources} and {@code classes} are resolved relative to
-     * {@code workspacePath} when they are not URIs with a scheme.
+     * <p>Paths in {@code sources} are resolved relative to {@code workspacePath}
+     * when they are not absolute. {@code javaHome} is a filesystem path
+     * (optionally a {@code file:} URI).
      *
      * <p>Order and dedup rules:
      * <ol>
-     *   <li>Source folders of every target come first, deduped by
+     *   <li>Source folders of every namespace come first, deduped by
      *       absolute normalized path.</li>
-     *   <li>A target's {@code classes} folders are added only when that
-     *       target has no {@code sources}: we don't reindex the compiled
-     *       output of sources we've already indexed.</li>
-     *   <li>Dependency jars (one per distinct path) follow, then optional
-     *       {@code sources} jars on dependency modules.</li>
+     *   <li>Dependency jars (one per distinct path) follow.</li>
      *   <li>One {@link JrtInput} per distinct {@code javaHome} path referenced
-     *       by any target is emitted last.</li>
+     *       by any namespace is emitted last.</li>
      * </ol>
      */
     public static List<InputSource> toInputSources(MbtInfo info, Path workspacePath) {
@@ -78,15 +74,10 @@ public final class MbtJson {
         if (info.namespaces != null) {
             for (MbtTargetInfo t : info.namespaces.values()) {
                 addDirs(t.sources, base, out, seenDirs);
-                addDirs(t.classes, base, out, seenDirs);
                 if (t.javaHome != null && !t.javaHome.isBlank()) {
-                    try {
-                        Path jdk = Path.of(new URI(t.javaHome)).toAbsolutePath().normalize();
-                        if (seenJdks.add(jdk)) {
-                            out.add(new JrtInput(jdk));
-                        }
-                    } catch (URISyntaxException e) {
-                        System.err.println("Skipping mbt target (invalid javaHome URI): " + t.javaHome);
+                    Path jdk = resolveJavaHome(t.javaHome);
+                    if (jdk != null && seenJdks.add(jdk)) {
+                        out.add(new JrtInput(jdk));
                     }
                 }
             }
@@ -99,7 +90,6 @@ public final class MbtJson {
         }
         return out;
     }
-
 
     private static void addDirs(
             List<String> paths, Path base, List<InputSource> out, Set<Path> seen) {
@@ -130,8 +120,36 @@ public final class MbtJson {
         }
     }
 
+    /**
+     * Resolves {@code javaHome} as a filesystem path. Accepts a bare path or a
+     * {@code file:} URI.
+     */
+    static Path resolveJavaHome(String javaHome) {
+        if (javaHome == null || javaHome.isBlank()) {
+            return null;
+        }
+        String trimmed = javaHome.trim();
+        if (trimmed.contains("://") || trimmed.startsWith("file:")) {
+            try {
+                return Path.of(new URI(trimmed)).toAbsolutePath().normalize();
+            } catch (URISyntaxException | IllegalArgumentException e) {
+                System.err.println("Skipping mbt target (invalid javaHome URI): " + javaHome);
+                return null;
+            }
+        }
+        try {
+            return Path.of(trimmed).toAbsolutePath().normalize();
+        } catch (java.nio.file.InvalidPathException e) {
+            System.err.println("Skipping mbt target (invalid javaHome path): " + javaHome);
+            return null;
+        }
+    }
+
     private static Path resolvePath(String s, Path base) {
         Path relative = Path.of(s.replace('/', File.separatorChar));
+        if (relative.isAbsolute()) {
+            return relative.toAbsolutePath().normalize();
+        }
         if (base != null) {
             return base.resolve(relative).toAbsolutePath().normalize();
         }

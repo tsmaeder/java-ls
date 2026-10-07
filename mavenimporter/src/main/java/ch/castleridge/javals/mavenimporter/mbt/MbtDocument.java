@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Root Metals-dialect {@code mbt.json} document.
+ * Root Metals-schema {@code mbt.json} document.
  */
 public final class MbtDocument {
     public List<MbtDependencyModule> dependencyModules = new ArrayList<>();

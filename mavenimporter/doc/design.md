@@ -22,8 +22,8 @@ combining fragments from all supported build systems into `.javals/mbt.json`.
 
 The target shape follows the Metals V2
 [`mbt.schema.json`](https://github.com/scalameta/metals/blob/main-v2/docs/build-tools/mbt.schema.json)
-and matches the practical dialect already used in this repository’s `.javals/mbt.json`
-(`javacOptions`, absolute source/`javaHome` paths, `file:` URIs for jars).
+(`javacOptions`, workspace-relative source paths with forward slashes, filesystem
+`javaHome` paths, `file:` URIs for jars). Metals-specific `uncheckedSources` is not emitted.
 
 ## CLI
 
@@ -114,16 +114,17 @@ sources on the classpath the same way Metals wires cross-module relationships to
 
 ### Fields emitted per namespace
 
-Aligned with the Metals schema and existing `.javals/mbt.json` emission:
+Aligned with the Metals [`mbt.schema.json`](https://github.com/scalameta/metals/blob/main-v2/docs/build-tools/mbt.schema.json):
 
-- `sources` — absolute paths to source roots (conventional compile roots that exist on
-  disk, plus plugin-generated roots from the registry below—even when those directories
-  do not exist yet)
+- `sources` — workspace-relative paths (forward slashes) to source roots: conventional
+  compile roots that exist on disk, plus plugin-generated roots from the registry
+  below—even when those directories do not exist yet
 - `javacOptions` — Java compiler options for the project
 - `dependencyModules` — ids into the top-level array (external jars only)
-- `javaHome` — JDK used for this project when known (toolchain / Maven Java home)
+- `javaHome` — filesystem path to the JDK used for this project when known
 - `dependsOn` — other namespace ids in the same `mbt.json`
-- optionally `classDirectories` / `projectPath` when useful for tooling parity with Metals
+
+Not emitted: `classDirectories`, `projectPath`, or Metals-specific `uncheckedSources`.
 
 ### Generated source roots
 
@@ -145,10 +146,11 @@ importer walks that registry:
    (execution config overrides plugin-level). If absent, use the rule’s default when one
    exists; if the rule requires an explicit value and none is set, skip.
 4. Interpolate `${project.build.directory}` / `${project.basedir}`, resolve relative paths
-   against the module basedir, and append absolute paths to the namespace `sources` list
-   (deduplicated). Plugin-derived paths are always emitted even when the directory is
-   missing, so a later `mvn generate-sources` / compile can populate them and java-ls
-   watchers can pick them up. (`IndexService` already skips non-directories at index time.)
+   against the module basedir, and append workspace-relative paths (forward slashes) to
+   the namespace `sources` list (deduplicated). Plugin-derived paths are always emitted
+   even when the directory is missing, so a later `mvn generate-sources` / compile can
+   populate them and java-ls watchers can pick them up. (`IndexService` already skips
+   non-directories at index time.)
 
 **Rule shape** (see `GeneratedSourceRule` / `GeneratedSourceRules`):
 
@@ -203,9 +205,7 @@ modules preferred over the local repository.
 **Out of scope**
 
 - Gradle, Bazel, or other build systems (those get their own importers; java-ls merges fragments)
-- Aligning java-indexing’s Gson DTOs (`MbtTargetInfo` fields `compilerOptions` / `classes`) with
-  Metals names (`javacOptions` / `classDirectories`). The importer emits the Metals dialect;
-  consumer field-name drift is a follow-up in java-indexing / java-ls.
+- Metals-specific `uncheckedSources` (generated roots stay in `sources`)
 - Running generate-sources / annotation-processing mojos, or inventing roots for plugins not
   listed in the registry
 

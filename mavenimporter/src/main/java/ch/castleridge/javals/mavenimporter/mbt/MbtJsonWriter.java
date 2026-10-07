@@ -15,7 +15,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
 /**
- * Writes a Metals-dialect {@code mbt.json} to a given path.
+ * Writes a Metals-schema {@code mbt.json} to a given path.
  */
 public final class MbtJsonWriter {
 
