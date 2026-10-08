@@ -175,18 +175,13 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         }
 
         if (strategy == LookupStrategy.Any || strategy == LookupStrategy.Unnamed) {
-            unnamedDeclares = unnamedHasTypesInPackage(packageJvm);
+            unnamedDeclares = unnamedDeclaresPackage(packageJvm);
             if (unnamedDeclares && (named == null || strategy == LookupStrategy.Unnamed)) {
                 names.add(ModuleBinding.UNNAMED);
             }
         }
 
         if (names.isEmpty()) {
-            // ANY with only unnamed types: still report unnamed when the package exists.
-            if (strategy == LookupStrategy.Any && index.hasPackage(packageJvm)
-                    && unnamedHasTypesInPackage(packageJvm)) {
-                return new char[][] { ModuleBinding.UNNAMED };
-            }
             return null;
         }
         return names.toArray(new char[names.size()][]);
@@ -325,8 +320,26 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         return out;
     }
 
-    private boolean unnamedHasTypesInPackage(String packageJvm) {
-        for (TypeEntry e : index.listPackage(packageJvm, false)) {
+    /**
+     * True when the unnamed module declares {@code packageJvm}: either leaf
+     * types live there, or it is an intermediate parent of classpath-visible
+     * unnamed types (e.g. {@code io/trino/plugin} when only
+     * {@code io/trino/plugin/base/metrics} has types).
+     */
+    private boolean unnamedDeclaresPackage(String packageJvm) {
+        if (unnamedHasVisibleType(packageJvm, false)) {
+            return true;
+        }
+        // Hollow parents: index.hasPackage includes ancestors registered at
+        // write time; only recurse when that cheap check says the tree exists.
+        if (!index.hasPackage(packageJvm)) {
+            return false;
+        }
+        return unnamedHasVisibleType(packageJvm, true);
+    }
+
+    private boolean unnamedHasVisibleType(String packageJvm, boolean recurse) {
+        for (TypeEntry e : index.listPackage(packageJvm, recurse)) {
             if (!isVisible(e)) {
                 continue;
             }

@@ -6,12 +6,14 @@
  */
 package ch.castleridge.javals.analysis.ecj;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 
 import org.eclipse.jdt.internal.compiler.env.IBinaryModule;
@@ -46,6 +48,13 @@ class IndexNameEnvironmentModuleTest {
                 "demo/Local.java",
                 CLASSPATH_URI,
                 "package demo; public class Local {}",
+                index);
+        // Hollow intermediate parents: types only under demo.util.nested, none in
+        // demo.util itself (mirrors Trino's io.trino.plugin → …base.metrics).
+        JavacSourceIndexer.index(
+                "demo/util/nested/Thing.java",
+                CLASSPATH_URI,
+                "package demo.util.nested; public class Thing {}",
                 index);
         classpath = new ClasspathOrder(
                 List.of(UriClasspathEntry.of(CLASSPATH_URI), UriClasspathEntry.of(jrtUri)),
@@ -116,5 +125,40 @@ class IndexNameEnvironmentModuleTest {
         assertTrue(session.isUsable());
         IndexNameEnvironment after = compiler.environmentFor("ns", index, classpath);
         assertSame(first, after);
+    }
+
+    @Test
+    void getModulesDeclaringPackageSeesHollowUnnamedParents() {
+        IndexNameEnvironment env = new IndexNameEnvironment(index, classpath);
+        char[][] util = env.getModulesDeclaringPackage(
+                new char[][] { "demo".toCharArray(), "util".toCharArray() },
+                ModuleBinding.ANY);
+        assertNotNull(util, "demo.util should exist as parent of demo.util.nested");
+        assertTrue(Arrays.stream(util).anyMatch(m -> m == ModuleBinding.UNNAMED),
+                () -> "expected UNNAMED among " + Arrays.deepToString(
+                        Arrays.stream(util).map(String::valueOf).toArray()));
+
+        char[][] nested = env.getModulesDeclaringPackage(
+                new char[][] {
+                        "demo".toCharArray(), "util".toCharArray(), "nested".toCharArray()
+                },
+                ModuleBinding.ANY);
+        assertNotNull(nested);
+    }
+
+    @Test
+    void importThroughHollowUnnamedParentResolves() {
+        String source = """
+                package demo;
+                import demo.util.nested.Thing;
+                class UseThing { Thing t; }
+                """;
+        AnalysisSession session = new EcjWorkspaceCompiler().analyze(
+                "file:///workspace/demo/UseThing.java", source, index, classpath);
+        assertTrue(session.isUsable());
+        assertFalse(session.diagnostics().stream()
+                        .anyMatch(d -> d.message() != null
+                                && d.message().contains("cannot be resolved")),
+                () -> "Unexpected unresolved import: " + session.diagnostics());
     }
 }
