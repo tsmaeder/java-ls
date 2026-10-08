@@ -85,6 +85,10 @@ public class JavaTextDocumentService implements TextDocumentService {
                 : workspaceCompiler;
     }
 
+    WorkspaceCompiler workspaceCompiler() {
+        return workspaceCompiler;
+    }
+
     public void setReferencesCandidateCap(int referencesCandidateCap) {
         this.referencesCandidateCap = referencesCandidateCap;
     }

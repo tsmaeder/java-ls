@@ -26,6 +26,7 @@ import org.eclipse.jdt.internal.compiler.ICompilerRequestor;
 import org.eclipse.jdt.internal.compiler.ast.CompilationUnitDeclaration;
 import org.eclipse.jdt.internal.compiler.batch.CompilationUnit;
 import org.eclipse.jdt.internal.compiler.env.ICompilationUnit;
+import org.eclipse.jdt.internal.compiler.env.INameEnvironment;
 import org.eclipse.jdt.internal.compiler.impl.CompilerOptions;
 import org.eclipse.jdt.internal.compiler.problem.AbortCompilation;
 import org.eclipse.jdt.internal.compiler.problem.DefaultProblem;
@@ -52,6 +53,16 @@ final class EcjAnalysisEngine {
                                    ClasspathOrder classpath,
                                    AstDeclarationLocator locator,
                                    Map<String, String> sourceJarByBinaryJar) {
+        return analyze(uri, text, index, classpath, locator, sourceJarByBinaryJar, null);
+    }
+
+    static AnalysisSession analyze(String uri,
+                                   CharSequence text,
+                                   Index index,
+                                   ClasspathOrder classpath,
+                                   AstDeclarationLocator locator,
+                                   Map<String, String> sourceJarByBinaryJar,
+                                   IndexNameEnvironment sharedEnvironment) {
         String source = text == null ? "" : text.toString();
         if (!index.contains(OBJECT_JVM_NAME)) {
             ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(
@@ -74,8 +85,15 @@ final class EcjAnalysisEngine {
         options.complianceLevel = options.sourceLevel;
         options.targetJDK = options.sourceLevel;
 
-        IndexNameEnvironment environment = new IndexNameEnvironment(index, classpath);
-        CapturingCompiler compiler = new CapturingCompiler(environment, options, requestor);
+        boolean owned = sharedEnvironment == null;
+        IndexNameEnvironment environment = owned
+                ? new IndexNameEnvironment(index, classpath)
+                : sharedEnvironment;
+        // Classic facade keeps ECJ out of useModuleSystem until unnamed-jar
+        // binary superclass resolution is solid; lookups still hit the
+        // IModuleAwareNameEnvironment with ModuleBinding.ANY.
+        CapturingCompiler compiler = new CapturingCompiler(
+                new ClassicNameEnvironment(environment), options, requestor);
         try {
             compiler.compile(new ICompilationUnit[] { input });
             mergeUnitProblems(compiler.unit, problems);
@@ -92,7 +110,10 @@ final class EcjAnalysisEngine {
                     null, uri, source, index, classpath, sourceJarByBinaryJar);
             return new AstAnalysisSession(cu, diagnostics, index, classpath, locator, sourceJarByBinaryJar);
         } finally {
-            environment.cleanup();
+            // Shared per-namespace environments outlive a single compile.
+            if (owned) {
+                environment.cleanup();
+            }
         }
     }
 
@@ -209,7 +230,7 @@ final class EcjAnalysisEngine {
     private static final class CapturingCompiler extends Compiler {
         private CompilationUnitDeclaration unit;
 
-        CapturingCompiler(IndexNameEnvironment environment,
+        CapturingCompiler(INameEnvironment environment,
                           CompilerOptions options,
                           ICompilerRequestor requestor) {
             super(environment,

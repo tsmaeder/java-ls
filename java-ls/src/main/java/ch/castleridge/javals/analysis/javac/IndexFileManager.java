@@ -32,6 +32,7 @@ import com.sun.tools.javac.api.ClientCodeWrapper;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.IndexedClassRef;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
+import ch.castleridge.javals.indexing.model.ModuleOwnership;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**
@@ -227,7 +228,7 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
 
     private boolean moduleOwnsPackage(String moduleName, String packageJvm) {
         ModuleEntry module = moduleEntry(moduleName);
-        return module != null && moduleOwnsPackage(module, packageJvm);
+        return module != null && ModuleOwnership.ownsPackage(module, packageJvm);
     }
 
     private ModuleEntry moduleEntry(String moduleName) {
@@ -241,24 +242,6 @@ public class IndexFileManager extends ForwardingJavaFileManager<StandardJavaFile
      */
     public JavaFileObject moduleFileObject(String moduleName) {
         return moduleFile(moduleName);
-    }
-
-    private static boolean moduleOwnsPackage(ModuleEntry module, String packageJvm) {
-        if (containsPackage(module.packages(), packageJvm)) return true;
-        for (ModuleEntry.Exports e : module.exports()) {
-            if (e.packageJvm().equals(packageJvm)) return true;
-        }
-        for (ModuleEntry.Opens o : module.opens()) {
-            if (o.packageJvm().equals(packageJvm)) return true;
-        }
-        return false;
-    }
-
-    private static boolean containsPackage(String[] packages, String packageJvm) {
-        for (String p : packages) {
-            if (p.equals(packageJvm)) return true;
-        }
-        return false;
     }
 
     /**

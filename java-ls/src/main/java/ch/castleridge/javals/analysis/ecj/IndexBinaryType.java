@@ -34,6 +34,8 @@ import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
+import ch.castleridge.javals.indexing.model.ModuleEntry;
+import ch.castleridge.javals.indexing.model.ModuleOwnership;
 import ch.castleridge.javals.indexing.model.RecordComponentEntry;
 import ch.castleridge.javals.indexing.model.SourceTypeEntry;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
@@ -65,6 +67,7 @@ final class IndexBinaryType implements IBinaryType {
     private final IRecordComponent[] recordComponents;
     private final IBinaryAnnotation[] annotations;
     private final URI uri;
+    private final char[] module;
 
     static IndexBinaryType of(TypeEntry entry, Index index, ClasspathOrder classpath) {
         return new IndexBinaryType(entry, index, classpath);
@@ -97,6 +100,8 @@ final class IndexBinaryType implements IBinaryType {
         this.recordComponents = recordComponents(entry, encoding);
         this.annotations = IndexBinaryAnnotations.of(annotationsOf(entry), encoding);
         this.uri = safeUri(resource);
+        ModuleEntry owning = owningModule(entry, index, order);
+        this.module = owning == null ? null : owning.name().toCharArray();
     }
 
     @Override
@@ -131,7 +136,48 @@ final class IndexBinaryType implements IBinaryType {
 
     @Override
     public char[] getModule() {
-        return null;
+        return module;
+    }
+
+    /**
+     * Classpath-visible module that owns {@code entry}'s package, or null
+     * when the type lives in the unnamed module.
+     *
+     * <p>Ownership is by package declaration (packages/exports/opens), not
+     * container URI alone: the JRT houses every JDK module under one
+     * {@code sourceUri}, so a same-container match would pick an arbitrary
+     * module.
+     */
+    static ModuleEntry owningModule(TypeEntry entry, Index index, ClasspathOrder classpath) {
+        if (entry == null || index == null) {
+            return null;
+        }
+        String packageJvm = ModuleOwnership.packageOf(entry.jvmOwnerName());
+        String sourceUri = entry.sourceUri();
+        ModuleEntry best = null;
+        int bestRank = Integer.MAX_VALUE;
+        for (ModuleEntry me : index.allModules()) {
+            if (me.sourceUri() != null && !classpath.contains(me.sourceUri())) {
+                continue;
+            }
+            if (!ModuleOwnership.ownsPackage(me, packageJvm)) {
+                continue;
+            }
+            // A modular jar only owns types from that jar; JRT modules all
+            // share one sourceUri so the equality holds for every JDK module.
+            if (sourceUri != null && me.sourceUri() != null && !sourceUri.equals(me.sourceUri())) {
+                continue;
+            }
+            int rank = classpath.rank(me.sourceUri());
+            if (rank < 0) {
+                rank = Integer.MAX_VALUE - 1;
+            }
+            if (rank < bestRank) {
+                bestRank = rank;
+                best = me;
+            }
+        }
+        return best;
     }
 
     @Override

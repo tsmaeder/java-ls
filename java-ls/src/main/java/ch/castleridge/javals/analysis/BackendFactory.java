@@ -1,9 +1,5 @@
 /**
- * Copyright 2026 by Anysphere Inc.
- * 
- * Licensed under the MIT License.
- * 
- * SPDX-License-Identifier: MIT
+ * Copyright 2026 by Castle Ridge Software GmbH
  *
  * Author: Thomas Mäder, Castle Ridge Software
  *
@@ -12,6 +8,7 @@ package ch.castleridge.javals.analysis;
 
 import java.util.Map;
 
+import ch.castleridge.javals.MbtService;
 import ch.castleridge.javals.analysis.ecj.EcjDietSources;
 import ch.castleridge.javals.analysis.ecj.EcjWorkspaceCompiler;
 import ch.castleridge.javals.analysis.javac.JavacDietSources;
@@ -26,7 +23,7 @@ public final class BackendFactory {
 
     public static WorkspaceCompiler workspaceCompiler(String name) {
         return workspaceCompiler(name, new AstDeclarationLocator(JavacDietSources::lower),
-                new AstDeclarationLocator(EcjDietSources::lower), Map.of());
+                new AstDeclarationLocator(EcjDietSources::lower), Map.of(), null);
     }
 
     /**
@@ -37,9 +34,42 @@ public final class BackendFactory {
                                                       AstDeclarationLocator javacLocator,
                                                       AstDeclarationLocator ecjLocator,
                                                       Map<String, String> sourceJarByBinaryJar) {
+        return workspaceCompiler(name, javacLocator, ecjLocator, sourceJarByBinaryJar, null);
+    }
+
+    public static WorkspaceCompiler workspaceCompiler(String name,
+                                                      AstDeclarationLocator javacLocator,
+                                                      AstDeclarationLocator ecjLocator,
+                                                      Map<String, String> sourceJarByBinaryJar,
+                                                      MbtService mbtService) {
         if (name != null && name.trim().equalsIgnoreCase("ecj")) {
-            return new EcjWorkspaceCompiler(ecjLocator, sourceJarByBinaryJar);
+            return new EcjWorkspaceCompiler(ecjLocator, sourceJarByBinaryJar, mbtService);
         }
         return new JavacWorkspaceCompiler(javacLocator, sourceJarByBinaryJar);
+    }
+
+    /**
+     * Update an existing compiler in place when possible (preserves ECJ
+     * per-namespace name environments), otherwise allocate a fresh one.
+     */
+    public static WorkspaceCompiler rebind(WorkspaceCompiler current,
+                                           String name,
+                                           AstDeclarationLocator javacLocator,
+                                           AstDeclarationLocator ecjLocator,
+                                           Map<String, String> sourceJarByBinaryJar,
+                                           MbtService mbtService) {
+        boolean wantEcj = name != null && name.trim().equalsIgnoreCase("ecj");
+        if (wantEcj && current instanceof EcjWorkspaceCompiler ecj) {
+            ecj.setSourceJarByBinaryJar(sourceJarByBinaryJar);
+            ecj.setMbtService(mbtService);
+            ecj.invalidateAnswerCaches();
+            return ecj;
+        }
+        if (!wantEcj && current instanceof JavacWorkspaceCompiler) {
+            // Javac compiler is stateless w.r.t. source jars beyond construction;
+            // recreate so the new mapping is used.
+            return new JavacWorkspaceCompiler(javacLocator, sourceJarByBinaryJar);
+        }
+        return workspaceCompiler(name, javacLocator, ecjLocator, sourceJarByBinaryJar, mbtService);
     }
 }

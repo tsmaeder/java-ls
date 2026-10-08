@@ -50,11 +50,13 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
 
     private void rebindWorkspaceCompiler() {
         JavaTextDocumentService tds = (JavaTextDocumentService) textDocumentService;
-        tds.setWorkspaceCompiler(ch.castleridge.javals.analysis.BackendFactory.workspaceCompiler(
+        tds.setWorkspaceCompiler(ch.castleridge.javals.analysis.BackendFactory.rebind(
+                tds.workspaceCompiler(),
                 compilerBackend,
                 tds.javacLocator(),
                 tds.ecjLocator(),
-                mbtService.sourceJarByBinaryJar()));
+                mbtService.sourceJarByBinaryJar(),
+                mbtService));
     }
 
     public IndexService getIndexService() {
@@ -118,6 +120,13 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
         CompletableFuture.runAsync(() -> {
             workspaceBootstrap.prepare(params, this::logMessage).ifPresent(p -> {
                 mbtService.loadFrom(p.mbtJson(), p.workspace());
+                ch.castleridge.javals.analysis.WorkspaceCompiler current =
+                        ((JavaTextDocumentService) textDocumentService).workspaceCompiler();
+                if (current instanceof ch.castleridge.javals.analysis.ecj.EcjWorkspaceCompiler ecj) {
+                    ecj.clearEnvironments();
+                    ecj.setMbtService(mbtService);
+                    ecj.setSourceJarByBinaryJar(mbtService.sourceJarByBinaryJar());
+                }
                 if (mbtService.inputSources().isEmpty()) {
                     return;
                 }

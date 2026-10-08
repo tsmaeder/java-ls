@@ -14,11 +14,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -32,6 +34,7 @@ import ch.castleridge.javals.indexing.mbt.MbtDependencyModuleInfo;
 import ch.castleridge.javals.indexing.mbt.MbtInfo;
 import ch.castleridge.javals.indexing.mbt.MbtJson;
 import ch.castleridge.javals.indexing.mbt.MbtTargetInfo;
+import ch.castleridge.javals.indexing.model.ResourceUris;
 import ch.castleridge.javals.indexing.scan.DirInput;
 import ch.castleridge.javals.indexing.scan.InputSource;
 import ch.castleridge.javals.indexing.scan.JarInput;
@@ -44,8 +47,10 @@ import ch.castleridge.javals.indexing.scan.ScanCollector;
  *
  * <p>Classpath composition per target matches the prior IndexService
  * behaviour: own sources → {@code dependsOn} sources → dependency jars →
- * JRT. {@link #classPathFor(String)} resolves a source file on the fly
- * to the first target (by namespace id) whose own source roots claim it.
+ * JRT. {@link #targetFor(String)} / {@link #classPathFor(String)} resolve a
+ * URI to the first target (by namespace id) whose own source roots claim it,
+ * or — for attached sources — the first target that depends on the binary
+ * jar mapped to that sources archive.
  */
 public final class MbtService {
 
@@ -76,9 +81,11 @@ public final class MbtService {
                 return;
             }
             List<IndexService.SourceRoot> sourceRoots = collectSourceRoots(sources);
+            Map<String, String> binaryJarBySourceJar = invertSourceJarMap(sourceJarByBinaryJar);
             state.set(new State(
-                    Map.copyOf(targets),
+                    Collections.unmodifiableNavigableMap(new TreeMap<>(targets)),
                     Map.copyOf(sourceJarByBinaryJar),
+                    Map.copyOf(binaryJarBySourceJar),
                     List.copyOf(sources.values()),
                     sourceRoots,
                     collector));
@@ -97,22 +104,41 @@ public final class MbtService {
     }
 
     /**
-     * Classpath for {@code uri}: the maintained classpath of the first
-     * target (stable namespace-id order) whose own source roots claim the
-     * URI. Fallback {@link ClasspathOrder#UNRESTRICTED}.
+     * First target (stable namespace-id order) that owns {@code uri}: either
+     * via own source roots, or as a dependency of the binary jar whose
+     * attached sources archive contains the URI. Empty when none match.
      */
-    public ClasspathOrder classPathFor(String uri) {
+    public Optional<Target> targetFor(String uri) {
         if (uri == null) {
-            return ClasspathOrder.UNRESTRICTED;
+            return Optional.empty();
         }
-        for (Target target : state.get().targets.values()) {
+        State current = state.get();
+        for (Target target : current.targets.values()) {
             for (String rootUri : target.ownSourceRootUris()) {
                 if (uri.startsWith(rootUri)) {
-                    return target.classpath();
+                    return Optional.of(target);
                 }
             }
         }
-        return ClasspathOrder.UNRESTRICTED;
+        String sourcesArchive = ResourceUris.classpathContainer(uri);
+        String binaryJarUri = binaryJarForSourcesArchive(current.binaryJarBySourceJar, sourcesArchive);
+        if (binaryJarUri == null) {
+            return Optional.empty();
+        }
+        for (Target target : current.targets.values()) {
+            if (target.classpath().contains(binaryJarUri)) {
+                return Optional.of(target);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Classpath for {@code uri}: the maintained classpath of
+     * {@link #targetFor(String)}, or {@link ClasspathOrder#UNRESTRICTED}.
+     */
+    public ClasspathOrder classPathFor(String uri) {
+        return targetFor(uri).map(Target::classpath).orElse(ClasspathOrder.UNRESTRICTED);
     }
 
     public Map<String, String> sourceJarByBinaryJar() {
@@ -311,6 +337,42 @@ public final class MbtService {
         return out.isEmpty() ? Map.of() : Map.copyOf(out);
     }
 
+    /** Invert binary→sources into normalized sources-archive URI → binary jar URI. */
+    private static Map<String, String> invertSourceJarMap(Map<String, String> sourceJarByBinaryJar) {
+        Map<String, String> out = new HashMap<>();
+        for (Map.Entry<String, String> e : sourceJarByBinaryJar.entrySet()) {
+            String sourcesKey = normalizeArchiveUri(e.getValue());
+            if (sourcesKey != null) {
+                out.putIfAbsent(sourcesKey, e.getKey());
+            }
+        }
+        return out;
+    }
+
+    private static String binaryJarForSourcesArchive(Map<String, String> binaryJarBySourceJar,
+                                                     String sourcesArchive) {
+        if (sourcesArchive == null || sourcesArchive.isBlank() || binaryJarBySourceJar.isEmpty()) {
+            return null;
+        }
+        String normalized = normalizeArchiveUri(sourcesArchive);
+        if (normalized == null) {
+            return null;
+        }
+        return binaryJarBySourceJar.get(normalized);
+    }
+
+    /** Normalize a jar/zip/file URI string to a canonical {@code file:} URI key. */
+    private static String normalizeArchiveUri(String uri) {
+        if (uri == null || uri.isBlank()) {
+            return null;
+        }
+        Path path = pathFromUri(uri);
+        if (path != null) {
+            return path.toUri().toString();
+        }
+        return uri.trim();
+    }
+
     /** Resolves a workspace-relative (forward-slash) or absolute source path. */
     private static Path resolveWorkspacePath(Path workspacePath, String source) {
         Path path = Path.of(source.replace('/', java.io.File.separatorChar));
@@ -345,18 +407,19 @@ public final class MbtService {
 
     /**
      * One mbt namespace: its DTO, maintained classpath, and own source-root
-     * URIs used for on-the-fly ownership in {@link #classPathFor(String)}.
+     * URIs used for on-the-fly ownership in {@link #targetFor(String)}.
      */
     public record Target(String id, MbtTargetInfo info, ClasspathOrder classpath,
                          List<String> ownSourceRootUris) {}
 
     private record State(Map<String, Target> targets,
                          Map<String, String> sourceJarByBinaryJar,
+                         Map<String, String> binaryJarBySourceJar,
                          Collection<InputSource> inputSources,
                          List<IndexService.SourceRoot> sourceRoots,
                          ScanCollector scanCollector) {
         static State empty() {
-            return new State(Map.of(), Map.of(), List.of(), List.of(), null);
+            return new State(Map.of(), Map.of(), Map.of(), List.of(), List.of(), null);
         }
     }
 }
