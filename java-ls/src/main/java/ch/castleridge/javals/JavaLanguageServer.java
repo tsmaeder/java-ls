@@ -30,6 +30,7 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     private final TextDocumentService textDocumentService;
     private final WorkspaceService workspaceService;
     private final IndexService indexService;
+    private final MbtService mbtService;
     private final WorkspaceBootstrap workspaceBootstrap;
     private LanguageClient client;
     private int errorCode = 1;
@@ -40,8 +41,9 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
 
     public JavaLanguageServer() {
         this.indexService = new IndexService(this);
+        this.mbtService = new MbtService(this);
         this.workspaceBootstrap = new WorkspaceBootstrap();
-        this.textDocumentService = new JavaTextDocumentService(this, indexService);
+        this.textDocumentService = new JavaTextDocumentService(this, indexService, mbtService);
         this.workspaceService = new JavaWorkspaceService(this);
         indexService.addIndexChangedListener(this::rebindWorkspaceCompiler);
     }
@@ -52,11 +54,15 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
                 compilerBackend,
                 tds.javacLocator(),
                 tds.ecjLocator(),
-                indexService.sourceJarByBinaryJar()));
+                mbtService.sourceJarByBinaryJar()));
     }
 
     public IndexService getIndexService() {
         return indexService;
+    }
+
+    public MbtService getMbtService() {
+        return mbtService;
     }
 
     /**
@@ -110,8 +116,16 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
                         + ", compiler=" + backend.compiler());
 
         CompletableFuture.runAsync(() -> {
-            workspaceBootstrap.prepare(params, this::logMessage)
-                    .ifPresent(p -> indexService.loadFrom(p.mbtJson(), p.workspace()));
+            workspaceBootstrap.prepare(params, this::logMessage).ifPresent(p -> {
+                mbtService.loadFrom(p.mbtJson(), p.workspace());
+                if (mbtService.inputSources().isEmpty()) {
+                    return;
+                }
+                indexService.index(mbtService.inputSources(), mbtService.sourceRoots());
+                if (!mbtService.sourceRootUris().isEmpty()) {
+                    registerSourceFileWatchers(mbtService.sourceRootUris());
+                }
+            });
         });
         applyReferencesFromOptions(params.getInitializationOptions(), false);
 

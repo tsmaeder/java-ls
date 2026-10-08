@@ -55,6 +55,7 @@ public class JavaTextDocumentService implements TextDocumentService {
 
     private final JavaLanguageServer server;
     private final IndexService indexService;
+    private final MbtService mbtService;
     private final Map<String, TextDocumentItem> documents = new ConcurrentHashMap<>();
     private final Map<String, CachedCompile> compileCache = new ConcurrentHashMap<>();
     private final AstDeclarationLocator javacLocator = new AstDeclarationLocator(JavacDietSources::lower);
@@ -71,9 +72,10 @@ public class JavaTextDocumentService implements TextDocumentService {
     });
     private final AtomicReference<ScheduledFuture<?>> pendingRefresh = new AtomicReference<>();
 
-    public JavaTextDocumentService(JavaLanguageServer server, IndexService indexService) {
+    public JavaTextDocumentService(JavaLanguageServer server, IndexService indexService, MbtService mbtService) {
         this.server = server;
         this.indexService = indexService;
+        this.mbtService = mbtService;
         indexService.addIndexChangedListener(this::scheduleRefreshOpenDocuments);
     }
 
@@ -190,7 +192,7 @@ public class JavaTextDocumentService implements TextDocumentService {
                 return;
             }
             Index index = indexOpt.get();
-            ClasspathOrder classpath = indexService.classPathFor(uri);
+            ClasspathOrder classpath = mbtService.classPathFor(uri);
 
             AnalysisSession session;
             long t0 = System.currentTimeMillis();
@@ -244,7 +246,7 @@ public class JavaTextDocumentService implements TextDocumentService {
             return List.of();
 
         Index index = indexService.index().orElse(null);
-        ClasspathOrder classpath = indexService.classPathFor(uri);
+        ClasspathOrder classpath = mbtService.classPathFor(uri);
         return session.complete(doc.getText(), position, index, classpath);
     }
 
@@ -258,7 +260,7 @@ public class JavaTextDocumentService implements TextDocumentService {
         if (indexOpt.isEmpty())
             return null;
 
-        ClasspathOrder classpath = indexService.classPathFor(uri);
+        ClasspathOrder classpath = mbtService.classPathFor(uri);
         try {
             return workspaceCompiler.analyze(uri, doc.getText(), indexOpt.get(), classpath);
         } catch (RuntimeException | Error e) {
@@ -386,8 +388,8 @@ public class JavaTextDocumentService implements TextDocumentService {
                 indexOpt.orElse(null),
                 key,
                 uri,
-                indexService.sourceJarByBinaryJar(),
-                indexService::classPathFor,
+                mbtService.sourceJarByBinaryJar(),
+                mbtService::classPathFor,
                 referenceSearchScope,
                 documents.keySet(),
                 referencesCandidateCap);
@@ -478,7 +480,7 @@ public class JavaTextDocumentService implements TextDocumentService {
             Optional<Index> index = indexService.index();
             if (index.isEmpty())
                 return;
-            ClasspathOrder classpath = indexService.classPathFor(candidateUri);
+            ClasspathOrder classpath = mbtService.classPathFor(candidateUri);
 
             AnalysisSession candidateSession;
             try {
@@ -605,8 +607,8 @@ public class JavaTextDocumentService implements TextDocumentService {
                 indexOpt.orElse(null),
                 key,
                 queryUri,
-                indexService.sourceJarByBinaryJar(),
-                indexService::classPathFor,
+                mbtService.sourceJarByBinaryJar(),
+                mbtService::classPathFor,
                 referenceSearchScope,
                 documents.keySet(),
                 referencesCandidateCap);
@@ -685,7 +687,7 @@ public class JavaTextDocumentService implements TextDocumentService {
         String text = textForUri(uri);
         if (text == null) text = "";
         try {
-            return workspaceCompiler.analyze(uri, text, indexOpt.get(), indexService.classPathFor(uri));
+            return workspaceCompiler.analyze(uri, text, indexOpt.get(), mbtService.classPathFor(uri));
         } catch (RuntimeException e) {
             server.logMessage(MessageType.Error, "Hierarchy session failed for " + uri + ": " + describe(e));
             return null;

@@ -12,7 +12,6 @@ package ch.castleridge.javals;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
@@ -29,21 +28,6 @@ import org.junit.jupiter.api.io.TempDir;
 import ch.castleridge.javals.indexing.index.Index;
 
 class IndexServiceWatchedFilesTest {
-
-    @Test
-    void resolveUnderSourceRootsPicksLongestMatchingRoot(@TempDir Path tempDir) {
-        Path outer = tempDir.resolve("src").toAbsolutePath().normalize();
-        Path nested = outer.resolve("nested").toAbsolutePath().normalize();
-        List<IndexService.SourceRoot> roots = List.of(
-                new IndexService.SourceRoot(outer, outer.toUri().toString()),
-                new IndexService.SourceRoot(nested, nested.toUri().toString()));
-
-        Path file = nested.resolve("com/Foo.java");
-        IndexService.ResolvedResource resolved = IndexService.resolveUnderSourceRoots(file, roots);
-        assertNotNull(resolved);
-        assertEquals(nested.toUri().toString(), resolved.sourceUri());
-        assertEquals("com/Foo.java", resolved.relativePath());
-    }
 
     @Test
     void watchedFileChangeUpdatesAndDeletesIndexEntries(@TempDir Path tempDir) throws Exception {
@@ -64,14 +48,16 @@ class IndexServiceWatchedFilesTest {
                 """;
         Files.writeString(tempDir.resolve("mbt.json"), mbt, StandardCharsets.UTF_8);
 
+        MbtService mbtService = new MbtService(null);
+        mbtService.loadFrom(tempDir.resolve("mbt.json"), tempDir);
+
         IndexService service = new IndexService(null);
-        Path mbtPath = tempDir.resolve("mbt.json");
-        service.loadFrom(mbtPath, tempDir);
+        service.index(mbtService.inputSources(), mbtService.sourceRoots());
 
         Index index = service.index().orElseThrow();
         assertTrue(index.contains("com/example/Foo"));
-        assertEquals(1, service.sourceRootUris().size());
-        assertTrue(service.sourceRootUris().get(0).contains("src"));
+        assertEquals(1, mbtService.sourceRootUris().size());
+        assertTrue(mbtService.sourceRootUris().get(0).contains("src"));
 
         Files.writeString(foo, "package com.example;\npublic class Foo { void bar() {} }\n",
                 StandardCharsets.UTF_8);
