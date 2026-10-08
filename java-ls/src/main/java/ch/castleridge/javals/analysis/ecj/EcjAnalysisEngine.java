@@ -53,65 +53,70 @@ final class EcjAnalysisEngine {
                                    ClasspathOrder classpath,
                                    AstDeclarationLocator locator,
                                    Map<String, String> sourceJarByBinaryJar) {
-        return analyze(uri, text, index, classpath, locator, sourceJarByBinaryJar, null);
+        return analyze(uri, text, index, classpath, locator, sourceJarByBinaryJar,
+                new IndexNameEnvironment(index, classpath), true);
     }
 
+    /**
+     * @param environment name environment for this compile
+     * @param cleanupAfter when true, clear type answers after lowering (normal
+     *        analyze). Reference workers pass false so answers stay warm until
+     *        the namespace switches.
+     */
     static AnalysisSession analyze(String uri,
                                    CharSequence text,
                                    Index index,
                                    ClasspathOrder classpath,
                                    AstDeclarationLocator locator,
                                    Map<String, String> sourceJarByBinaryJar,
-                                   IndexNameEnvironment sharedEnvironment) {
+                                   IndexNameEnvironment environment,
+                                   boolean cleanupAfter) {
         String source = text == null ? "" : text.toString();
-        if (!index.contains(OBJECT_JVM_NAME)) {
-            ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(
-                    null, uri, source, index, classpath, sourceJarByBinaryJar);
-            return new AstAnalysisSession(cu, List.of(), index, classpath, locator, sourceJarByBinaryJar);
-        }
-
-        String fileName = uri == null || uri.isBlank() ? "Analysis.java" : uri;
-        ICompilationUnit input = new CompilationUnit(source.toCharArray(), fileName, "UTF-8");
-        List<CategorizedProblem> problems = new ArrayList<>();
-        ICompilerRequestor requestor = result -> collectProblems(result, problems);
-        CompilerOptions options = new CompilerOptions();
-        options.generateClassFiles = false;
-        options.performMethodsFullRecovery = true;
-        options.performStatementsRecovery = true;
-        // ECJ's batch default stops recording after 100 problems per unit. An
-        // editor wants every squiggle in the file it has open.
-        options.maxProblemsPerUnit = Integer.MAX_VALUE;
-        options.sourceLevel = CompilerOptions.versionToJdkLevel(CompilerOptions.getLatestVersion());
-        options.complianceLevel = options.sourceLevel;
-        options.targetJDK = options.sourceLevel;
-
-        boolean owned = sharedEnvironment == null;
-        IndexNameEnvironment environment = owned
-                ? new IndexNameEnvironment(index, classpath)
-                : sharedEnvironment;
-        // Classic facade keeps ECJ out of useModuleSystem until unnamed-jar
-        // binary superclass resolution is solid; lookups still hit the
-        // IModuleAwareNameEnvironment with ModuleBinding.ANY.
-        CapturingCompiler compiler = new CapturingCompiler(
-                new ClassicNameEnvironment(environment), options, requestor);
         try {
-            compiler.compile(new ICompilationUnit[] { input });
-            mergeUnitProblems(compiler.unit, problems);
-            return session(uri, source, compiler.unit, mapProblems(problems, source),
-                    index, classpath, locator, sourceJarByBinaryJar);
-        } catch (RuntimeException | Error failure) {
-            mergeUnitProblems(compiler.unit, problems);
-            List<PublishedDiagnostic> diagnostics = mapProblems(problems, source);
-            if (!diagnostics.isEmpty() || compiler.unit != null) {
-                return session(uri, source, compiler.unit, diagnostics,
-                        index, classpath, locator, sourceJarByBinaryJar);
+            if (!index.contains(OBJECT_JVM_NAME)) {
+                ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(
+                        null, uri, source, index, classpath, sourceJarByBinaryJar);
+                return new AstAnalysisSession(cu, List.of(), index, classpath, locator, sourceJarByBinaryJar);
             }
-            ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(
-                    null, uri, source, index, classpath, sourceJarByBinaryJar);
-            return new AstAnalysisSession(cu, diagnostics, index, classpath, locator, sourceJarByBinaryJar);
+
+            String fileName = uri == null || uri.isBlank() ? "Analysis.java" : uri;
+            ICompilationUnit input = new CompilationUnit(source.toCharArray(), fileName, "UTF-8");
+            List<CategorizedProblem> problems = new ArrayList<>();
+            ICompilerRequestor requestor = result -> collectProblems(result, problems);
+            CompilerOptions options = new CompilerOptions();
+            options.generateClassFiles = false;
+            options.performMethodsFullRecovery = true;
+            options.performStatementsRecovery = true;
+            // ECJ's batch default stops recording after 100 problems per unit. An
+            // editor wants every squiggle in the file it has open.
+            options.maxProblemsPerUnit = Integer.MAX_VALUE;
+            options.sourceLevel = CompilerOptions.versionToJdkLevel(CompilerOptions.getLatestVersion());
+            options.complianceLevel = options.sourceLevel;
+            options.targetJDK = options.sourceLevel;
+
+            // Classic facade keeps ECJ out of useModuleSystem until unnamed-jar
+            // binary superclass resolution is solid; lookups still hit the
+            // IModuleAwareNameEnvironment with ModuleBinding.ANY.
+            CapturingCompiler compiler = new CapturingCompiler(
+                    new ClassicNameEnvironment(environment), options, requestor);
+            try {
+                compiler.compile(new ICompilationUnit[] { input });
+                mergeUnitProblems(compiler.unit, problems);
+                return session(uri, source, compiler.unit, mapProblems(problems, source),
+                        index, classpath, locator, sourceJarByBinaryJar);
+            } catch (RuntimeException | Error failure) {
+                mergeUnitProblems(compiler.unit, problems);
+                List<PublishedDiagnostic> diagnostics = mapProblems(problems, source);
+                if (!diagnostics.isEmpty() || compiler.unit != null) {
+                    return session(uri, source, compiler.unit, diagnostics,
+                            index, classpath, locator, sourceJarByBinaryJar);
+                }
+                ch.castleridge.javals.ast.CompilationUnit cu = EcjAstLowerer.lower(
+                        null, uri, source, index, classpath, sourceJarByBinaryJar);
+                return new AstAnalysisSession(cu, diagnostics, index, classpath, locator, sourceJarByBinaryJar);
+            }
         } finally {
-            // Shared per-namespace environments outlive a single compile.
-            if (owned) {
+            if (cleanupAfter) {
                 environment.cleanup();
             }
         }

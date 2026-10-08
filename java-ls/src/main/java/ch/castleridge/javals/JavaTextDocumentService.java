@@ -41,6 +41,7 @@ import ch.castleridge.javals.analysis.ResolvedSymbol;
 import ch.castleridge.javals.analysis.SourceText;
 import ch.castleridge.javals.analysis.WorkspaceCompiler;
 import ch.castleridge.javals.analysis.ecj.EcjDietSources;
+import ch.castleridge.javals.analysis.ecj.EcjWorkspaceCompiler;
 import ch.castleridge.javals.analysis.javac.JavacDietSources;
 import ch.castleridge.javals.ast.SymbolKey;
 import ch.castleridge.javals.classpath.ClasspathOrder;
@@ -426,18 +427,31 @@ public class JavaTextDocumentService implements TextDocumentService {
             ConcurrentLinkedQueue<String> queue = new ConcurrentLinkedQueue<>(candidates);
             int parallelism = Math.max(1, Runtime.getRuntime().availableProcessors());
             Thread[] workers = new Thread[parallelism];
+            EcjWorkspaceCompiler ecjCompiler = workspaceCompiler instanceof EcjWorkspaceCompiler ecj
+                    ? ecj
+                    : null;
             for (int i = 0; i < parallelism; i++) {
                 Thread worker = new Thread(() -> {
-                    while (!combined.isCanceled()) {
-                        String candidateUri = queue.poll();
-                        if (candidateUri == null) {
-                            break;
+                    EcjWorkspaceCompiler.StickyEnvironment sticky = null;
+                    try {
+                        while (!combined.isCanceled()) {
+                            String candidateUri = queue.poll();
+                            if (candidateUri == null) {
+                                break;
+                            }
+                            long ta0 = System.nanoTime();
+                            sticky = analyzeReferenceCandidate(
+                                    candidateUri, key, locations, progress, combined, ecjCompiler, sticky);
+                            long elapsedNs = System.nanoTime() - ta0;
+                            if (elapsedNs > 1_000_000_000L) {
+                                server.logMessage(MessageType.Log,
+                                        "analyzeReferenceCandidate took " + elapsedNs / 1_000_000
+                                                + "ms for " + candidateUri);
+                            }
                         }
-                        long ta0= System.nanoTime();
-                        analyzeReferenceCandidate(candidateUri, key, locations, progress, combined);
-                        long elapsedNs = System.nanoTime() - ta0;
-                        if (elapsedNs > 1000000000) {
-                            server.logMessage(MessageType.Log, "analyzeReferenceCandidate took " + elapsedNs/1000000 + "ms for " + candidateUri);
+                    } finally {
+                        if (sticky != null) {
+                            sticky.release();
                         }
                     }
                 }, "references-analyze");
@@ -471,33 +485,46 @@ public class JavaTextDocumentService implements TextDocumentService {
         }
     }
 
-    private void analyzeReferenceCandidate(String candidateUri,
+    private EcjWorkspaceCompiler.StickyEnvironment analyzeReferenceCandidate(
+            String candidateUri,
             SymbolKey key,
             Set<Location> locations,
             ReferencesProgress progress,
-            CancelChecker cancel) {
+            CancelChecker cancel,
+            EcjWorkspaceCompiler ecjCompiler,
+            EcjWorkspaceCompiler.StickyEnvironment sticky) {
         try {
             String text = textForUri(candidateUri);
             if (text == null)
-                return;
+                return sticky;
 
-            Optional<Index> index = indexService.index();
-            if (index.isEmpty())
-                return;
+            Optional<Index> indexOpt = indexService.index();
+            if (indexOpt.isEmpty())
+                return sticky;
+            Index index = indexOpt.get();
             ClasspathOrder classpath = mbtService.classPathFor(candidateUri);
 
             AnalysisSession candidateSession;
             try {
-                candidateSession = workspaceCompiler.analyze(candidateUri, text, index.get(), classpath);
+                if (ecjCompiler != null) {
+                    sticky = ecjCompiler.environmentForReferences(
+                            candidateUri, index, classpath, sticky);
+                    candidateSession = ecjCompiler.analyze(
+                            candidateUri, text, index, classpath, sticky.environment());
+                } else {
+                    candidateSession = workspaceCompiler.analyze(
+                            candidateUri, text, index, classpath);
+                }
             } catch (RuntimeException | Error e) {
                 server.logMessage(MessageType.Error,
                         "Error compiling candidate " + candidateUri + ": " + e.getMessage());
                 server.logException(e);
-                return;
+                return sticky;
             }
             if (!candidateSession.isUsable())
-                return;
+                return sticky;
             locations.addAll(candidateSession.findReferencesTo(key));
+            return sticky;
         } finally {
             if (!cancel.isCanceled()) {
                 progress.fileDone();

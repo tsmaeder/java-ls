@@ -50,7 +50,7 @@ public final class BackendFactory {
 
     /**
      * Update an existing compiler in place when possible (preserves ECJ
-     * per-namespace name environments), otherwise allocate a fresh one.
+     * per-namespace lookup caches), otherwise allocate a fresh one.
      */
     public static WorkspaceCompiler rebind(WorkspaceCompiler current,
                                            String name,
@@ -62,7 +62,7 @@ public final class BackendFactory {
         if (wantEcj && current instanceof EcjWorkspaceCompiler ecj) {
             ecj.setSourceJarByBinaryJar(sourceJarByBinaryJar);
             ecj.setMbtService(mbtService);
-            ecj.invalidateAnswerCaches();
+            ecj.invalidateLookupCaches();
             return ecj;
         }
         if (!wantEcj && current instanceof JavacWorkspaceCompiler) {
