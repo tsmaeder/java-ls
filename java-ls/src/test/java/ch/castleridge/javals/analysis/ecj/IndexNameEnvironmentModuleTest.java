@@ -128,6 +128,22 @@ class IndexNameEnvironmentModuleTest {
     }
 
     @Test
+    void isPackageSeesJdkAndHollowUnnamedParents() {
+        IndexNameEnvironment env = new IndexNameEnvironment(index, classpath);
+        assertTrue(env.isPackage(null, "java".toCharArray()));
+        assertTrue(env.isPackage(
+                new char[][] { "java".toCharArray() }, "lang".toCharArray()));
+        assertTrue(env.isPackage(
+                new char[][] { "demo".toCharArray() }, "util".toCharArray()),
+                "demo.util should exist as parent of demo.util.nested");
+        assertTrue(env.isPackage(
+                new char[][] { "demo".toCharArray(), "util".toCharArray() },
+                "nested".toCharArray()));
+        assertFalse(env.isPackage(
+                new char[][] { "demo".toCharArray() }, "missing".toCharArray()));
+    }
+
+    @Test
     void getModulesDeclaringPackageSeesHollowUnnamedParents() {
         IndexNameEnvironment env = new IndexNameEnvironment(index, classpath);
         char[][] util = env.getModulesDeclaringPackage(
@@ -144,6 +160,13 @@ class IndexNameEnvironmentModuleTest {
                 },
                 ModuleBinding.ANY);
         assertNotNull(nested);
+
+        char[][] javaLang = env.getModulesDeclaringPackage(
+                new char[][] { "java".toCharArray(), "lang".toCharArray() },
+                ModuleBinding.ANY);
+        assertNotNull(javaLang);
+        assertTrue(Arrays.stream(javaLang)
+                .anyMatch(m -> "java.base".equals(String.valueOf(m))));
     }
 
     @Test

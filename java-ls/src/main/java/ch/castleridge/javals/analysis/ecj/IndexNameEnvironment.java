@@ -7,6 +7,7 @@
 package ch.castleridge.javals.analysis.ecj;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +48,13 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
     private final ClasspathOrder classpath;
     private final Map<String, NameEnvironmentAnswer> answers = new ConcurrentHashMap<>();
     private final Map<String, IModule> modules = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> unnamedPackageCache = new ConcurrentHashMap<>();
+    private final Map<String, char[][]> declaringModulesCache = new ConcurrentHashMap<>();
+
+    /** Lazily built; cleared in {@link #cleanup()}. */
+    private volatile List<ModuleEntry> cachedClasspathModules;
+    /** packageJvm → classpath modules that own it exactly (packages/exports/opens). */
+    private volatile Map<String, List<ModuleEntry>> exactPackageOwners;
 
     IndexNameEnvironment(Index index, ClasspathOrder classpath) {
         this.index = index;
@@ -101,12 +109,12 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         if (winner == null) {
             return null;
         }
-        ModuleEntry owning = IndexBinaryType.owningModule(winner, index, classpath);
+        ModuleEntry owning = owningModule(winner);
         String packageJvm = ModuleOwnership.packageOf(jvmName);
         if (!matchesModule(strategy, named, owning, packageJvm)) {
             return null;
         }
-        IBinaryType binary = IndexBinaryType.of(winner, index, classpath);
+        IBinaryType binary = IndexBinaryType.of(winner, index, classpath, owning);
         // Named modules: tag the answer with the module name. Unnamed-classpath
         // types leave moduleName null so ECJ attaches them to the unnamed module
         // without rebinding java.base types during binary superclass resolution.
@@ -145,20 +153,50 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         return false;
     }
 
+    /**
+     * Boolean package probe with early exit: never builds the full declaring-
+     * module list, and skips the unnamed hollow-package walk when a named
+     * module already owns the package (exact or as a parent).
+     */
+    @Override
+    public boolean isPackage(char[][] parentPackageName, char[] packageName) {
+        String packageJvm = flatPackageJvm(parentPackageName, packageName);
+        if (hasExactPackageOwner(packageJvm)) {
+            return true;
+        }
+        if (namedModuleDeclaresPrefix(packageJvm)) {
+            return true;
+        }
+        return unnamedDeclaresPackage(packageJvm);
+    }
+
     @Override
     public char[][] getModulesDeclaringPackage(char[][] packageName, char[] moduleName) {
         String packageJvm = flatPackageJvm(packageName);
         LookupStrategy strategy = LookupStrategy.get(moduleName);
         String named = LookupStrategy.getStringName(moduleName);
-        List<char[]> names = new ArrayList<>();
-        boolean unnamedDeclares = false;
+        String cacheKey = named == null
+                ? strategy.name() + ':' + packageJvm
+                : strategy.name() + ':' + named + ':' + packageJvm;
+        char[][] cached = declaringModulesCache.get(cacheKey);
+        if (cached != null) {
+            return cached.length == 0 ? null : cached;
+        }
+        char[][] made = computeModulesDeclaringPackage(packageJvm, strategy, named);
+        declaringModulesCache.putIfAbsent(cacheKey, made == null ? NO_MODULES : made);
+        return made;
+    }
 
-        for (ModuleEntry me : classpathModules()) {
-            if (!ModuleOwnership.ownsPackage(me, packageJvm)) {
-                continue;
-            }
-            if (matchesModule(strategy, named, me, packageJvm)) {
-                names.add(me.name().toCharArray());
+    private char[][] computeModulesDeclaringPackage(
+            String packageJvm, LookupStrategy strategy, String named) {
+        List<char[]> names = new ArrayList<>();
+
+        List<ModuleEntry> exact = exactPackageOwners().get(packageJvm);
+        if (exact != null) {
+            for (ModuleEntry me : exact) {
+                if (matchesModule(strategy, named, me, packageJvm)) {
+                    names.add(me.name().toCharArray());
+                }
             }
         }
         // Intermediate parents (java when only java/lang is declared): fall back
@@ -175,8 +213,10 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         }
 
         if (strategy == LookupStrategy.Any || strategy == LookupStrategy.Unnamed) {
-            unnamedDeclares = unnamedDeclaresPackage(packageJvm);
-            if (unnamedDeclares && (named == null || strategy == LookupStrategy.Unnamed)) {
+            // For ANY, still record UNNAMED when it also declares (module system
+            // callers want the full list). isPackage short-circuits earlier.
+            if (unnamedDeclaresPackage(packageJvm)
+                    && (named == null || strategy == LookupStrategy.Unnamed)) {
                 names.add(ModuleBinding.UNNAMED);
             }
         }
@@ -196,7 +236,7 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
             if (!isVisible(e)) {
                 continue;
             }
-            ModuleEntry owning = IndexBinaryType.owningModule(e, index, classpath);
+            ModuleEntry owning = owningModule(e);
             if (matchesModule(strategy, named, owning, packageJvm)) {
                 return true;
             }
@@ -282,6 +322,44 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
     public void cleanup() {
         answers.clear();
         modules.clear();
+        unnamedPackageCache.clear();
+        declaringModulesCache.clear();
+        cachedClasspathModules = null;
+        exactPackageOwners = null;
+    }
+
+    /**
+     * Classpath-visible module that owns {@code entry}'s package, or null
+     * when the type lives in the unnamed module.
+     */
+    ModuleEntry owningModule(TypeEntry entry) {
+        if (entry == null) {
+            return null;
+        }
+        String packageJvm = ModuleOwnership.packageOf(entry.jvmOwnerName());
+        List<ModuleEntry> owners = exactPackageOwners().get(packageJvm);
+        if (owners == null || owners.isEmpty()) {
+            return null;
+        }
+        String sourceUri = entry.sourceUri();
+        ModuleEntry best = null;
+        int bestRank = Integer.MAX_VALUE;
+        for (ModuleEntry me : owners) {
+            // A modular jar only owns types from that jar; JRT modules all
+            // share one sourceUri so the equality holds for every JDK module.
+            if (sourceUri != null && me.sourceUri() != null && !sourceUri.equals(me.sourceUri())) {
+                continue;
+            }
+            int rank = classpath.rank(me.sourceUri());
+            if (rank < 0) {
+                rank = Integer.MAX_VALUE - 1;
+            }
+            if (rank < bestRank) {
+                bestRank = rank;
+                best = me;
+            }
+        }
+        return best;
     }
 
     private ModuleEntry pickModule(String moduleName) {
@@ -303,21 +381,87 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
     }
 
     private List<ModuleEntry> classpathModules() {
-        List<ModuleEntry> out = new ArrayList<>();
-        Set<String> seen = new LinkedHashSet<>();
-        for (ModuleEntry me : index.allModules()) {
-            if (me.sourceUri() != null && !classpath.contains(me.sourceUri())) {
-                continue;
+        List<ModuleEntry> cached = cachedClasspathModules;
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (this) {
+            if (cachedClasspathModules != null) {
+                return cachedClasspathModules;
             }
-            if (!seen.add(me.name())) {
-                continue;
+            List<ModuleEntry> out = new ArrayList<>();
+            Set<String> seen = new LinkedHashSet<>();
+            for (ModuleEntry me : index.allModules()) {
+                if (me.sourceUri() != null && !classpath.contains(me.sourceUri())) {
+                    continue;
+                }
+                if (!seen.add(me.name())) {
+                    continue;
+                }
+                ModuleEntry winner = pickModule(me.name());
+                if (winner != null) {
+                    out.add(winner);
+                }
             }
-            ModuleEntry winner = pickModule(me.name());
-            if (winner != null) {
-                out.add(winner);
+            cachedClasspathModules = List.copyOf(out);
+            return cachedClasspathModules;
+        }
+    }
+
+    private Map<String, List<ModuleEntry>> exactPackageOwners() {
+        Map<String, List<ModuleEntry>> cached = exactPackageOwners;
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (this) {
+            if (exactPackageOwners != null) {
+                return exactPackageOwners;
+            }
+            Map<String, List<ModuleEntry>> map = new HashMap<>();
+            for (ModuleEntry me : classpathModules()) {
+                addOwnedPackages(map, me);
+            }
+            // Freeze lists
+            Map<String, List<ModuleEntry>> frozen = new HashMap<>(map.size());
+            for (Map.Entry<String, List<ModuleEntry>> e : map.entrySet()) {
+                frozen.put(e.getKey(), List.copyOf(e.getValue()));
+            }
+            exactPackageOwners = Map.copyOf(frozen);
+            return exactPackageOwners;
+        }
+    }
+
+    private static void addOwnedPackages(Map<String, List<ModuleEntry>> map, ModuleEntry me) {
+        for (String p : me.packages()) {
+            addOwner(map, p, me);
+        }
+        for (ModuleEntry.Exports e : me.exports()) {
+            addOwner(map, e.packageJvm(), me);
+        }
+        for (ModuleEntry.Opens o : me.opens()) {
+            addOwner(map, o.packageJvm(), me);
+        }
+    }
+
+    private static void addOwner(Map<String, List<ModuleEntry>> map, String packageJvm, ModuleEntry me) {
+        List<ModuleEntry> owners = map.computeIfAbsent(packageJvm, k -> new ArrayList<>(1));
+        if (!owners.contains(me)) {
+            owners.add(me);
+        }
+    }
+
+    private boolean hasExactPackageOwner(String packageJvm) {
+        List<ModuleEntry> owners = exactPackageOwners().get(packageJvm);
+        return owners != null && !owners.isEmpty();
+    }
+
+    private boolean namedModuleDeclaresPrefix(String packageJvm) {
+        for (ModuleEntry me : classpathModules()) {
+            if (ModuleOwnership.declaresPackageOrParent(me, packageJvm)) {
+                return true;
             }
         }
-        return out;
+        return false;
     }
 
     /**
@@ -327,6 +471,16 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
      * {@code io/trino/plugin/base/metrics} has types).
      */
     private boolean unnamedDeclaresPackage(String packageJvm) {
+        Boolean cached = unnamedPackageCache.get(packageJvm);
+        if (cached != null) {
+            return cached;
+        }
+        boolean result = computeUnnamedDeclaresPackage(packageJvm);
+        unnamedPackageCache.putIfAbsent(packageJvm, result);
+        return result;
+    }
+
+    private boolean computeUnnamedDeclaresPackage(String packageJvm) {
         if (unnamedHasVisibleType(packageJvm, false)) {
             return true;
         }
@@ -343,7 +497,7 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
             if (!isVisible(e)) {
                 continue;
             }
-            if (IndexBinaryType.owningModule(e, index, classpath) == null) {
+            if (owningModule(e) == null) {
                 return true;
             }
         }
@@ -362,6 +516,25 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
             return "";
         }
         return CharOperation.toString(packageName).replace('.', '/');
+    }
+
+    private static String flatPackageJvm(char[][] parentPackageName, char[] packageName) {
+        StringBuilder name = new StringBuilder();
+        if (parentPackageName != null) {
+            for (char[] component : parentPackageName) {
+                if (!name.isEmpty()) {
+                    name.append('/');
+                }
+                name.append(component);
+            }
+        }
+        if (packageName != null && packageName.length > 0) {
+            if (!name.isEmpty()) {
+                name.append('/');
+            }
+            name.append(packageName);
+        }
+        return name.toString();
     }
 
     private static String slashToDot(String jvm) {

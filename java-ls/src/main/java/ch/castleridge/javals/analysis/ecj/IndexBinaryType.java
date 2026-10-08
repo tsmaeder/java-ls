@@ -70,10 +70,17 @@ final class IndexBinaryType implements IBinaryType {
     private final char[] module;
 
     static IndexBinaryType of(TypeEntry entry, Index index, ClasspathOrder classpath) {
-        return new IndexBinaryType(entry, index, classpath);
+        ClasspathOrder order = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
+        return of(entry, index, order, owningModule(entry, index, order));
     }
 
-    private IndexBinaryType(TypeEntry entry, Index index, ClasspathOrder classpath) {
+    static IndexBinaryType of(
+            TypeEntry entry, Index index, ClasspathOrder classpath, ModuleEntry owning) {
+        return new IndexBinaryType(entry, index, classpath, owning);
+    }
+
+    private IndexBinaryType(
+            TypeEntry entry, Index index, ClasspathOrder classpath, ModuleEntry owning) {
         ClasspathOrder order = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
         IndexTypeEncoding encoding = new IndexTypeEncoding(entry, index, order);
         this.name = entry.jvmOwnerName().toCharArray();
@@ -100,7 +107,6 @@ final class IndexBinaryType implements IBinaryType {
         this.recordComponents = recordComponents(entry, encoding);
         this.annotations = IndexBinaryAnnotations.of(annotationsOf(entry), encoding);
         this.uri = safeUri(resource);
-        ModuleEntry owning = owningModule(entry, index, order);
         this.module = owning == null ? null : owning.name().toCharArray();
     }
 
