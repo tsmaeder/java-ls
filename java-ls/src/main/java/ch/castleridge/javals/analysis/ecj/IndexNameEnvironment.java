@@ -6,6 +6,8 @@
  */
 package ch.castleridge.javals.analysis.ecj;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -101,15 +103,12 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         if (cached != null) {
             return cached;
         }
-        TypeEntry winner = lookup.classpath().pick(lookup.index().getAll(jvmName), TypeEntry::sourceUri);
+        String packageJvm = ModuleOwnership.packageOf(jvmName);
+        TypeEntry winner = pickMatching(jvmName, packageJvm, strategy, named);
         if (winner == null) {
             return null;
         }
         ModuleEntry owning = lookup.owningModule(winner);
-        String packageJvm = ModuleOwnership.packageOf(jvmName);
-        if (!lookup.matchesModule(strategy, named, owning, packageJvm)) {
-            return null;
-        }
         IBinaryType binary = IndexBinaryType.of(winner, lookup.index(), lookup.classpath(), owning);
         // Named modules: tag the answer with the module name. Unnamed-classpath
         // types leave moduleName null so ECJ attaches them to the unnamed module
@@ -119,6 +118,46 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
                 : new NameEnvironmentAnswer(binary, null, owning.name().toCharArray());
         NameEnvironmentAnswer prior = answers.putIfAbsent(cacheKey, made);
         return prior == null ? made : prior;
+    }
+
+    /**
+     * Classpath-order pick among candidates that match {@code strategy}. Under
+     * {@link LookupStrategy#Any}, when the package has exact named-module owners,
+     * named-owned candidates win so an unnamed jar cannot shadow {@code java.base}
+     * types such as {@code java.lang.Object}.
+     */
+    private TypeEntry pickMatching(
+            String jvmName, String packageJvm, LookupStrategy strategy, String named) {
+        List<TypeEntry> all = lookup.index().getAll(jvmName);
+        if (all.isEmpty()) {
+            return null;
+        }
+        List<TypeEntry> matching = new ArrayList<>(all.size());
+        List<TypeEntry> namedOwned = null;
+        boolean preferNamed = strategy == LookupStrategy.Any
+                && lookup.hasExactPackageOwner(packageJvm);
+        for (TypeEntry e : all) {
+            if (!lookup.isVisible(e)) {
+                continue;
+            }
+            ModuleEntry owning = lookup.owningModule(e);
+            if (!lookup.matchesModule(strategy, named, owning, packageJvm)) {
+                continue;
+            }
+            matching.add(e);
+            if (preferNamed && owning != null) {
+                if (namedOwned == null) {
+                    namedOwned = new ArrayList<>();
+                }
+                namedOwned.add(e);
+            }
+        }
+        List<TypeEntry> pool = namedOwned != null && !namedOwned.isEmpty() ? namedOwned : matching;
+        if (pool.isEmpty()) {
+            return null;
+        }
+        TypeEntry winner = lookup.classpath().pick(pool, TypeEntry::sourceUri);
+        return winner == null ? pool.get(0) : winner;
     }
 
     @Override

@@ -22,6 +22,7 @@ import org.eclipse.jdt.internal.compiler.env.IBinaryModule;
 import org.eclipse.jdt.internal.compiler.env.IModule;
 import org.eclipse.jdt.internal.compiler.env.NameEnvironmentAnswer;
 import org.eclipse.jdt.internal.compiler.lookup.ModuleBinding;
+import org.eclipse.lsp4j.DiagnosticSeverity;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -29,6 +30,10 @@ import ch.castleridge.javals.analysis.AnalysisSession;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
+import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
+import ch.castleridge.javals.indexing.model.EmptyArrays;
+import ch.castleridge.javals.indexing.model.MethodEntry;
+import ch.castleridge.javals.indexing.model.Type;
 import ch.castleridge.javals.indexing.scan.JrtInput;
 import ch.castleridge.javals.indexing.scan.Scanner;
 import ch.castleridge.javals.indexing.source.javac.JavacSourceIndexer;
@@ -242,5 +247,81 @@ class IndexNameEnvironmentModuleTest {
                         .anyMatch(d -> d.message() != null
                                 && d.message().contains("cannot be resolved")),
                 () -> "Unexpected unresolved import: " + session.diagnostics());
+    }
+
+    @Test
+    void findTypeAnyPrefersJavaBaseOverShadowingUnnamedObject() {
+        String shadowUri = "index:///shadow-object/";
+        InMemoryIndex shadowed = new InMemoryIndex();
+        assertTrue(new Scanner().scanAll(
+                List.of(new JrtInput(Path.of(System.getProperty("java.home")))), shadowed).isEmpty());
+        shadowed.add(new ClassFileTypeEntry(
+                "java/lang/Object.class",
+                shadowUri,
+                "java/lang/Object",
+                0x0001,
+                null,
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                new MethodEntry[] {
+                        new MethodEntry(
+                                0x0001,
+                                "<init>",
+                                Type.Primitive.VOID,
+                                EmptyArrays.TYPE,
+                                EmptyArrays.TYPE,
+                                EmptyArrays.ANNOTATION_REF)
+                },
+                EmptyArrays.STRING,
+                EmptyArrays.ANNOTATION_REF));
+        JavacSourceIndexer.index(
+                "demo/User.java",
+                shadowUri,
+                "package demo; public class User {}",
+                shadowed);
+        // Shadow jar ahead of JRT so classpath.pick alone would choose the fake Object.
+        ClasspathOrder order = new ClasspathOrder(
+                List.of(UriClasspathEntry.of(shadowUri), UriClasspathEntry.of(jrtUri)),
+                false);
+        IndexNameEnvironment env = new IndexNameEnvironment(shadowed, order);
+        NameEnvironmentAnswer object = env.findType(
+                new char[][] { "java".toCharArray(), "lang".toCharArray(), "Object".toCharArray() },
+                ModuleBinding.ANY);
+        assertNotNull(object);
+        assertEquals("java.base", String.valueOf(object.getBinaryType().getModule()));
+
+        char[][] javaLang = env.getModulesDeclaringPackage(
+                new char[][] { "java".toCharArray(), "lang".toCharArray() },
+                ModuleBinding.ANY);
+        assertNotNull(javaLang);
+        assertTrue(Arrays.stream(javaLang)
+                .anyMatch(m -> "java.base".equals(String.valueOf(m))));
+        assertFalse(Arrays.stream(javaLang).anyMatch(m -> m == ModuleBinding.UNNAMED),
+                () -> "java.lang must not report UNNAMED when owned by java.base: "
+                        + Arrays.deepToString(Arrays.stream(javaLang).map(String::valueOf).toArray()));
+    }
+
+    @Test
+    void moduleModeAnalyzeKeepsObjectFromJavaBase() {
+        String source = """
+                package demo;
+                class Use { Local local; Object o = local; }
+                """;
+        AnalysisSession session = new EcjWorkspaceCompiler().analyze(
+                "file:///workspace/demo/Use.java", source, index, classpath);
+        assertTrue(session.isUsable());
+        assertFalse(session.diagnostics().stream()
+                        .anyMatch(d -> d.severity() == DiagnosticSeverity.Error
+                                && d.message() != null
+                                && d.message().toLowerCase().contains("object")),
+                () -> "Unexpected Object-related errors under module mode: " + session.diagnostics());
+
+        IndexNameEnvironment env = new IndexNameEnvironment(index, classpath);
+        NameEnvironmentAnswer object = env.findType(
+                new char[][] { "java".toCharArray(), "lang".toCharArray(), "Object".toCharArray() },
+                ModuleBinding.ANY);
+        assertNotNull(object);
+        assertEquals("java.base", String.valueOf(object.getBinaryType().getModule()));
     }
 }

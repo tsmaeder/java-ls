@@ -94,11 +94,7 @@ final class EcjAnalysisEngine {
             options.complianceLevel = options.sourceLevel;
             options.targetJDK = options.sourceLevel;
 
-            // Classic facade keeps ECJ out of useModuleSystem until unnamed-jar
-            // binary superclass resolution is solid; lookups still hit the
-            // IModuleAwareNameEnvironment with ModuleBinding.ANY.
-            CapturingCompiler compiler = new CapturingCompiler(
-                    new ClassicNameEnvironment(environment), options, requestor);
+            CapturingCompiler compiler = new CapturingCompiler(environment, options, requestor);
             try {
                 compiler.compile(new ICompilationUnit[] { input });
                 mergeUnitProblems(compiler.unit, problems);

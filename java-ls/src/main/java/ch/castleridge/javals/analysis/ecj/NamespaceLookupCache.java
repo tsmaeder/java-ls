@@ -119,11 +119,18 @@ final class NamespaceLookupCache {
             }
         }
 
-        if (strategy == LookupStrategy.Any || strategy == LookupStrategy.Unnamed) {
-            if (unnamedDeclaresPackage(packageJvm)
-                    && (named == null || strategy == LookupStrategy.Unnamed)) {
-                names.add(ModuleBinding.UNNAMED);
-            }
+        // Under Any, suppress UNNAMED only for packages with exact named-module
+        // ownership (e.g. java.lang → java.base). Prefix-only hits like "com"
+        // from JDK com.sun.* must still report UNNAMED so classpath jars under
+        // com.example remain visible. Unnamed strategy always reports when
+        // unnamed types contribute.
+        boolean suppressUnnamedSplit = strategy == LookupStrategy.Any
+                && hasExactPackageOwner(packageJvm);
+        if (!suppressUnnamedSplit
+                && (strategy == LookupStrategy.Any || strategy == LookupStrategy.Unnamed)
+                && unnamedDeclaresPackage(packageJvm)
+                && (named == null || strategy == LookupStrategy.Unnamed)) {
+            names.add(ModuleBinding.UNNAMED);
         }
 
         if (names.isEmpty()) {
@@ -343,7 +350,7 @@ final class NamespaceLookupCache {
         }
     }
 
-    private boolean hasExactPackageOwner(String packageJvm) {
+    boolean hasExactPackageOwner(String packageJvm) {
         List<ModuleEntry> owners = exactPackageOwners().get(packageJvm);
         return owners != null && !owners.isEmpty();
     }
