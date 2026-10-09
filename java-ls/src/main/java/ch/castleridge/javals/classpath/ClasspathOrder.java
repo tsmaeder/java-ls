@@ -12,10 +12,9 @@ package ch.castleridge.javals.classpath;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
-
-import ch.castleridge.javals.indexing.model.TypeEntry;
-
 /**
  * Ordered list of {@link ClasspathEntry} expressing classpath priority
  * for a compile session. Entries earlier in the list shadow later ones
@@ -40,6 +39,7 @@ public final class ClasspathOrder {
 
     private final List<ClasspathEntry> entries;
     private final boolean unrestricted;
+    private final Map<String, Integer> rankBySourceUri = new ConcurrentHashMap<>();
 
     public ClasspathOrder(List<ClasspathEntry> entries, boolean unrestricted) {
         this.entries = entries;
@@ -55,6 +55,10 @@ public final class ClasspathOrder {
     public int rank(String sourceUri) {
         if (unrestricted) return sourceUri == null ? -1 : 0;
         if (sourceUri == null) return -1;
+        return rankBySourceUri.computeIfAbsent(sourceUri, this::computeRank);
+    }
+
+    private int computeRank(String sourceUri) {
         for (int i = 0; i < entries.size(); i++) {
             if (entries.get(i).contains(sourceUri)) {
                 return i;
