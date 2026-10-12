@@ -219,12 +219,6 @@ public final class IndexService {
             log(MessageType.Info, "Index stats: " + stats.sourceFileCount() + " source files, "
                     + jarCount + " jars (" + HeapSizeEstimator.formatBytes(jarBytes) + "); class files "
                     + HeapSizeEstimator.formatBytes(stats.classFileBytes()));
-            HeapSizeEstimator est = new HeapSizeEstimator();
-            long estimated = est.estimate(index);
-            log(MessageType.Info, "Index memory estimate: " + HeapSizeEstimator.formatBytes(estimated));
-            for (String row : est.topByBytes(15)) {
-                log(MessageType.Info, "  " + row);
-            }
             failures.forEach(f -> {
                 StringWriter writer = new StringWriter();
                 f.printStackTrace(new PrintWriter(writer));
