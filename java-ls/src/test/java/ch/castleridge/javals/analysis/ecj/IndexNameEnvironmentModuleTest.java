@@ -218,4 +218,95 @@ class IndexNameEnvironmentModuleTest {
         assertNotNull(object);
         assertEquals("java.base", String.valueOf(object.getBinaryType().getModule()));
     }
+
+    @Test
+    void objectsAttributedToJavaBaseUnderAny() {
+        IndexNameEnvironment env = new IndexNameEnvironment(index, classpath);
+        char[][] javaUtil = env.getModulesDeclaringPackage(
+                new char[][] { "java".toCharArray(), "util".toCharArray() },
+                ModuleBinding.ANY);
+        assertNotNull(javaUtil);
+        assertTrue(Arrays.stream(javaUtil)
+                .anyMatch(m -> "java.base".equals(String.valueOf(m))),
+                () -> "expected java.base among " + Arrays.deepToString(
+                        Arrays.stream(javaUtil).map(String::valueOf).toArray()));
+
+        NameEnvironmentAnswer objects = env.findType(
+                new char[][] {
+                        "java".toCharArray(), "util".toCharArray(), "Objects".toCharArray()
+                },
+                ModuleBinding.ANY);
+        assertNotNull(objects);
+        assertEquals("java.base", String.valueOf(objects.getBinaryType().getModule()));
+        assertNull(env.findType(
+                new char[][] {
+                        "java".toCharArray(), "util".toCharArray(), "Objects".toCharArray()
+                },
+                ModuleBinding.UNNAMED));
+    }
+
+    @Test
+    void importStaticObjectsRequireNonNullResolves() {
+        String source = """
+                package demo;
+                import static java.util.Objects.requireNonNull;
+                class UseObjects {
+                    Object one(Object value) {
+                        return requireNonNull(value);
+                    }
+                }
+                """;
+        AnalysisSession session = new EcjWorkspaceCompiler().analyze(
+                "file:///workspace/demo/UseObjects.java", source, index, classpath);
+        assertTrue(session.isUsable(), () -> "diagnostics: " + session.diagnostics());
+        assertFalse(session.diagnostics().stream()
+                        .anyMatch(d -> d.message() != null
+                                && d.message().contains("cannot be resolved")),
+                () -> "Unexpected unresolved import: " + session.diagnostics());
+    }
+
+    @Test
+    void unrestrictedClasspathStillAttributesJavaUtilToJavaBase() {
+        // Repro for dual-list bug: getEntries() empty must still see JRT modules
+        // via filter(allModules), not modulesForSourceUri(exact entry URI).
+        IndexNameEnvironment env = new IndexNameEnvironment(index, ClasspathOrder.UNRESTRICTED);
+        char[][] javaUtil = env.getModulesDeclaringPackage(
+                new char[][] { "java".toCharArray(), "util".toCharArray() },
+                ModuleBinding.ANY);
+        assertNotNull(javaUtil);
+        assertTrue(Arrays.stream(javaUtil)
+                .anyMatch(m -> "java.base".equals(String.valueOf(m))),
+                () -> "UNRESTRICTED must report java.base for java.util, got "
+                        + Arrays.deepToString(
+                                Arrays.stream(javaUtil).map(String::valueOf).toArray()));
+
+        NameEnvironmentAnswer objects = env.findType(
+                new char[][] {
+                        "java".toCharArray(), "util".toCharArray(), "Objects".toCharArray()
+                },
+                ModuleBinding.ANY);
+        assertNotNull(objects);
+        assertEquals("java.base", String.valueOf(objects.getBinaryType().getModule()));
+
+        String source = """
+                package demo;
+                import java.util.Objects;
+                class UseObjectsImport {
+                    Object one(Object value) {
+                        return Objects.requireNonNull(value);
+                    }
+                }
+                """;
+        AnalysisSession session = new EcjWorkspaceCompiler().analyze(
+                "file:///workspace/demo/UseObjectsImport.java",
+                source,
+                index,
+                ClasspathOrder.UNRESTRICTED);
+        assertTrue(session.isUsable(), () -> "diagnostics: " + session.diagnostics());
+        assertFalse(session.diagnostics().stream()
+                        .anyMatch(d -> d.message() != null
+                                && d.message().contains("cannot be resolved")),
+                () -> "Unexpected unresolved import under UNRESTRICTED: "
+                        + session.diagnostics());
+    }
 }

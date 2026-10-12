@@ -7,8 +7,11 @@
 package ch.castleridge.javals.analysis.ecj;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.eclipse.jdt.core.compiler.CharOperation;
@@ -21,13 +24,8 @@ import org.eclipse.jdt.internal.compiler.lookup.ModuleBinding;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
-import ch.castleridge.javals.indexing.model.ModuleOwnership;
-import ch.castleridge.javals.indexing.model.TypeEntry;
-import ch.castleridge.javals.classpath.ClasspathEntry;
 import ch.castleridge.javals.indexing.model.ResourceUris;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.HashSet;
+import ch.castleridge.javals.indexing.model.TypeEntry;
 
 /**
  * ECJ {@link IModuleAwareNameEnvironment} backed exclusively by the
@@ -71,16 +69,18 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         String jvmName = new String(CharOperation.concatWith(compoundName, '/'));
         LookupStrategy strategy = LookupStrategy.get(moduleName);
         String named = LookupStrategy.getStringName(moduleName);
-        String packageJvm = ModuleOwnership.packageOf(jvmName);
-        List<ModuleEntry> modules = this.classpath.filter(this.index.allModules(), ModuleEntry::sourceUri);
+        List<ModuleEntry> modules = classpathModules();
 
-        List<TypeEntry> matching = new ArrayList<>();
         for (TypeEntry entry : this.classpath.sort(this.index.getAll(jvmName), TypeEntry::sourceUri)) {
             ModuleEntry owning = owningModule(entry, modules);
             if (matchesModule(strategy, named, owning)) {
-                return owning == null ? 
-                new NameEnvironmentAnswer(IndexBinaryType.of(entry, this.index, this.classpath, null), null, null):
-                new NameEnvironmentAnswer(IndexBinaryType.of(entry, this.index, this.classpath, owning), null, owning.name().toCharArray());
+                return owning == null
+                        ? new NameEnvironmentAnswer(
+                                IndexBinaryType.of(entry, this.index, this.classpath, null), null, null)
+                        : new NameEnvironmentAnswer(
+                                IndexBinaryType.of(entry, this.index, this.classpath, owning),
+                                null,
+                                owning.name().toCharArray());
             }
         }
         return null;
@@ -106,30 +106,29 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         }
         return false;
     }
-    
-    
-    List<ModuleEntry> getClasspathModules() {
-                List<ClasspathEntry> entries = this.classpath.getEntries();
-        LinkedHashSet<ModuleEntry> modules = new LinkedHashSet<>();
-        for (ClasspathEntry entry : entries) {
-            for (ModuleEntry module : this.index.modulesForSourceUri(entry.sourceUri())) {
-                modules.add(module);
-            }
-        }
-        return new ArrayList<>(modules);
-    }
-    
+
     /**
-	 * Answer the relevant modules that declare the given package.
-	 * If moduleName is ModuleBinding.ANY then all packages are relevant,
-	 * if moduleName is ModuleBinding.UNNAMED, then only packages in the unnamed module are relevant,
-	 * otherwise consider only packages in the module identified by moduleName.
-	 */
+     * Classpath-visible modules using the same membership rule as type
+     * lookup ({@link ClasspathOrder#filter} / prefix {@code contains}),
+     * not exact {@code modulesForSourceUri} keys. Duplicate names are
+     * collapsed to the classpath winner so package attribution matches
+     * {@link #findType}.
+     */
+    List<ModuleEntry> classpathModules() {
+        return this.classpath.filter(this.index.allModules(), ModuleEntry::sourceUri);
+    }
+
+    /**
+     * Answer the relevant modules that declare the given package.
+     * If moduleName is ModuleBinding.ANY then all packages are relevant,
+     * if moduleName is ModuleBinding.UNNAMED, then only packages in the unnamed module are relevant,
+     * otherwise consider only packages in the module identified by moduleName.
+     */
     @Override
     public char[][] getModulesDeclaringPackage(char[][] packageName, char[] moduleName) {
         String packageJvm = flatPackageJvm(packageName);
 
-        List<ModuleEntry> classpathModules = this.getClasspathModules();
+        List<ModuleEntry> classpathModules = this.classpathModules();
 
         LinkedHashSet<String> modules = new LinkedHashSet<>();
         LinkedHashSet<char[]> moduleNames = new LinkedHashSet<>();
@@ -148,10 +147,12 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
                             moduleNames.add(ModuleBinding.UNNAMED);
                             modules.add(new String(ModuleBinding.UNNAMED));
                         }
-                    }   
+                    }
                 }
             }
-            return (moduleName == ModuleBinding.UNNAMED ||  moduleNames.isEmpty()) ? null : moduleNames.toArray(new char[moduleNames.size()][]);
+            return (moduleName == ModuleBinding.UNNAMED || moduleNames.isEmpty())
+                    ? null
+                    : moduleNames.toArray(new char[moduleNames.size()][]);
         } else {
             String named = new String(moduleName);
             List<ModuleEntry> moduleEntries = this.classpath.filter(this.index.getAllModules(named), ModuleEntry::sourceUri);
@@ -175,7 +176,7 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         if (moduleName == ModuleBinding.UNNAMED) {
             Set<String> checkedPackageRoots = new HashSet<>();
             Map<String, ModuleEntry> modulesByPackageRoot = new HashMap<>();
-            for (ModuleEntry module : this.getClasspathModules()) {
+            for (ModuleEntry module : this.classpathModules()) {
                 modulesByPackageRoot.put(module.packageRootUri(), module);
             }
             List<TypeEntry> entries = this.classpath.filter(index.listPackage(packageJvm, false), TypeEntry::sourceUri);
@@ -190,19 +191,19 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
                 }
             }
             return false;
-        } else  {
+        } else {
             List<TypeEntry> entries = this.index.listPackage(packageJvm, false);
             for (ModuleEntry module : this.index.getAllModules(named)) {
                 if (this.classpath.contains(module.sourceUri())) {
-                   for (TypeEntry e : entries) {
-                       if (module.contains(e)) {
+                    for (TypeEntry e : entries) {
+                        if (module.contains(e)) {
                             return true;
                         }
                     }
                 }
             }
             return false;
-        } 
+        }
     }
 
     private static ModuleEntry owningModule(TypeEntry entry, List<ModuleEntry> modules) {
