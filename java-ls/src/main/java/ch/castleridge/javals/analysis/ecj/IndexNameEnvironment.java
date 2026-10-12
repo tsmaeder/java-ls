@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Set;
 
 import org.eclipse.jdt.core.compiler.CharOperation;
-import org.eclipse.jdt.internal.compiler.env.IBinaryType;
 import org.eclipse.jdt.internal.compiler.env.IModule;
 import org.eclipse.jdt.internal.compiler.env.IModuleAwareNameEnvironment;
 import org.eclipse.jdt.internal.compiler.env.IUpdatableModule;
@@ -24,6 +23,11 @@ import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.ModuleEntry;
 import ch.castleridge.javals.indexing.model.ModuleOwnership;
 import ch.castleridge.javals.indexing.model.TypeEntry;
+import ch.castleridge.javals.classpath.ClasspathEntry;
+import ch.castleridge.javals.indexing.model.ResourceUris;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.HashSet;
 
 /**
  * ECJ {@link IModuleAwareNameEnvironment} backed exclusively by the
@@ -71,9 +75,6 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         List<ModuleEntry> modules = this.classpath.filter(this.index.allModules(), ModuleEntry::sourceUri);
 
         List<TypeEntry> matching = new ArrayList<>();
-        List<TypeEntry> namedOwned = null;
-        boolean preferNamed = strategy == LookupStrategy.Any
-                && hasExactNamedOwner(packageJvm, modules);
         for (TypeEntry entry : this.index.getAll(jvmName)) {
             if (!isVisible(entry)) {
                 continue;
@@ -83,20 +84,13 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
                 continue;
             }
             matching.add(entry);
-            if (preferNamed && owning != null) {
-                if (namedOwned == null) {
-                    namedOwned = new ArrayList<>();
-                }
-                namedOwned.add(entry);
-            }
         }
-        List<TypeEntry> pool = namedOwned != null && !namedOwned.isEmpty() ? namedOwned : matching;
-        if (pool.isEmpty()) {
+        if (matching.isEmpty()) {
             return null;
         }
-        TypeEntry winner = this.classpath.pick(pool, TypeEntry::sourceUri);
+        TypeEntry winner = this.classpath.pick(matching, TypeEntry::sourceUri);
         if (winner == null) {
-            winner = pool.get(0);
+            winner = matching.get(0);
         }
         ModuleEntry owning = owningModule(winner, modules);
         return owning == null
@@ -108,72 +102,123 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
                         owning.name().toCharArray());
     }
 
-    private boolean hasExactNamedOwner(String packageJvm, List<ModuleEntry> modules) {
-        for (ModuleEntry module : modules) {
-            if (hasExactNamedTypeInPackage(module, packageJvm)
-                    || ModuleOwnership.ownsPackage(module, packageJvm)) {
-                return true;
+    @Override
+    public boolean isPackage(char[][] parentPackageName, char[] packageName) {
+        StringBuilder name = new StringBuilder();
+        if (parentPackageName != null) {
+            for (char[] component : parentPackageName) {
+                if (!name.isEmpty()) name.append('/');
+                name.append(component);
             }
+        }
+        if (!name.isEmpty()) name.append('/');
+        name.append(packageName);
+        String packageJvm = name.toString();
+        if (!index.hasPackage(packageJvm)) {
+            return false;
+        }
+        for (TypeEntry entry : index.listPackage(packageJvm, true)) {
+            if (classpath.rank(entry.sourceUri()) >= 0) return true;
         }
         return false;
     }
-
-    @Override
-    public boolean isPackage(char[][] parentPackageName, char[] packageName) {
-        return getModulesDeclaringPackage(
-                CharOperation.arrayConcat(parentPackageName, packageName),
-                ModuleBinding.ANY) != null;
+    
+    
+    List<ModuleEntry> getClasspathModules() {
+                List<ClasspathEntry> entries = this.classpath.getEntries();
+        LinkedHashSet<ModuleEntry> modules = new LinkedHashSet<>();
+        for (ClasspathEntry entry : entries) {
+            for (ModuleEntry module : this.index.modulesForSourceUri(entry.sourceUri())) {
+                modules.add(module);
+            }
+        }
+        return new ArrayList<>(modules);
     }
-
+    
+    /**
+	 * Answer the relevant modules that declare the given package.
+	 * If moduleName is ModuleBinding.ANY then all packages are relevant,
+	 * if moduleName is ModuleBinding.UNNAMED, then only packages in the unnamed module are relevant,
+	 * otherwise consider only packages in the module identified by moduleName.
+	 */
     @Override
     public char[][] getModulesDeclaringPackage(char[][] packageName, char[] moduleName) {
         String packageJvm = flatPackageJvm(packageName);
-        LookupStrategy strategy = LookupStrategy.get(moduleName);
-        String named = LookupStrategy.getStringName(moduleName);
 
-        List<char[]> names = new ArrayList<>();
-        List<ModuleEntry> candidates = classpathModules(strategy, named);
-        boolean exactNamedOwner = false;
-        for (ModuleEntry module : candidates) {
-            if (!moduleDeclaresPackage(module, packageJvm)) {
-                continue;
-            }
-            if (matchesNamedStrategy(strategy, named, module)) {
-                names.add(module.name().toCharArray());
-            }
-            if (hasExactNamedTypeInPackage(module, packageJvm)) {
-                exactNamedOwner = true;
-            }
-        }
+        List<ModuleEntry> classpathModules = this.getClasspathModules();
 
-        boolean wantUnnamed = strategy == LookupStrategy.Any || strategy == LookupStrategy.Unnamed;
-        boolean suppressUnnamed = strategy == LookupStrategy.Any && exactNamedOwner;
-        if (wantUnnamed && !suppressUnnamed && unnamedDeclaresPackage(packageJvm)) {
-            names.add(ModuleBinding.UNNAMED);
-        }
-
-        if (names.isEmpty()) {
+        LinkedHashSet<String> modules = new LinkedHashSet<>();
+        LinkedHashSet<char[]> moduleNames = new LinkedHashSet<>();
+        if (moduleName == ModuleBinding.ANY || moduleName == ModuleBinding.UNNAMED || moduleName == ModuleBinding.ANY_NAMED) {
+            List<TypeEntry> entries = this.classpath.filter(index.listPackage(packageJvm, true), TypeEntry::sourceUri);
+            for (TypeEntry entry : entries) {
+                ModuleEntry module = owningModule(entry, classpathModules);
+                if (module != null) {
+                    modules.add(module.name());
+                    moduleNames.add(module.name().toCharArray());
+                } else {
+                    if (moduleName == ModuleBinding.UNNAMED) {
+                        return new char[][] { ModuleBinding.UNNAMED };
+                    } else {
+                        if (moduleName != ModuleBinding.ANY_NAMED) {
+                            moduleNames.add(ModuleBinding.UNNAMED);
+                            modules.add(new String(ModuleBinding.UNNAMED));
+                        }
+                    }   
+                }
+            }
+            return (moduleName == ModuleBinding.UNNAMED ||  moduleNames.isEmpty()) ? null : moduleNames.toArray(new char[moduleNames.size()][]);
+        } else {
+            String named = new String(moduleName);
+            List<ModuleEntry> moduleEntries = this.classpath.filter(this.index.getAllModules(named), ModuleEntry::sourceUri);
+            for (ModuleEntry module : moduleEntries) {
+                if (this.index.packagesInPackageRoot(module.packageRootUri()).contains(packageJvm)) {
+                    return new char[][] { moduleName };
+                }
+            }
             return null;
         }
-        return names.toArray(new char[names.size()][]);
     }
 
     @Override
     public boolean hasCompilationUnit(char[][] qualifiedPackageName, char[] moduleName, boolean checkCUs) {
+        // ECJ: "compilation unit" here means .java or .class types in the
+        // exact package. Leaf packages under a module's package root are
+        // the indexed equivalent.
         String packageJvm = flatPackageJvm(qualifiedPackageName);
-        LookupStrategy strategy = LookupStrategy.get(moduleName);
         String named = LookupStrategy.getStringName(moduleName);
-        List<ModuleEntry> modules = this.classpath.filter(this.index.allModules(), ModuleEntry::sourceUri);
-        for (TypeEntry e : index.listPackage(packageJvm, false)) {
-            if (!isVisible(e)) {
-                continue;
+
+        if (moduleName == ModuleBinding.UNNAMED) {
+            Set<String> checkedPackageRoots = new HashSet<>();
+            Map<String, ModuleEntry> modulesByPackageRoot = new HashMap<>();
+            for (ModuleEntry module : this.getClasspathModules()) {
+                modulesByPackageRoot.put(module.packageRootUri(), module);
             }
-            ModuleEntry owning = owningModule(e, modules);
-            if (matchesModule(strategy, named, owning, packageJvm)) {
-                return true;
+            List<TypeEntry> entries = this.classpath.filter(index.listPackage(packageJvm, false), TypeEntry::sourceUri);
+            for (TypeEntry entry : entries) {
+                String packageRootUri = ResourceUris.packageRootUri(entry.resourceUri(), packageJvm);
+                if (!checkedPackageRoots.contains(packageRootUri)) {
+                    checkedPackageRoots.add(packageRootUri);
+                    ModuleEntry module = modulesByPackageRoot.get(packageRootUri);
+                    if (module == null) {
+                        return true;
+                    }
+                }
             }
-        }
-        return false;
+            return false;
+        } else  {
+            List<TypeEntry> entries = this.index.listPackage(packageJvm, false);
+            for (ModuleEntry module : this.index.getAllModules(named)) {
+                if (this.classpath.contains(module.sourceUri())) {
+                   for (TypeEntry e : entries) {
+                       if (module.contains(e)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        } 
     }
 
     private static ModuleEntry owningModule(TypeEntry entry, List<ModuleEntry> modules) {
@@ -284,77 +329,6 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
     @Override
     public void cleanup() {
         // No per-environment caches yet.
-    }
-
-    private List<ModuleEntry> classpathModules(LookupStrategy strategy, String named) {
-        if (strategy == LookupStrategy.Named) {
-            return this.classpath.filter(this.index.getAllModules(named), ModuleEntry::sourceUri);
-        }
-        List<ModuleEntry> visible = this.classpath.filter(this.index.allModules(), ModuleEntry::sourceUri);
-        List<ModuleEntry> winners = new ArrayList<>();
-        Set<String> seen = new LinkedHashSet<>();
-        for (ModuleEntry me : visible) {
-            if (!seen.add(me.name())) {
-                continue;
-            }
-            ModuleEntry winner = this.classpath.pick(
-                    this.index.getAllModules(me.name()), ModuleEntry::sourceUri);
-            if (winner != null) {
-                winners.add(winner);
-            }
-        }
-        return winners;
-    }
-
-    private boolean moduleDeclaresPackage(ModuleEntry module, String packageJvm) {
-        Set<String> inRoot = index.packagesInPackageRoot(module.packageRootUri());
-        if (inRoot.contains(packageJvm)) {
-            return true;
-        }
-        return ModuleOwnership.declaresPackageOrParent(module, packageJvm);
-    }
-
-    private static boolean matchesNamedStrategy(LookupStrategy strategy, String named, ModuleEntry module) {
-        return switch (strategy) {
-            case Any, AnyNamed -> true;
-            case Named -> module.name().equals(named);
-            case Unnamed -> false;
-        };
-    }
-
-    private boolean hasExactNamedTypeInPackage(ModuleEntry module, String packageJvm) {
-        for (TypeEntry e : index.listPackage(packageJvm, false)) {
-            if (!isVisible(e)) {
-                continue;
-            }
-            if (module.contains(e)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean unnamedDeclaresPackage(String packageJvm) {
-        if (unnamedHasVisibleType(packageJvm, false)) {
-            return true;
-        }
-        if (!index.hasPackage(packageJvm)) {
-            return false;
-        }
-        return unnamedHasVisibleType(packageJvm, true);
-    }
-
-    private boolean unnamedHasVisibleType(String packageJvm, boolean recurse) {
-        List<ModuleEntry> modules = this.classpath.filter(this.index.allModules(), ModuleEntry::sourceUri);
-        for (TypeEntry e : index.listPackage(packageJvm, recurse)) {
-            if (!isVisible(e)) {
-                continue;
-            }
-            if (owningModule(e, modules) == null) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private boolean isVisible(TypeEntry e) {

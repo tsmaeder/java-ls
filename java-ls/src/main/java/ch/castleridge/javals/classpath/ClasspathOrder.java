@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.Comparator;
+import java.util.Collections;
 /**
  * Ordered list of {@link ClasspathEntry} expressing classpath priority
  * for a compile session. Entries earlier in the list shadow later ones
@@ -88,6 +89,10 @@ public final class ClasspathOrder {
         return null;
     }
 
+    public List<ClasspathEntry> getEntries() {
+        return Collections.unmodifiableList(entries);
+    }
+        
     public <T> List<T> filter(List<T> candidates, Function<T, String> uriMapper) {
         return candidates.stream().filter(candidate -> contains(uriMapper.apply(candidate))).collect(Collectors.toList());
     }
