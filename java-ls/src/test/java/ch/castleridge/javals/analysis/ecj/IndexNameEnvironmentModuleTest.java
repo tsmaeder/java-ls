@@ -106,8 +106,10 @@ class IndexNameEnvironmentModuleTest {
         assertNotNull(env.findType(
                 new char[][] { "demo".toCharArray(), "Local".toCharArray() },
                 ModuleBinding.UNNAMED));
-        // Unnamed-module clients can read unqualified exports (java.lang).
-        assertNotNull(env.findType(
+        // ECJ FileSystem Unnamed only searches !hasModule() locations, so named-module
+        // types (java.base Object) are not returned here. Unnamed clients see those via
+        // nameForLookup()==ANY and ModuleBinding.canAccess, not findType(..., UNNAMED).
+        assertNull(env.findType(
                 new char[][] { "java".toCharArray(), "lang".toCharArray(), "Object".toCharArray() },
                 ModuleBinding.UNNAMED));
     }

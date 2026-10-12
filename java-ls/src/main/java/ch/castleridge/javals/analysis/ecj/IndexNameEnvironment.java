@@ -75,31 +75,15 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         List<ModuleEntry> modules = this.classpath.filter(this.index.allModules(), ModuleEntry::sourceUri);
 
         List<TypeEntry> matching = new ArrayList<>();
-        for (TypeEntry entry : this.index.getAll(jvmName)) {
-            if (!isVisible(entry)) {
-                continue;
-            }
+        for (TypeEntry entry : this.classpath.sort(this.index.getAll(jvmName), TypeEntry::sourceUri)) {
             ModuleEntry owning = owningModule(entry, modules);
-            if (!matchesModule(strategy, named, owning, packageJvm)) {
-                continue;
+            if (matchesModule(strategy, named, owning)) {
+                return owning == null ? 
+                new NameEnvironmentAnswer(IndexBinaryType.of(entry, this.index, this.classpath, null), null, null):
+                new NameEnvironmentAnswer(IndexBinaryType.of(entry, this.index, this.classpath, owning), null, owning.name().toCharArray());
             }
-            matching.add(entry);
         }
-        if (matching.isEmpty()) {
-            return null;
-        }
-        TypeEntry winner = this.classpath.pick(matching, TypeEntry::sourceUri);
-        if (winner == null) {
-            winner = matching.get(0);
-        }
-        ModuleEntry owning = owningModule(winner, modules);
-        return owning == null
-                ? new NameEnvironmentAnswer(
-                        IndexBinaryType.of(winner, this.index, this.classpath, null), null, null)
-                : new NameEnvironmentAnswer(
-                        IndexBinaryType.of(winner, this.index, this.classpath, owning),
-                        null,
-                        owning.name().toCharArray());
+        return null;
     }
 
     @Override
@@ -230,27 +214,13 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         return null;
     }
 
-    private static boolean matchesModule(
-            LookupStrategy strategy, String named, ModuleEntry owning, String packageJvm) {
+    private static boolean matchesModule(LookupStrategy strategy, String named, ModuleEntry owning) {
         return switch (strategy) {
             case Any -> true;
             case AnyNamed -> owning != null;
-            case Unnamed -> owning == null || exportsUnqualified(owning, packageJvm);
+            case Unnamed -> owning == null;
             case Named -> owning != null && owning.name().equals(named);
         };
-    }
-
-    private static boolean exportsUnqualified(ModuleEntry module, String packageJvm) {
-        if (module == null || packageJvm == null) {
-            return false;
-        }
-        for (ModuleEntry.Exports e : module.exports()) {
-            if (!e.packageJvm().equals(packageJvm)) {
-                continue;
-            }
-            return e.toModules() == null || e.toModules().length == 0;
-        }
-        return false;
     }
 
     @Override
@@ -329,13 +299,6 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
     @Override
     public void cleanup() {
         // No per-environment caches yet.
-    }
-
-    private boolean isVisible(TypeEntry e) {
-        if (classpath == ClasspathOrder.UNRESTRICTED) {
-            return true;
-        }
-        return e.sourceUri() != null && classpath.contains(e.sourceUri());
     }
 
     private static String flatPackageJvm(char[][] packageName) {
