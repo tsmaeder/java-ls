@@ -6,13 +6,13 @@
  */
 package ch.castleridge.javals.analysis.ecj;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -117,78 +117,27 @@ class IndexNameEnvironmentModuleTest {
     }
 
     @Test
-    void compilerReusesLookupCachePerNamespace() {
-        EcjWorkspaceCompiler compiler = new EcjWorkspaceCompiler();
-        NamespaceLookupCache first = compiler.lookupCacheFor("ns", index, classpath);
-        NamespaceLookupCache second = compiler.lookupCacheFor("ns", index, classpath);
-        assertSame(first, second);
-
-        String source = """
-                package demo;
-                class Use { Local local; }
-                """;
-        AnalysisSession session = compiler.analyze(
-                "file:///workspace/demo/Use.java", source, index, classpath);
-        assertTrue(session.isUsable());
-        NamespaceLookupCache after = compiler.lookupCacheFor("ns", index, classpath);
-        assertSame(first, after);
-    }
-
-    @Test
-    void sequentialAnalyzesDoNotShareAnswerMaps() {
-        EcjWorkspaceCompiler compiler = new EcjWorkspaceCompiler();
-        IndexNameEnvironment first = compiler.newEnvironment("ns", index, classpath);
-        first.findType(
-                new char[][] { "java".toCharArray(), "lang".toCharArray(), "Object".toCharArray() },
-                ModuleBinding.ANY);
-        assertTrue(first.answerCount() > 0);
-
-        IndexNameEnvironment second = compiler.newEnvironment("ns", index, classpath);
-        assertNotSame(first, second);
-        assertSame(first.lookup(), second.lookup());
-        assertEquals(0, second.answerCount());
-    }
-
-    @Test
     void referencesStickyEnvironmentReusesUntilNamespaceChanges() {
         EcjWorkspaceCompiler compiler = new EcjWorkspaceCompiler();
         EcjWorkspaceCompiler.StickyEnvironment first = compiler.environmentForReferences(
                 "file:///a/A.java", index, classpath, null);
-        first.environment().findType(
+        assertNotNull(first.environment().findType(
                 new char[][] { "demo".toCharArray(), "Local".toCharArray() },
-                ModuleBinding.ANY);
-        int answers = first.environment().answerCount();
-        assertTrue(answers > 0);
+                ModuleBinding.ANY));
 
         EcjWorkspaceCompiler.StickyEnvironment sameNs = compiler.environmentForReferences(
                 "file:///a/B.java", index, classpath, first);
         assertSame(first, sameNs);
-        assertEquals(answers, sameNs.environment().answerCount());
 
         // Without mbt, environmentForReferences uses unrestricted "". Pretend the
-        // worker was on another namespace so the next call must drop answers.
+        // worker was on another namespace so the next call must allocate a new env.
         EcjWorkspaceCompiler.StickyEnvironment previous =
                 new EcjWorkspaceCompiler.StickyEnvironment("other-ns", first.environment());
         EcjWorkspaceCompiler.StickyEnvironment switched = compiler.environmentForReferences(
                 "file:///b/C.java", index, classpath, previous);
         assertNotSame(previous.environment(), switched.environment());
-        assertEquals(0, previous.environment().answerCount(),
-                "prior env answers cleared on namespace switch");
-        assertSame(compiler.lookupCacheFor("", index, classpath), switched.environment().lookup());
+        assertSame(classpath, switched.environment().classpath());
         switched.release();
-    }
-
-    @Test
-    void getModuleHitsSharedLookupCacheAcrossEnvironments() {
-        EcjWorkspaceCompiler compiler = new EcjWorkspaceCompiler();
-        IndexNameEnvironment first = compiler.newEnvironment("ns", index, classpath);
-        IModule module = first.getModule("java.base".toCharArray());
-        assertNotNull(module);
-        assertEquals(1, first.lookup().moduleCacheSize());
-
-        IndexNameEnvironment second = compiler.newEnvironment("ns", index, classpath);
-        assertSame(module, second.getModule("java.base".toCharArray()));
-        assertEquals(1, second.lookup().moduleCacheSize());
     }
 
     @Test

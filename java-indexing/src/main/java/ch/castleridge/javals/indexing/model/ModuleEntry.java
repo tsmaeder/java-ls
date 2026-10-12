@@ -59,6 +59,21 @@ public record ModuleEntry(
         return ResourceUris.resolve(sourceUri, resourcePath);
     }
 
+    /** Package-root URI of this module-info resource (parent directory). */
+    public String packageRootUri() {
+        return ResourceUris.packageRootUri(resourceUri(), "");
+    }
+
+    /**
+     * True when {@code entry}'s resource lives under this module's package
+     * root (same jar/jrt module directory or source root).
+     */
+    public boolean contains(TypeEntry entry) {
+        if (entry == null) return false;
+        String root = packageRootUri();
+        return root != null && entry.resourceUri().startsWith(root);
+    }
+
     public EntryKind kind() {
         return EntryKind.MODULE;
     }

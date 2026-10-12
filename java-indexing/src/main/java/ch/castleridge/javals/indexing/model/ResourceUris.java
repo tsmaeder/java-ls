@@ -64,6 +64,39 @@ public final class ResourceUris {
     }
 
     /**
+     * Package-root URI for a type or module-info resource: the directory
+     * that would be the default-package folder if {@code resourceUri} were
+     * a file tree.
+     *
+     * <p>Strips the filename, then strips a trailing {@code packageJvm + "/"}
+     * when {@code packageJvm} is non-empty. For {@code module-info} (default
+     * package), pass an empty {@code packageJvm}.
+     *
+     * <p>Examples:
+     * <ul>
+     *   <li>{@code jar:file:///lib.jar!/com/example/Foo.class} + {@code com/example}
+     *       → {@code jar:file:///lib.jar!/}</li>
+     *   <li>{@code jrt:///jdk!/modules/java.base/java/lang/Object.class} + {@code java/lang}
+     *       → {@code jrt:///jdk!/modules/java.base/}</li>
+     *   <li>{@code …/module-info.class} + {@code ""} → parent directory URI</li>
+     * </ul>
+     */
+    public static String packageRootUri(String resourceUri, String packageJvm) {
+        if (resourceUri == null || resourceUri.isEmpty()) return resourceUri;
+        int lastSlash = resourceUri.lastIndexOf('/');
+        if (lastSlash < 0) return resourceUri;
+        // Directory of the file, including trailing '/'.
+        String withoutFile = resourceUri.substring(0, lastSlash + 1);
+        String pkg = packageJvm == null ? "" : packageJvm;
+        if (pkg.isEmpty()) return withoutFile;
+        String suffix = pkg + "/";
+        if (withoutFile.endsWith(suffix)) {
+            return withoutFile.substring(0, withoutFile.length() - suffix.length());
+        }
+        return withoutFile;
+    }
+
+    /**
      * Classpath container claimed by {@code resourceUri}: the jar/jrt
      * prefix before {@code !/} (with a leading {@code jar:} stripped), or
      * the URI itself for directory resources. Used with

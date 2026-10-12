@@ -21,6 +21,48 @@ import org.junit.jupiter.api.Test;
 class ResourceUrisTest {
 
     @Test
+    void packageRootUriStripsJarPackageAndFile() {
+        String resource = "jar:file:///C:/lib/dep.jar!/com/example/Foo.class";
+        assertEquals(
+                "jar:file:///C:/lib/dep.jar!/",
+                ResourceUris.packageRootUri(resource, "com/example"));
+    }
+
+    @Test
+    void packageRootUriStripsJrtModulePackageAndFile() {
+        String resource = "jrt:///C:/jdk!/modules/java.base/java/lang/Object.class";
+        assertEquals(
+                "jrt:///C:/jdk!/modules/java.base/",
+                ResourceUris.packageRootUri(resource, "java/lang"));
+    }
+
+    @Test
+    void packageRootUriDirectorySourceRoot() {
+        String resource = "file:///C:/proj/src/com/foo/Bar.java";
+        assertEquals(
+                "file:///C:/proj/src/",
+                ResourceUris.packageRootUri(resource, "com/foo"));
+    }
+
+    @Test
+    void packageRootUriDefaultPackageAndModuleInfo() {
+        String type = "jar:file:///mod.jar!/Top.class";
+        assertEquals("jar:file:///mod.jar!/", ResourceUris.packageRootUri(type, ""));
+        String moduleInfo = "jar:file:///mod.jar!/module-info.class";
+        assertEquals("jar:file:///mod.jar!/", ResourceUris.packageRootUri(moduleInfo, ""));
+        String jrtModuleInfo = "jrt:///C:/jdk!/modules/java.base/module-info.class";
+        assertEquals(
+                "jrt:///C:/jdk!/modules/java.base/",
+                ResourceUris.packageRootUri(jrtModuleInfo, ""));
+    }
+
+    @Test
+    void packageRootUriNullAndEmpty() {
+        assertNull(ResourceUris.packageRootUri(null, "com"));
+        assertEquals("", ResourceUris.packageRootUri("", "com"));
+    }
+
+    @Test
     void classpathContainerStripsJarBangPath() {
         String jar = "file:///C:/lib/dep.jar";
         String resource = "jar:" + jar + "!/com/example/Hello.class";

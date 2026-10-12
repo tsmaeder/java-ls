@@ -89,6 +89,13 @@ public final class InMemoryIndex implements Index {
     // duplicates across classpath sources are resolved by classpath
     // ordering at lookup time (mirroring the TypeEntry bucket strategy).
     private final Map<String, List<ModuleEntry>> byModuleName = new HashMap<>();
+    /**
+     * Package-root URI → known package JVM names (leaf + ancestors) scoped
+     * to that root. Additive on remove, matching {@link #knownPackages}.
+     */
+    private final Map<String, Set<String>> packagesByPackageRoot = new HashMap<>();
+    /** sourceUri → {@link ModuleEntry} buckets (many under one JRT home). */
+    private final Map<String, List<ModuleEntry>> modulesBySourceUri = new HashMap<>();
     /** Compact bloom slots addressed by StringTable ids for {@code (sourceUri, resourcePath)}. */
     private final List<BloomSlot> blooms = new ArrayList<>();
     /** Live (non-tombstoned) type entries; {@link #typeCount} is the ID high-water mark. */
@@ -368,6 +375,26 @@ public final class InMemoryIndex implements Index {
         }
     }
 
+    /**
+     * Caller must hold the write lock. Registers {@code packageJvm} and
+     * ancestors under {@code packageRootUri} (additive; never pruned).
+     */
+    private void registerPackagesUnderRootLocked(String packageRootUri, String packageJvm) {
+        if (packageRootUri == null) return;
+        Set<String> packages = packagesByPackageRoot.computeIfAbsent(
+                packageRootUri, k -> new HashSet<>());
+        String pkg = packageJvm;
+        while (pkg != null && !pkg.isEmpty()) {
+            packages.add(pkg);
+            int slash = pkg.lastIndexOf('/');
+            pkg = slash < 0 ? "" : pkg.substring(0, slash);
+        }
+        // Default package: record the empty name so the root is known.
+        if (packageJvm == null || packageJvm.isEmpty()) {
+            packages.add("");
+        }
+    }
+
     /** Caller must hold the write lock. Appends blob and all secondary indexes. */
     private int appendEncodedTypeLocked(String jvm, String pkg, byte[] blob) {
         int id = appendTypeBlobLocked(blob);
@@ -376,13 +403,15 @@ public final class InMemoryIndex implements Index {
         String[] identity = TypeEntryCodec.peekIdentity(blob);
         appendId(byResource, resourceKey(identity[0], identity[1]), id);
         registerPackageAncestorsLocked(pkg);
+        String resourceUri = ResourceUris.resolve(identity[0], identity[1]);
+        registerPackagesUnderRootLocked(ResourceUris.packageRootUri(resourceUri, pkg), pkg);
         liveTypeCount++;
         return id;
     }
 
     /**
-     * Caller must hold the write lock. Tombstones every type and bloom for
-     * the resource. Returns {@code true} if anything was removed.
+     * Caller must hold the write lock. Tombstones every type, bloom, and
+     * module for the resource. Returns {@code true} if anything was removed.
      */
     private boolean removeResourceLocked(String sourceUri, String compactedPath) {
         boolean changed = false;
@@ -403,6 +432,9 @@ public final class InMemoryIndex implements Index {
                 decodedCache.invalidate(id);
             }
         }
+        if (removeModulesForResourceLocked(sourceUri, compactedPath)) {
+            changed = true;
+        }
         int sourceUriId = StringTable.intern(sourceUri);
         int pathId = StringTable.intern(compactedPath);
         for (int i = blooms.size() - 1; i >= 0; i--) {
@@ -413,6 +445,39 @@ public final class InMemoryIndex implements Index {
             }
         }
         return changed;
+    }
+
+    /**
+     * Caller must hold the write lock. Drops modules whose compacted
+     * {@code (sourceUri, resourcePath)} match. Returns {@code true} if any
+     * were removed.
+     */
+    private boolean removeModulesForResourceLocked(String sourceUri, String compactedPath) {
+        boolean changed = false;
+        var moduleBuckets = byModuleName.entrySet().iterator();
+        while (moduleBuckets.hasNext()) {
+            Map.Entry<String, List<ModuleEntry>> entry = moduleBuckets.next();
+            List<ModuleEntry> bucket = entry.getValue();
+            for (int i = bucket.size() - 1; i >= 0; i--) {
+                ModuleEntry module = bucket.get(i);
+                if (!Objects.equals(sourceUri, module.sourceUri())) continue;
+                if (!Objects.equals(compactedPath, module.resourcePath())) continue;
+                bucket.remove(i);
+                removeModuleFromSourceUriLocked(module);
+                changed = true;
+            }
+            if (bucket.isEmpty()) moduleBuckets.remove();
+        }
+        return changed;
+    }
+
+    /** Caller must hold the write lock. */
+    private void removeModuleFromSourceUriLocked(ModuleEntry module) {
+        String sourceUri = module.sourceUri();
+        List<ModuleEntry> bucket = modulesBySourceUri.get(sourceUri);
+        if (bucket == null) return;
+        bucket.remove(module);
+        if (bucket.isEmpty()) modulesBySourceUri.remove(sourceUri);
     }
 
     private static String resourceKey(String sourceUri, String compactedPath) {
@@ -640,6 +705,7 @@ public final class InMemoryIndex implements Index {
         if (module == null) return false;
         String name = module.name();
         appendBucket(byModuleName, name, module);
+        appendBucket(modulesBySourceUri, module.sourceUri(), module);
         return true;
     }
 
@@ -649,28 +715,33 @@ public final class InMemoryIndex implements Index {
     }
 
     @Override
-    public ModuleEntry getModule(String moduleName) {
-        return read(() -> {
-            List<ModuleEntry> bucket = byModuleName.get(moduleName);
-            if (bucket == null || bucket.isEmpty()) return null;
-            return bucket.get(0);
-        });
-    }
-
-    @Override
-    public Collection<ModuleEntry> allModules() {
+    public List<ModuleEntry> allModules() {
         return read(() -> {
             List<ModuleEntry> out = new ArrayList<>();
             for (List<ModuleEntry> bucket : byModuleName.values()) {
                 addAllTo(bucket, out);
             }
-            return Collections.unmodifiableCollection(out);
+            return Collections.unmodifiableList(out);
         });
     }
 
     @Override
     public int moduleCount() {
         return read(byModuleName::size);
+    }
+
+    @Override
+    public Set<String> packagesInPackageRoot(String packageRootUri) {
+        return read(() -> {
+            Set<String> packages = packagesByPackageRoot.get(packageRootUri);
+            if (packages == null || packages.isEmpty()) return Set.of();
+            return Set.copyOf(packages);
+        });
+    }
+
+    @Override
+    public List<ModuleEntry> modulesForSourceUri(String sourceUri) {
+        return read(() -> toImmutableList(modulesBySourceUri.get(sourceUri)));
     }
 
     /** Snapshot of live canonical blobs and known packages. */

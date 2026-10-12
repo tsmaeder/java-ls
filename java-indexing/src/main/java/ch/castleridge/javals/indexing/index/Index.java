@@ -12,6 +12,7 @@ package ch.castleridge.javals.indexing.index;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 import java.util.function.BiPredicate;
 
 import ch.castleridge.javals.indexing.bloom.BloomEntry;
@@ -147,14 +148,31 @@ public interface Index {
      */
     List<ModuleEntry> getAllModules(String moduleName);
 
-    /** Convenience: pick an arbitrary {@link ModuleEntry} for the name, or null. */
-    ModuleEntry getModule(String moduleName);
+    /** First {@link ModuleEntry} for the name, or {@code null} if none. */
+    default ModuleEntry getModule(String moduleName) {
+        List<ModuleEntry> all = getAllModules(moduleName);
+        return all.isEmpty() ? null : all.get(0);
+    }
 
     /** Every {@link ModuleEntry} currently stored, including duplicates. */
-    Collection<ModuleEntry> allModules();
+    List<ModuleEntry> allModules();
 
     /** Distinct number of module names indexed (ignoring duplicates). */
     int moduleCount();
+
+    /**
+     * Package JVM names known under {@code packageRootUri} (leaf packages
+     * that own types plus slash-separated ancestors). Empty when the root
+     * is unknown. See {@link ch.castleridge.javals.indexing.model.ResourceUris#packageRootUri}.
+     */
+    Set<String> packagesInPackageRoot(String packageRootUri);
+
+    /**
+     * Every {@link ModuleEntry} stamped with {@code sourceUri}. Order is
+     * observation-order; empty when none. A single JRT home may contribute
+     * many modules under one source URI.
+     */
+    List<ModuleEntry> modulesForSourceUri(String sourceUri);
 
     /**
      * Returns true for simple names that should never be indexed:

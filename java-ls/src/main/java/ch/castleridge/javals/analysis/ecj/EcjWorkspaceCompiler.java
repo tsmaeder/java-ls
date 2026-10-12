@@ -18,9 +18,9 @@ import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
 
 /**
- * ECJ-backed workspace compiler. Module/package lookup caches are reused per
- * mbt namespace; type-answer {@link IndexNameEnvironment}s are per-compilation
- * (or reused across reference candidates until the namespace changes).
+ * ECJ-backed workspace compiler. Type-answer {@link IndexNameEnvironment}s are
+ * per-compilation (or reused across reference candidates until the namespace
+ * changes).
  */
 public final class EcjWorkspaceCompiler implements WorkspaceCompiler {
 
@@ -29,7 +29,8 @@ public final class EcjWorkspaceCompiler implements WorkspaceCompiler {
     private final AstDeclarationLocator locator;
     private volatile Map<String, String> sourceJarByBinaryJar;
     private volatile MbtService mbtService;
-    private final ConcurrentHashMap<String, NamespaceLookupCache> lookupCaches = new ConcurrentHashMap<>();
+    /** Remember last index/classpath per namespace for sticky-env reuse. */
+    private final ConcurrentHashMap<String, ResolvedNamespace> namespaces = new ConcurrentHashMap<>();
 
     public EcjWorkspaceCompiler() {
         this(new AstDeclarationLocator(EcjDietSources::lower), Map.of(), null);
@@ -64,21 +65,15 @@ public final class EcjWorkspaceCompiler implements WorkspaceCompiler {
     }
 
     /**
-     * Drop cached module/package lookups (e.g. after mbt reload). Also cleared
-     * when the index mutates via {@link #invalidateLookupCaches()}.
+     * Drop cached namespace bindings (e.g. after mbt reload).
      */
     public void clearEnvironments() {
-        for (NamespaceLookupCache cache : lookupCaches.values()) {
-            cache.clear();
-        }
-        lookupCaches.clear();
+        namespaces.clear();
     }
 
-    /** Clear per-namespace module/package caches after an index mutation. */
+    /** Clear per-namespace bindings after an index mutation. */
     public void invalidateLookupCaches() {
-        for (NamespaceLookupCache cache : lookupCaches.values()) {
-            cache.clear();
-        }
+        namespaces.clear();
     }
 
     /**
@@ -96,8 +91,7 @@ public final class EcjWorkspaceCompiler implements WorkspaceCompiler {
     /**
      * Resolve or replace a sticky environment for {@code uri}. When
      * {@code previous} is for a different namespace (or different index/
-     * classpath), its answers are cleared and a new environment is created
-     * sharing that namespace's {@link NamespaceLookupCache}.
+     * classpath), its answers are cleared and a new environment is created.
      */
     public StickyEnvironment environmentForReferences(String uri,
                                                       Index index,
@@ -106,40 +100,28 @@ public final class EcjWorkspaceCompiler implements WorkspaceCompiler {
         ResolvedNamespace resolved = resolveNamespace(uri, index, classpath);
         if (previous != null
                 && previous.namespaceId().equals(resolved.namespaceId())
-                && previous.environment().index() == resolved.lookup().index()
-                && previous.environment().classpath() == resolved.lookup().classpath()) {
+                && previous.environment().index() == resolved.index()
+                && previous.environment().classpath() == resolved.classpath()) {
             return previous;
         }
         if (previous != null) {
             previous.release();
         }
-        return new StickyEnvironment(resolved.namespaceId(), new IndexNameEnvironment(resolved.lookup()));
+        return new StickyEnvironment(
+                resolved.namespaceId(),
+                new IndexNameEnvironment(resolved.index(), resolved.classpath()));
     }
 
-    /** Package-visible for tests: lookup cache reused for a namespace id. */
-    NamespaceLookupCache lookupCacheFor(String namespaceId, Index index, ClasspathOrder classpath) {
-        String key = namespaceId == null ? UNRESTRICTED_KEY : namespaceId;
-        ClasspathOrder order = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
-        return lookupCaches.compute(key, (k, existing) -> {
-            if (existing != null && existing.index() == index && existing.classpath() == order) {
-                return existing;
-            }
-            if (existing != null) {
-                existing.clear();
-            }
-            return new NamespaceLookupCache(index, order);
-        });
-    }
-
-    /** Package-visible for tests: fresh env wired to the shared lookup cache. */
+    /** Package-visible for tests: fresh env for a namespace id. */
     IndexNameEnvironment newEnvironment(String namespaceId, Index index, ClasspathOrder classpath) {
-        return new IndexNameEnvironment(lookupCacheFor(namespaceId, index, classpath));
+        ResolvedNamespace resolved = namespaceFor(namespaceId, index, classpath);
+        return new IndexNameEnvironment(resolved.index(), resolved.classpath());
     }
 
     @Override
     public AnalysisSession analyze(String uri, CharSequence text, Index index, ClasspathOrder classpath) {
         ResolvedNamespace resolved = resolveNamespace(uri, index, classpath);
-        IndexNameEnvironment environment = new IndexNameEnvironment(resolved.lookup());
+        IndexNameEnvironment environment = new IndexNameEnvironment(resolved.index(), resolved.classpath());
         return EcjAnalysisEngine.analyze(
                 uri, text, index, classpath, locator, sourceJarByBinaryJar, environment, true);
     }
@@ -163,12 +145,23 @@ public final class EcjWorkspaceCompiler implements WorkspaceCompiler {
             Optional<MbtService.Target> target = mbt.targetFor(uri);
             if (target.isPresent()) {
                 MbtService.Target t = target.get();
-                return new ResolvedNamespace(t.id(), lookupCacheFor(t.id(), index, t.classpath()));
+                return namespaceFor(t.id(), index, t.classpath());
             }
         }
         ClasspathOrder order = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
-        return new ResolvedNamespace(UNRESTRICTED_KEY, lookupCacheFor(UNRESTRICTED_KEY, index, order));
+        return namespaceFor(UNRESTRICTED_KEY, index, order);
     }
 
-    private record ResolvedNamespace(String namespaceId, NamespaceLookupCache lookup) {}
+    private ResolvedNamespace namespaceFor(String namespaceId, Index index, ClasspathOrder classpath) {
+        String key = namespaceId == null ? UNRESTRICTED_KEY : namespaceId;
+        ClasspathOrder order = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
+        return namespaces.compute(key, (k, existing) -> {
+            if (existing != null && existing.index() == index && existing.classpath() == order) {
+                return existing;
+            }
+            return new ResolvedNamespace(key, index, order);
+        });
+    }
+
+    private record ResolvedNamespace(String namespaceId, Index index, ClasspathOrder classpath) {}
 }

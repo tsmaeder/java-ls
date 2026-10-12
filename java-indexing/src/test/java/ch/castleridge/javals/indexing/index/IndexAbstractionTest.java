@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
 
@@ -97,7 +98,7 @@ class IndexAbstractionTest {
         assertEquals(1, notifications.get());
         assertEquals("com/example/Bar",
                 ch.castleridge.javals.indexing.IndexTestUtils.get(target, "com/example/Bar").jvmOwnerName());
-        assertEquals("com.example.mod", target.getModule("com.example.mod").name());
+        assertEquals("com.example.mod", target.getAllModules("com.example.mod").get(0).name());
         IdentifierBloomFilter merged = null;
         for (BloomEntry entry : target.bloomFilters()) {
             if ("file:///com/example/Bar.java".equals(entry.resourceUri())) {
@@ -282,6 +283,97 @@ class IndexAbstractionTest {
         assertTrue(index.isEmpty());
     }
 
+    @Test
+    void packagesInPackageRootAreScopedWhenSourceUriIsShared() {
+        InMemoryIndex index = new InMemoryIndex();
+        String jrtHome = "jrt:///C:/jdk";
+        index.add(classFileAt(
+                jrtHome,
+                "modules/java.base/java/lang/Object.class",
+                "java/lang/Object"));
+        index.add(classFileAt(
+                jrtHome,
+                "modules/java.sql/java/sql/Connection.class",
+                "java/sql/Connection"));
+
+        String baseRoot = "jrt:///C:/jdk!/modules/java.base/";
+        String sqlRoot = "jrt:///C:/jdk!/modules/java.sql/";
+
+        assertTrue(index.packagesInPackageRoot(baseRoot).contains("java"));
+        assertTrue(index.packagesInPackageRoot(baseRoot).contains("java/lang"));
+        assertFalse(index.packagesInPackageRoot(baseRoot).contains("java/sql"));
+
+        assertTrue(index.packagesInPackageRoot(sqlRoot).contains("java/sql"));
+        assertFalse(index.packagesInPackageRoot(sqlRoot).contains("java/lang"));
+    }
+
+    @Test
+    void modulesForSourceUriTracksSharedJrtHomeAndPutResourceDeletes() {
+        InMemoryIndex index = new InMemoryIndex();
+        String jrtHome = "jrt:///C:/jdk";
+        ModuleEntry javaBase = new ModuleEntry(
+                "modules/java.base/module-info.class",
+                jrtHome,
+                "java.base",
+                null,
+                0,
+                EmptyArrays.REQUIRES,
+                EmptyArrays.EXPORTS,
+                EmptyArrays.OPENS,
+                EmptyArrays.STRING,
+                EmptyArrays.PROVIDES,
+                EmptyArrays.STRING,
+                null);
+        ModuleEntry javaSql = new ModuleEntry(
+                "modules/java.sql/module-info.class",
+                jrtHome,
+                "java.sql",
+                null,
+                0,
+                EmptyArrays.REQUIRES,
+                EmptyArrays.EXPORTS,
+                EmptyArrays.OPENS,
+                EmptyArrays.STRING,
+                EmptyArrays.PROVIDES,
+                EmptyArrays.STRING,
+                null);
+        index.addModule(javaBase);
+        index.addModule(javaSql);
+
+        assertEquals(List.of(javaBase, javaSql), index.modulesForSourceUri(jrtHome));
+        assertTrue(javaBase.contains(classFileAt(
+                jrtHome,
+                "modules/java.base/java/lang/Object.class",
+                "java/lang/Object")));
+        assertFalse(javaBase.contains(classFileAt(
+                jrtHome,
+                "modules/java.sql/java/sql/Connection.class",
+                "java/sql/Connection")));
+
+        index.putResource(jrtHome, "modules/java.base/module-info.class", new InMemoryIndex());
+
+        assertEquals(List.of(javaSql), index.modulesForSourceUri(jrtHome));
+        assertTrue(index.getAllModules("java.base").isEmpty());
+        assertEquals(1, index.moduleCount());
+    }
+
+    private static ClassFileTypeEntry classFileAt(String sourceUri, String resourcePath, String jvmOwnerName) {
+        return new ClassFileTypeEntry(
+                resourcePath,
+                sourceUri,
+                jvmOwnerName,
+                0,
+                null,
+                EmptyArrays.TYPE,
+                EmptyArrays.TYPE_PARAM,
+                EmptyArrays.FIELD,
+                EmptyArrays.METHOD,
+                EmptyArrays.STRING,
+                EmptyArrays.TYPE_REF,
+                EmptyArrays.RECORD_COMPONENT,
+                EmptyArrays.ANNOTATION_REF);
+    }
+
     private static InMemoryIndex indexWithExplicitPath(String sourceUri, String resourcePath, String jvm) {
         InMemoryIndex index = new InMemoryIndex();
         index.add(sourceTypeAt(sourceUri, resourcePath, jvm));
@@ -449,18 +541,23 @@ class IndexAbstractionTest {
         }
 
         @Override
-        public ModuleEntry getModule(String moduleName) {
-            return getAllModules(moduleName).stream().findFirst().orElse(null);
-        }
-
-        @Override
-        public Collection<ModuleEntry> allModules() {
+        public List<ModuleEntry> allModules() {
             return List.copyOf(modules);
         }
 
         @Override
         public int moduleCount() {
             return (int) modules.stream().map(ModuleEntry::name).distinct().count();
+        }
+
+        @Override
+        public Set<String> packagesInPackageRoot(String packageRootUri) {
+            return Set.of();
+        }
+
+        @Override
+        public List<ModuleEntry> modulesForSourceUri(String sourceUri) {
+            return List.of();
         }
     }
 }

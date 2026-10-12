@@ -190,18 +190,23 @@ class EcjAnalysisEngineAbortTest {
         }
 
         @Override
-        public ModuleEntry getModule(String moduleName) {
-            return delegate.getModule(moduleName);
-        }
-
-        @Override
-        public Collection<ModuleEntry> allModules() {
+        public List<ModuleEntry> allModules() {
             return delegate.allModules();
         }
 
         @Override
         public int moduleCount() {
             return delegate.moduleCount();
+        }
+
+        @Override
+        public java.util.Set<String> packagesInPackageRoot(String packageRootUri) {
+            return delegate.packagesInPackageRoot(packageRootUri);
+        }
+
+        @Override
+        public List<ModuleEntry> modulesForSourceUri(String sourceUri) {
+            return delegate.modulesForSourceUri(sourceUri);
         }
     }
 }
