@@ -305,6 +305,16 @@ class IndexAbstractionTest {
 
         assertTrue(index.packagesInPackageRoot(sqlRoot).contains("java/sql"));
         assertFalse(index.packagesInPackageRoot(sqlRoot).contains("java/lang"));
+
+        assertTrue(index.packageRootDeclares(baseRoot, "java"));
+        assertTrue(index.packageRootDeclares(baseRoot, "java/lang"));
+        assertFalse(index.packageRootDeclares(baseRoot, "java/sql"));
+        assertTrue(index.packageRootDeclares(sqlRoot, "java/sql"));
+
+        assertEquals(Set.of(baseRoot), index.packageRootsDeclaring("java/lang"));
+        assertEquals(Set.of(sqlRoot), index.packageRootsDeclaring("java/sql"));
+        assertEquals(Set.of(baseRoot, sqlRoot), index.packageRootsDeclaring("java"));
+        assertTrue(index.packageRootsDeclaring("java/missing").isEmpty());
     }
 
     @Test
@@ -550,6 +560,16 @@ class IndexAbstractionTest {
 
         @Override
         public Set<String> packagesInPackageRoot(String packageRootUri) {
+            return Set.of();
+        }
+
+        @Override
+        public boolean packageRootDeclares(String packageRootUri, String packageJvm) {
+            return false;
+        }
+
+        @Override
+        public Set<String> packageRootsDeclaring(String packageJvm) {
             return Set.of();
         }
 

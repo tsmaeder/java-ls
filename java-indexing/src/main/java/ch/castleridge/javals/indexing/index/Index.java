@@ -168,6 +168,21 @@ public interface Index {
     Set<String> packagesInPackageRoot(String packageRootUri);
 
     /**
+     * True when {@code packageJvm} is known under {@code packageRootUri}
+     * (leaf or ancestor). Equivalent to
+     * {@code packagesInPackageRoot(packageRootUri).contains(packageJvm)}
+     * without copying the root's package set.
+     */
+    boolean packageRootDeclares(String packageRootUri, String packageJvm);
+
+    /**
+     * Package-root URIs that know {@code packageJvm} (leaf or ancestor).
+     * Empty when the package is unknown. Inverse of
+     * {@link #packagesInPackageRoot}; additive on remove like that map.
+     */
+    Set<String> packageRootsDeclaring(String packageJvm);
+
+    /**
      * Every {@link ModuleEntry} stamped with {@code sourceUri}. Order is
      * observation-order; empty when none. A single JRT home may contribute
      * many modules under one source URI.

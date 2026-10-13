@@ -94,6 +94,11 @@ public final class InMemoryIndex implements Index {
      * to that root. Additive on remove, matching {@link #knownPackages}.
      */
     private final Map<String, Set<String>> packagesByPackageRoot = new HashMap<>();
+    /**
+     * Package JVM name → package-root URIs that declare it (leaf or ancestor).
+     * Inverse of {@link #packagesByPackageRoot}; additive on remove.
+     */
+    private final Map<String, Set<String>> packageRootsByPackage = new HashMap<>();
     /** sourceUri → {@link ModuleEntry} buckets (many under one JRT home). */
     private final Map<String, List<ModuleEntry>> modulesBySourceUri = new HashMap<>();
     /** Compact bloom slots addressed by StringTable ids for {@code (sourceUri, resourcePath)}. */
@@ -383,12 +388,14 @@ public final class InMemoryIndex implements Index {
         String pkg = packageJvm;
         while (pkg != null && !pkg.isEmpty()) {
             packages.add(pkg);
+            packageRootsByPackage.computeIfAbsent(pkg, k -> new HashSet<>()).add(packageRootUri);
             int slash = pkg.lastIndexOf('/');
             pkg = slash < 0 ? "" : pkg.substring(0, slash);
         }
         // Default package: record the empty name so the root is known.
         if (packageJvm == null || packageJvm.isEmpty()) {
             packages.add("");
+            packageRootsByPackage.computeIfAbsent("", k -> new HashSet<>()).add(packageRootUri);
         }
     }
 
@@ -733,6 +740,25 @@ public final class InMemoryIndex implements Index {
             Set<String> packages = packagesByPackageRoot.get(packageRootUri);
             if (packages == null || packages.isEmpty()) return Set.of();
             return Set.copyOf(packages);
+        });
+    }
+
+    @Override
+    public boolean packageRootDeclares(String packageRootUri, String packageJvm) {
+        String pkg = packageJvm == null ? "" : packageJvm;
+        return read(() -> {
+            Set<String> packages = packagesByPackageRoot.get(packageRootUri);
+            return packages != null && packages.contains(pkg);
+        });
+    }
+
+    @Override
+    public Set<String> packageRootsDeclaring(String packageJvm) {
+        String pkg = packageJvm == null ? "" : packageJvm;
+        return read(() -> {
+            Set<String> roots = packageRootsByPackage.get(pkg);
+            if (roots == null || roots.isEmpty()) return Set.of();
+            return Set.copyOf(roots);
         });
     }
 

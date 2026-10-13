@@ -6,7 +6,6 @@
  */
 package ch.castleridge.javals.analysis.ecj;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -39,9 +38,15 @@ import ch.castleridge.javals.indexing.model.TypeEntry;
  */
 final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
     private static final char[][] NO_PACKAGES = new char[0][];
+    private static final String UNNAMED_MODULE_NAME = new String(ModuleBinding.UNNAMED);
 
     private final Index index;
     private final ClasspathOrder classpath;
+
+    /** Lazily filled; cleared in {@link #cleanup()}. */
+    private List<ModuleEntry> cachedClasspathModules;
+    /** Lazily filled from {@link #classpathModules()}; cleared in {@link #cleanup()}. */
+    private Map<String, ModuleEntry> cachedModulesByPackageRoot;
 
     IndexNameEnvironment(Index index, ClasspathOrder classpath) {
         this.index = index;
@@ -101,8 +106,10 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         if (!index.hasPackage(packageJvm)) {
             return false;
         }
-        for (TypeEntry entry : index.listPackage(packageJvm, true)) {
-            if (classpath.rank(entry.sourceUri()) >= 0) return true;
+        for (String root : index.packageRootsDeclaring(packageJvm)) {
+            if (classpath.contains(root)) {
+                return true;
+            }
         }
         return false;
     }
@@ -115,7 +122,24 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
      * {@link #findType}.
      */
     List<ModuleEntry> classpathModules() {
-        return this.classpath.filter(this.index.allModules(), ModuleEntry::sourceUri);
+        List<ModuleEntry> cached = this.cachedClasspathModules;
+        if (cached == null) {
+            cached = this.classpath.filter(this.index.allModules(), ModuleEntry::sourceUri);
+            this.cachedClasspathModules = cached;
+        }
+        return cached;
+    }
+
+    private Map<String, ModuleEntry> modulesByPackageRoot() {
+        Map<String, ModuleEntry> cached = this.cachedModulesByPackageRoot;
+        if (cached == null) {
+            cached = new HashMap<>();
+            for (ModuleEntry module : classpathModules()) {
+                cached.put(module.packageRootUri(), module);
+            }
+            this.cachedModulesByPackageRoot = cached;
+        }
+        return cached;
     }
 
     /**
@@ -128,41 +152,40 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
     public char[][] getModulesDeclaringPackage(char[][] packageName, char[] moduleName) {
         String packageJvm = flatPackageJvm(packageName);
 
-        List<ModuleEntry> classpathModules = this.classpathModules();
-
-        LinkedHashSet<String> modules = new LinkedHashSet<>();
-        LinkedHashSet<char[]> moduleNames = new LinkedHashSet<>();
-        if (moduleName == ModuleBinding.ANY || moduleName == ModuleBinding.UNNAMED || moduleName == ModuleBinding.ANY_NAMED) {
-            List<TypeEntry> entries = this.classpath.filter(index.listPackage(packageJvm, true), TypeEntry::sourceUri);
-            for (TypeEntry entry : entries) {
-                ModuleEntry module = owningModule(entry, classpathModules);
+        if (moduleName == ModuleBinding.ANY
+                || moduleName == ModuleBinding.UNNAMED
+                || moduleName == ModuleBinding.ANY_NAMED) {
+            Map<String, ModuleEntry> modulesByRoot = modulesByPackageRoot();
+            LinkedHashSet<String> moduleNames = new LinkedHashSet<>();
+            for (String root : index.packageRootsDeclaring(packageJvm)) {
+                if (!classpath.contains(root)) {
+                    continue;
+                }
+                ModuleEntry module = modulesByRoot.get(root);
                 if (module != null) {
-                    modules.add(module.name());
-                    moduleNames.add(module.name().toCharArray());
-                } else {
-                    if (moduleName == ModuleBinding.UNNAMED) {
-                        return new char[][] { ModuleBinding.UNNAMED };
-                    } else {
-                        if (moduleName != ModuleBinding.ANY_NAMED) {
-                            moduleNames.add(ModuleBinding.UNNAMED);
-                            modules.add(new String(ModuleBinding.UNNAMED));
-                        }
+                    if (moduleName != ModuleBinding.UNNAMED) {
+                        moduleNames.add(module.name());
                     }
+                } else if (moduleName == ModuleBinding.UNNAMED) {
+                    return new char[][] { ModuleBinding.UNNAMED };
+                } else if (moduleName != ModuleBinding.ANY_NAMED) {
+                    moduleNames.add(UNNAMED_MODULE_NAME);
                 }
             }
             return (moduleName == ModuleBinding.UNNAMED || moduleNames.isEmpty())
                     ? null
-                    : moduleNames.toArray(new char[moduleNames.size()][]);
-        } else {
-            String named = new String(moduleName);
-            List<ModuleEntry> moduleEntries = this.classpath.filter(this.index.getAllModules(named), ModuleEntry::sourceUri);
-            for (ModuleEntry module : moduleEntries) {
-                if (this.index.packagesInPackageRoot(module.packageRootUri()).contains(packageJvm)) {
-                    return new char[][] { moduleName };
-                }
-            }
-            return null;
+                    : toCharArrays(moduleNames);
         }
+
+        String named = new String(moduleName);
+        List<ModuleEntry> moduleEntries =
+                this.classpath.filter(this.index.getAllModules(named), ModuleEntry::sourceUri);
+        for (ModuleEntry module : moduleEntries) {
+            if (this.index.packageRootDeclares(module.packageRootUri(), packageJvm)) {
+                return new char[][] { moduleName };
+            }
+        }
+        return null;
     }
 
     @Override
@@ -174,11 +197,8 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
         String named = LookupStrategy.getStringName(moduleName);
 
         if (moduleName == ModuleBinding.UNNAMED) {
+            Map<String, ModuleEntry> modulesByPackageRoot = modulesByPackageRoot();
             Set<String> checkedPackageRoots = new HashSet<>();
-            Map<String, ModuleEntry> modulesByPackageRoot = new HashMap<>();
-            for (ModuleEntry module : this.classpathModules()) {
-                modulesByPackageRoot.put(module.packageRootUri(), module);
-            }
             List<TypeEntry> entries = this.classpath.filter(index.listPackage(packageJvm, false), TypeEntry::sourceUri);
             for (TypeEntry entry : entries) {
                 String packageRootUri = ResourceUris.packageRootUri(entry.resourceUri(), packageJvm);
@@ -299,7 +319,19 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
 
     @Override
     public void cleanup() {
-        // No per-environment caches yet.
+        this.cachedClasspathModules = null;
+        this.cachedModulesByPackageRoot = null;
+    }
+
+    private static char[][] toCharArrays(Set<String> names) {
+        char[][] out = new char[names.size()][];
+        int i = 0;
+        for (String name : names) {
+            out[i++] = UNNAMED_MODULE_NAME.equals(name)
+                    ? ModuleBinding.UNNAMED
+                    : name.toCharArray();
+        }
+        return out;
     }
 
     private static String flatPackageJvm(char[][] packageName) {

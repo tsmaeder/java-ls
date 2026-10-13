@@ -205,6 +205,16 @@ class EcjAnalysisEngineAbortTest {
         }
 
         @Override
+        public boolean packageRootDeclares(String packageRootUri, String packageJvm) {
+            return delegate.packageRootDeclares(packageRootUri, packageJvm);
+        }
+
+        @Override
+        public java.util.Set<String> packageRootsDeclaring(String packageJvm) {
+            return delegate.packageRootsDeclaring(packageJvm);
+        }
+
+        @Override
         public List<ModuleEntry> modulesForSourceUri(String sourceUri) {
             return delegate.modulesForSourceUri(sourceUri);
         }
