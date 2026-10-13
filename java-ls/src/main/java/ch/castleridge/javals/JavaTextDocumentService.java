@@ -31,9 +31,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import ch.castleridge.javals.analysis.AnalysisSession;
+import ch.castleridge.javals.analysis.AstAnalysisSession;
 import ch.castleridge.javals.analysis.AstDeclarationLocator;
 import ch.castleridge.javals.analysis.BackendFactory;
 import ch.castleridge.javals.analysis.CallHierarchySupport;
+import ch.castleridge.javals.analysis.DocumentSymbolSupport;
 import ch.castleridge.javals.analysis.HoverInfo;
 import ch.castleridge.javals.analysis.JavadocMarkdown;
 import ch.castleridge.javals.analysis.PublishedDiagnostic;
@@ -43,6 +45,7 @@ import ch.castleridge.javals.analysis.WorkspaceCompiler;
 import ch.castleridge.javals.analysis.ecj.EcjDietSources;
 import ch.castleridge.javals.analysis.ecj.EcjWorkspaceCompiler;
 import ch.castleridge.javals.analysis.javac.JavacDietSources;
+import ch.castleridge.javals.ast.CompilationUnit;
 import ch.castleridge.javals.ast.SymbolKey;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
@@ -780,7 +783,38 @@ public class JavaTextDocumentService implements TextDocumentService {
     @Override
     public CompletableFuture<List<Either<SymbolInformation, DocumentSymbol>>> documentSymbol(
             DocumentSymbolParams params) {
-        return CompletableFuture.completedFuture(new ArrayList<>());
+        String uri = UriCoding.decode(params.getTextDocument().getUri());
+        return CompletableFuture.supplyAsync(() -> computeDocumentSymbols(uri));
+    }
+
+    private List<Either<SymbolInformation, DocumentSymbol>> computeDocumentSymbols(String uri) {
+        CompilationUnit cu = compilationUnitForOutline(uri);
+        if (cu == null) return List.of();
+        List<DocumentSymbol> symbols = DocumentSymbolSupport.from(cu);
+        List<Either<SymbolInformation, DocumentSymbol>> result = new ArrayList<>(symbols.size());
+        for (DocumentSymbol symbol : symbols) {
+            result.add(Either.forRight(symbol));
+        }
+        return result;
+    }
+
+    /**
+     * Never waits on analysis: use a cached session AST when present, otherwise
+     * diet-parse the open buffer (or disk) immediately.
+     */
+    private CompilationUnit compilationUnitForOutline(String uri) {
+        CachedCompile cached = compileCache.get(uri);
+        if (cached != null
+                && cached.session() instanceof AstAnalysisSession session
+                && session.isUsable()) {
+            return session.compilationUnit();
+        }
+        String text = textForUri(uri);
+        if (text == null) return null;
+        if (workspaceCompiler instanceof EcjWorkspaceCompiler) {
+            return EcjDietSources.lower(uri, text);
+        }
+        return JavacDietSources.lower(uri, text);
     }
 
     @Override

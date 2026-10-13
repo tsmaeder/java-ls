@@ -31,6 +31,12 @@ public final class EcjDietSources {
     public static ch.castleridge.javals.ast.CompilationUnit lower(String uri) {
         String text = SourceText.read(uri);
         if (text == null) return null;
+        return lower(uri, text);
+    }
+
+    public static ch.castleridge.javals.ast.CompilationUnit lower(String uri, CharSequence text) {
+        if (text == null) return null;
+        String source = text.toString();
         CompilerOptions options = new CompilerOptions();
         options.sourceLevel = CompilerOptions.versionToJdkLevel(CompilerOptions.getLatestVersion());
         options.complianceLevel = options.sourceLevel;
@@ -41,12 +47,12 @@ public final class EcjDietSources {
                 new DefaultProblemFactory(Locale.ROOT));
         Parser parser = new Parser(reporter, false);
         String fileName = fileNameOf(uri);
-        ICompilationUnit input = new CompilationUnit(text.toCharArray(), fileName, "UTF-8");
+        ICompilationUnit input = new CompilationUnit(source.toCharArray(), fileName, "UTF-8");
         CompilationResult result = new CompilationResult(input, 0, 1, options.maxProblemsPerUnit);
         try {
             CompilationUnitDeclaration unit = parser.dietParse(input, result);
             if (unit == null) return null;
-            return EcjAstLowerer.diet(unit, uri, text);
+            return EcjAstLowerer.diet(unit, uri, source);
         } catch (RuntimeException | StackOverflowError failure) {
             return null;
         }

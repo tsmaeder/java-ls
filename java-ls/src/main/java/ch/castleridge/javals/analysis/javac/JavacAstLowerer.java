@@ -419,7 +419,12 @@ final class JavacAstLowerer {
 
     private boolean isEnumConstant(VariableTree tree) {
         Element element = elementOf(tree);
-        return element != null && element.getKind() == ElementKind.ENUM_CONSTANT;
+        if (element != null && element.getKind() == ElementKind.ENUM_CONSTANT) {
+            return true;
+        }
+        // Diet / unattributed trees still carry Flags.ENUM on constants.
+        return tree instanceof JCTree.JCVariableDecl variable
+                && (variable.mods.flags & Flags.ENUM) != 0;
     }
 
     private Declaration lowerMethod(MethodTree tree, TypeSymbol owner, TypeDeclKind ownerKind) {
