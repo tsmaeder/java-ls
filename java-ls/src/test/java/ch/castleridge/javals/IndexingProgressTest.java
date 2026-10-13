@@ -56,7 +56,7 @@ class IndexingProgressTest {
         assertEquals(2, reports.size(), () -> "expected reports at 100 and 200, got: " + reports);
         assertEquals(IndexingProgress.message(uri, 3, 10, 100), reports.get(0).getMessage());
         assertEquals(IndexingProgress.message(uri, 3, 10, 200), reports.get(1).getMessage());
-        assertEquals("file:///lib/foo.jar (3 of 10)100", reports.get(0).getMessage());
+        assertEquals(" (3 of 10)/100 file:///lib/foo.jar ", reports.get(0).getMessage());
         assertFalse(Boolean.TRUE.equals(reports.get(0).getCancellable()));
     }
 

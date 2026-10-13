@@ -12,11 +12,14 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import org.eclipse.jdt.core.compiler.CharOperation;
 import org.eclipse.jdt.internal.compiler.env.IModule;
 import org.eclipse.jdt.internal.compiler.env.IModuleAwareNameEnvironment;
+import org.eclipse.jdt.internal.compiler.env.IModuleAwareNameEnvironment.LookupStrategy;
 import org.eclipse.jdt.internal.compiler.env.IUpdatableModule;
+import org.eclipse.jdt.internal.compiler.env.IUpdatableModule.UpdatesByKind;
 import org.eclipse.jdt.internal.compiler.env.NameEnvironmentAnswer;
 import org.eclipse.jdt.internal.compiler.lookup.ModuleBinding;
 
@@ -42,6 +45,8 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
 
     private final Index index;
     private final ClasspathOrder classpath;
+    /** Per-module --add-exports / --add-reads from mbt javacOptions. */
+    private final Map<String, UpdatesByKind> moduleUpdates;
 
     /** Lazily filled; cleared in {@link #cleanup()}. */
     private List<ModuleEntry> cachedClasspathModules;
@@ -49,8 +54,15 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
     private Map<String, ModuleEntry> cachedModulesByPackageRoot;
 
     IndexNameEnvironment(Index index, ClasspathOrder classpath) {
+        this(index, classpath, Map.of());
+    }
+
+    IndexNameEnvironment(Index index, ClasspathOrder classpath, Map<String, UpdatesByKind> moduleUpdates) {
         this.index = index;
         this.classpath = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
+        this.moduleUpdates = moduleUpdates == null || moduleUpdates.isEmpty()
+                ? Map.of()
+                : Map.copyOf(moduleUpdates);
     }
 
     Index index() {
@@ -59,6 +71,10 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
 
     ClasspathOrder classpath() {
         return classpath;
+    }
+
+    Map<String, UpdatesByKind> moduleUpdates() {
+        return moduleUpdates;
     }
 
     @Override
@@ -266,7 +282,17 @@ final class IndexNameEnvironment implements IModuleAwareNameEnvironment {
 
     @Override
     public void applyModuleUpdates(IUpdatableModule module, IUpdatableModule.UpdateKind kind) {
-        /* default: do nothing */
+        char[] name = module.name();
+        if (name == ModuleBinding.UNNAMED || moduleUpdates.isEmpty()) {
+            return;
+        }
+        UpdatesByKind updates = moduleUpdates.get(String.valueOf(name));
+        if (updates == null) {
+            return;
+        }
+        for (Consumer<IUpdatableModule> update : updates.getList(kind, false)) {
+            update.accept(module);
+        }
     }
 
     /**

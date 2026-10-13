@@ -6,9 +6,13 @@
  */
 package ch.castleridge.javals.analysis.ecj;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+
+import org.eclipse.jdt.internal.compiler.env.IUpdatableModule.UpdatesByKind;
 
 import ch.castleridge.javals.MbtService;
 import ch.castleridge.javals.analysis.AnalysisSession;
@@ -16,6 +20,7 @@ import ch.castleridge.javals.analysis.AstDeclarationLocator;
 import ch.castleridge.javals.analysis.WorkspaceCompiler;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.mbt.MbtTargetInfo;
 
 /**
  * ECJ-backed workspace compiler. Type-answer {@link IndexNameEnvironment}s are
@@ -101,7 +106,8 @@ public final class EcjWorkspaceCompiler implements WorkspaceCompiler {
         if (previous != null
                 && previous.namespaceId().equals(resolved.namespaceId())
                 && previous.environment().index() == resolved.index()
-                && previous.environment().classpath() == resolved.classpath()) {
+                && previous.environment().classpath() == resolved.classpath()
+                && previous.environment().moduleUpdates() == resolved.moduleUpdates()) {
             return previous;
         }
         if (previous != null) {
@@ -109,19 +115,22 @@ public final class EcjWorkspaceCompiler implements WorkspaceCompiler {
         }
         return new StickyEnvironment(
                 resolved.namespaceId(),
-                new IndexNameEnvironment(resolved.index(), resolved.classpath()));
+                new IndexNameEnvironment(
+                        resolved.index(), resolved.classpath(), resolved.moduleUpdates()));
     }
 
     /** Package-visible for tests: fresh env for a namespace id. */
     IndexNameEnvironment newEnvironment(String namespaceId, Index index, ClasspathOrder classpath) {
-        ResolvedNamespace resolved = namespaceFor(namespaceId, index, classpath);
-        return new IndexNameEnvironment(resolved.index(), resolved.classpath());
+        ResolvedNamespace resolved = namespaceFor(namespaceId, index, classpath, List.of());
+        return new IndexNameEnvironment(
+                resolved.index(), resolved.classpath(), resolved.moduleUpdates());
     }
 
     @Override
     public AnalysisSession analyze(String uri, CharSequence text, Index index, ClasspathOrder classpath) {
         ResolvedNamespace resolved = resolveNamespace(uri, index, classpath);
-        IndexNameEnvironment environment = new IndexNameEnvironment(resolved.index(), resolved.classpath());
+        IndexNameEnvironment environment = new IndexNameEnvironment(
+                resolved.index(), resolved.classpath(), resolved.moduleUpdates());
         return EcjAnalysisEngine.analyze(
                 uri, text, index, classpath, locator, sourceJarByBinaryJar, environment, true);
     }
@@ -145,23 +154,43 @@ public final class EcjWorkspaceCompiler implements WorkspaceCompiler {
             Optional<MbtService.Target> target = mbt.targetFor(uri);
             if (target.isPresent()) {
                 MbtService.Target t = target.get();
-                return namespaceFor(t.id(), index, t.classpath());
+                return namespaceFor(t.id(), index, t.classpath(), javacOptionsOf(t.info()));
             }
         }
         ClasspathOrder order = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
-        return namespaceFor(UNRESTRICTED_KEY, index, order);
+        return namespaceFor(UNRESTRICTED_KEY, index, order, List.of());
     }
 
-    private ResolvedNamespace namespaceFor(String namespaceId, Index index, ClasspathOrder classpath) {
+    private ResolvedNamespace namespaceFor(String namespaceId,
+                                         Index index,
+                                         ClasspathOrder classpath,
+                                         List<String> javacOptions) {
         String key = namespaceId == null ? UNRESTRICTED_KEY : namespaceId;
         ClasspathOrder order = classpath == null ? ClasspathOrder.UNRESTRICTED : classpath;
+        List<String> options = javacOptions == null || javacOptions.isEmpty()
+                ? List.of()
+                : List.copyOf(javacOptions);
         return namespaces.compute(key, (k, existing) -> {
-            if (existing != null && existing.index() == index && existing.classpath() == order) {
+            if (existing != null
+                    && existing.index() == index
+                    && existing.classpath() == order
+                    && Objects.equals(existing.javacOptions(), options)) {
                 return existing;
             }
-            return new ResolvedNamespace(key, index, order);
+            return new ResolvedNamespace(key, index, order, options, EcjModuleUpdates.parse(options));
         });
     }
 
-    private record ResolvedNamespace(String namespaceId, Index index, ClasspathOrder classpath) {}
+    private static List<String> javacOptionsOf(MbtTargetInfo info) {
+        if (info == null || info.javacOptions == null || info.javacOptions.isEmpty()) {
+            return List.of();
+        }
+        return info.javacOptions;
+    }
+
+    private record ResolvedNamespace(String namespaceId,
+                                     Index index,
+                                     ClasspathOrder classpath,
+                                     List<String> javacOptions,
+                                     Map<String, UpdatesByKind> moduleUpdates) {}
 }
