@@ -106,7 +106,7 @@ final class IndexingProgress {
 
     static String message(String sourceUri, int sourceIndex, int sourceCount, int filesInSource) {
         String uri = sourceUri == null ? "" : sourceUri;
-        return uri + " (" + sourceIndex + " of " + sourceCount + ")" + filesInSource;
+        return " (" + sourceIndex + " of " + sourceCount + ")/"+ filesInSource + " " + uri + " ";
     }
 
     private void notify(Either<WorkDoneProgressNotification, Object> value) {

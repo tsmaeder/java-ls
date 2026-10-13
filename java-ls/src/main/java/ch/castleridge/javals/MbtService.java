@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.eclipse.lsp4j.MessageType;
 
+import ch.castleridge.javals.analysis.FileUris;
 import ch.castleridge.javals.classpath.ClasspathEntry;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.classpath.UriClasspathEntry;
@@ -115,7 +116,9 @@ public final class MbtService {
         State current = state.get();
         for (Target target : current.targets.values()) {
             for (String rootUri : target.ownSourceRootUris()) {
-                if (uri.startsWith(rootUri)) {
+                // Normalize encoding / Windows drive-letter case so LSP URIs
+                // (file:///d:/…, file:///D%3A/…) match Path.toUri() roots.
+                if (FileUris.underRoot(uri, rootUri)) {
                     return Optional.of(target);
                 }
             }

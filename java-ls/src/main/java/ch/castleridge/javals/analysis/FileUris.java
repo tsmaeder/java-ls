@@ -29,6 +29,17 @@ public final class FileUris {
         return canonical(a).equals(canonical(b));
     }
 
+    /**
+     * True when {@code uri} lies under directory root {@code rootUri} after
+     * the same encoding / drive-letter normalization as {@link #sameFile}.
+     * Used by classpath ownership so LSP {@code file:///d:/…} URIs match
+     * {@code Path.toUri()} roots that use {@code file:///D:/…}.
+     */
+    public static boolean underRoot(String uri, String rootUri) {
+        if (uri == null || rootUri == null) return false;
+        return canonical(uri).startsWith(canonical(rootUri));
+    }
+
     static String canonical(String uri) {
         return lowercaseDrive(UriCoding.decode(uri));
     }

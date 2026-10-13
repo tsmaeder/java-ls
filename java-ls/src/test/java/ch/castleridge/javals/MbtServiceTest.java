@@ -16,6 +16,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -211,5 +213,76 @@ class MbtServiceTest {
         assertEquals("owner", mbtService.targetFor(ownerFile.toUri().toString()).orElseThrow().id());
         String attached = "jar:" + srcJar.toUri() + "!/com/example/Lib.java";
         assertEquals("consumer", mbtService.targetFor(attached).orElseThrow().id());
+    }
+
+    @Test
+    void targetForMatchesFlippedDriveLetterCase(@TempDir Path tempDir) throws Exception {
+        MbtService mbtService = loadSingleSourceTarget(tempDir);
+        ClasspathOrder libCp = mbtService.targets().get("lib").classpath();
+        Path libFile = tempDir.resolve("lib/src/Lib.java");
+        String flipped = flipDriveLetterCase(libFile.toUri().toString());
+
+        assertEquals("lib", mbtService.targetFor(flipped).orElseThrow().id());
+        assertSame(libCp, mbtService.classPathFor(flipped));
+        assertNotSame(ClasspathOrder.UNRESTRICTED, mbtService.classPathFor(flipped));
+    }
+
+    @Test
+    void targetForMatchesPercentEncodedDriveColon(@TempDir Path tempDir) throws Exception {
+        MbtService mbtService = loadSingleSourceTarget(tempDir);
+        ClasspathOrder libCp = mbtService.targets().get("lib").classpath();
+        Path libFile = tempDir.resolve("lib/src/Lib.java");
+        String encoded = percentEncodeDriveColon(libFile.toUri().toString());
+
+        assertEquals("lib", mbtService.targetFor(encoded).orElseThrow().id());
+        assertSame(libCp, mbtService.classPathFor(encoded));
+        assertNotSame(ClasspathOrder.UNRESTRICTED, mbtService.classPathFor(encoded));
+    }
+
+    private static MbtService loadSingleSourceTarget(Path tempDir) throws Exception {
+        Path libSrc = tempDir.resolve("lib/src");
+        Files.createDirectories(libSrc);
+        Files.writeString(libSrc.resolve("Lib.java"), "public class Lib {}\n", StandardCharsets.UTF_8);
+
+        String mbt = """
+                {
+                  "namespaces": {
+                    "lib": {
+                      "sources": ["lib/src"]
+                    }
+                  },
+                  "dependencyModules": []
+                }
+                """;
+        Files.writeString(tempDir.resolve("mbt.json"), mbt, StandardCharsets.UTF_8);
+
+        MbtService mbtService = new MbtService(null);
+        mbtService.loadFrom(tempDir.resolve("mbt.json"), tempDir);
+        assertEquals(1, mbtService.targets().size());
+        return mbtService;
+    }
+
+    private static final Pattern DRIVE = Pattern.compile("^(file:/*)([A-Za-z]):");
+
+    /** {@code file:///D:/…} ↔ {@code file:///d:/…}; unchanged when no drive letter. */
+    private static String flipDriveLetterCase(String uri) {
+        Matcher m = DRIVE.matcher(uri);
+        if (!m.find()) {
+            return uri;
+        }
+        char drive = m.group(2).charAt(0);
+        char flipped = Character.isUpperCase(drive)
+                ? Character.toLowerCase(drive)
+                : Character.toUpperCase(drive);
+        return m.replaceFirst(m.group(1) + flipped + ":");
+    }
+
+    /** {@code file:///D:/…} → {@code file:///D%3A/…}; unchanged when no drive letter. */
+    private static String percentEncodeDriveColon(String uri) {
+        Matcher m = DRIVE.matcher(uri);
+        if (!m.find()) {
+            return uri;
+        }
+        return m.replaceFirst(m.group(1) + m.group(2) + "%3A");
     }
 }
