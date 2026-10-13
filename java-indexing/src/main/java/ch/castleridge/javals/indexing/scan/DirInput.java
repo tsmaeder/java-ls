@@ -58,7 +58,8 @@ public record DirInput(Path root, ScanCollector collector) implements InputSourc
 
     @Override
     public String sourceUri() {
-        return root.toUri().toString();
+        String uri = root.toUri().toString();
+        return uri.endsWith("/") ? uri : uri + "/";
     }
 
     private static boolean isIndexable(String name) {

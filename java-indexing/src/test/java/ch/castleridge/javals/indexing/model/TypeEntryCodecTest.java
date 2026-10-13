@@ -40,7 +40,7 @@ class TypeEntryCodecTest {
     void roundTripsSparseClassFileTypeEntry() {
         ClassFileTypeEntry original = new ClassFileTypeEntry(
                 "com/example/Hello.class",
-                "file:///lib.jar",
+                "jar:file:///lib.jar!/",
                 "com/example/Hello",
                 0x0021,
                 TypeRef.resolved("java/lang/Object"),
@@ -302,7 +302,7 @@ class TypeEntryCodecTest {
     void peekIdentityReadsLeadingSourceUriAndResourcePath() {
         ClassFileTypeEntry original = new ClassFileTypeEntry(
                 "com/example/Hello.class",
-                "file:///lib.jar",
+                "jar:file:///lib.jar!/",
                 "com/example/Hello",
                 0x0021,
                 TypeRef.resolved("java/lang/Object"),
@@ -316,10 +316,10 @@ class TypeEntryCodecTest {
                 EmptyArrays.ANNOTATION_REF);
 
         byte[] blob = TypeEntryCodec.encode(original);
-        assertEquals("file:///lib.jar", TypeEntryCodec.peekSourceUri(blob));
+        assertEquals("jar:file:///lib.jar!/", TypeEntryCodec.peekSourceUri(blob));
         assertEquals("com/example/Hello.class", TypeEntryCodec.peekResourcePath(blob));
         String[] identity = TypeEntryCodec.peekIdentity(blob);
-        assertEquals("file:///lib.jar", identity[0]);
+        assertEquals("jar:file:///lib.jar!/", identity[0]);
         assertEquals("com/example/Hello.class", identity[1]);
 
         TypeEntry decoded = TypeEntryCodec.decode(blob);

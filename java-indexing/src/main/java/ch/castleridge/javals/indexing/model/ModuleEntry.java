@@ -25,8 +25,8 @@ package ch.castleridge.javals.indexing.model;
  * <p>{@link #flags()} is the raw {@code Module} access flag set
  * ({@code ACC_OPEN}, {@code ACC_SYNTHETIC}, {@code ACC_MANDATED}).
  *
- * <p>{@link #resourcePath()} is compact relative to {@link #sourceUri()} when
- * possible; prefer {@link #resourceUri()} for the full location.
+ * <p>{@link #resourcePath()} is relative to {@link #sourceUri()};
+ * prefer {@link #resourceUri()} for the full location.
  */
 public record ModuleEntry(
         String resourcePath,
@@ -46,7 +46,6 @@ public record ModuleEntry(
         if (name == null || name.isEmpty()) {
             throw new IllegalArgumentException("module name must be non-empty");
         }
-        resourcePath = ResourceUris.compact(resourcePath, sourceUri);
         requires = EmptyArrays.orEmpty(requires, EmptyArrays.REQUIRES);
         exports = EmptyArrays.orEmpty(exports, EmptyArrays.EXPORTS);
         opens = EmptyArrays.orEmpty(opens, EmptyArrays.OPENS);
@@ -66,7 +65,7 @@ public record ModuleEntry(
 
     /**
      * True when {@code entry}'s resource lives under this module's package
-     * root (same jar/jrt module directory or source root).
+     * root (same jar/jdk module directory or source root).
      */
     public boolean contains(TypeEntry entry) {
         if (entry == null) return false;

@@ -28,7 +28,7 @@ import ch.castleridge.javals.indexing.model.ResourcePaths;
  * in {@code Outer.java}, so the entry path is truncated to the outermost type.
  *
  * <p>Class files are never a navigation target: without attached source the
- * result is empty. Handing a client a {@code .class} or {@code jrt:} URI only
+ * result is empty. Handing a client a {@code .class} or {@code jdk:} URI only
  * makes it show bytecode or fail to open the document.
  */
 public final class AttachedSource {
@@ -54,10 +54,6 @@ public final class AttachedSource {
         int separator = resourceUri.indexOf("!/");
         if (separator < 0 || separator + 2 >= resourceUri.length()) return Optional.empty();
         String classEntry = resourceUri.substring(separator + 2);
-        // JRT walkers store modules/<module>/...; src.zip uses <module>/... .
-        if (containerUri != null && containerUri.startsWith("jrt:") && classEntry.startsWith("modules/")) {
-            classEntry = classEntry.substring("modules/".length());
-        }
         try {
             return Optional.of("jar:" + URI.create(sourcesArchive) + "!/" + outerClassJavaEntry(classEntry));
         } catch (IllegalArgumentException e) {

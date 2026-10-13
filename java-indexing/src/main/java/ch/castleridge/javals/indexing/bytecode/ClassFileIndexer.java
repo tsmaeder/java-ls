@@ -174,9 +174,6 @@ public final class ClassFileIndexer {
 
         CollectingVisitor(String resourcePath, String sourceUri) {
             super(ASM_API);
-            // resourcePath may be a relative path or (for synthetic test URIs)
-            // an absolute URI; ResourceUris.compact normalises storage when
-            // the TypeEntry / ModuleEntry is built.
             this.resourcePath = resourcePath;
             this.sourceUri = sourceUri;
         }

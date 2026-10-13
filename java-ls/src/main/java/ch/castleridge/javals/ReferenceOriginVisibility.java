@@ -24,6 +24,7 @@ final class ReferenceOriginVisibility {
      */
     static String originContainer(ClasspathOrder order, String originResourceUri) {
         if (originResourceUri == null || originResourceUri.isEmpty()) return null;
+        // jar:…!/ and jdk:…!/ prefixes match InputSource#sourceUri().
         String probe = ResourceUris.classpathContainer(originResourceUri);
         if (order != null) {
             String owned = order.owningSourceUri(probe);

@@ -20,30 +20,32 @@ import java.nio.file.Path;
 import java.util.Map;
 
 /**
- * Reads bytes from resource URIs in the custom
- * {@code jrt://<java-home-path>!<path-within-jrt-fs>} form produced by
+ * Reads bytes from resource URIs in the
+ * {@code jdk:///<java-home>!/<module>/...} form produced by
  * {@link ch.castleridge.javals.indexing.scan.JrtInput}.
  */
 final class JrtResourceReader {
 
+    private static final String SCHEME_PREFIX = "jdk://";
+
     private JrtResourceReader() {}
 
-    static byte[] readAllBytes(String jrtResourceUri) throws IOException {
-        int bang = jrtResourceUri.indexOf("!/");
-        if (bang < 0) {
-            throw new IOException("Malformed jrt resource URI (missing !/): " + jrtResourceUri);
+    static byte[] readAllBytes(String jdkResourceUri) throws IOException {
+        int bang = jdkResourceUri.indexOf("!/");
+        if (bang < 0 || !jdkResourceUri.startsWith(SCHEME_PREFIX)) {
+            throw new IOException("Malformed jdk resource URI: " + jdkResourceUri);
         }
-        String javaHomeRaw = jrtResourceUri.substring("jrt://".length(), bang);
-        String entryPath = jrtResourceUri.substring(bang + 2);
+        String javaHomeRaw = jdkResourceUri.substring(SCHEME_PREFIX.length(), bang);
+        String entryPath = jdkResourceUri.substring(bang + 2);
         Path javaHome = Path.of(URI.create("file:" + javaHomeRaw));
         try (FileSystem fs = FileSystems.newFileSystem(
                 URI.create("jrt:/"),
                 Map.of("java.home", javaHome.toString()))) {
-            return Files.readAllBytes(fs.getPath(entryPath));
+            return Files.readAllBytes(fs.getPath("modules/" + entryPath));
         }
     }
 
-    static InputStream openStream(String jrtResourceUri) throws IOException {
-        return new java.io.ByteArrayInputStream(readAllBytes(jrtResourceUri));
+    static InputStream openStream(String jdkResourceUri) throws IOException {
+        return new java.io.ByteArrayInputStream(readAllBytes(jdkResourceUri));
     }
 }

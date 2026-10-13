@@ -14,7 +14,7 @@ import ch.castleridge.javals.indexing.model.ResourceUris;
 
 /**
  * One per-resource identifier bloom filter, addressed the same way as
- * type entries: classpath {@code sourceUri} plus compact
+ * type entries: classpath {@code sourceUri} plus relative
  * {@code resourcePath}.
  */
 public record BloomEntry(String sourceUri, String resourcePath, IdentifierBloomFilter filter) {

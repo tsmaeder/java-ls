@@ -6,8 +6,6 @@
  */
 package ch.castleridge.javals;
 
-import java.util.Locale;
-
 /**
  * Which indexed containers find-references may scan beyond workspace sources.
  *
@@ -21,9 +19,9 @@ record ReferenceSearchScope(boolean inJars, boolean inJdk) {
 
     /**
      * @param sourceUri classpath container stamped on the bloom entry
-     *        (a source root, a jar, or {@code jrt:///...})
-     * @param resourcePath compact entry path ({@code com/example/Foo.java}
-     *        or {@code java/lang/Object.class})
+     *        (a source root, a jar, or {@code jdk:///<home>!/})
+     * @param resourcePath entry path ({@code com/example/Foo.java}
+     *        or {@code java.base/java/lang/Object.class})
      */
     boolean include(String sourceUri, String resourcePath) {
         if (resourcePath == null) return false;
@@ -35,23 +33,12 @@ record ReferenceSearchScope(boolean inJars, boolean inJdk) {
         if (sourceUri == null || sourceUri.isEmpty()) {
             return true;
         }
-        if (sourceUri.startsWith("jrt:")) {
+        if (sourceUri.startsWith("jdk:")) {
             return inJdk;
         }
-        if (isArchive(sourceUri)) {
+        if (sourceUri.startsWith("jar:")) {
             return inJars;
         }
         return true;
-    }
-
-    private static boolean isArchive(String sourceUri) {
-        if (sourceUri.startsWith("jar:")) return true;
-        int query = sourceUri.indexOf('?');
-        int fragment = sourceUri.indexOf('#');
-        int end = sourceUri.length();
-        if (query >= 0) end = Math.min(end, query);
-        if (fragment >= 0) end = Math.min(end, fragment);
-        String path = sourceUri.substring(0, end).toLowerCase(Locale.ROOT);
-        return path.endsWith(".jar") || path.endsWith(".jmod") || path.endsWith(".zip");
     }
 }

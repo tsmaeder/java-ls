@@ -13,9 +13,8 @@ package ch.castleridge.javals.indexing.model;
 /**
  * Indexed type declaration produced from source parsing.
  *
- * <p>{@link #resourcePath()} holds either a path relative to
- * {@link #sourceUri()} or an absolute URI when compaction is not
- * loss-free. Prefer {@link #resourceUri()} for the full resource location.
+ * <p>{@link #resourcePath()} is relative to {@link #sourceUri()};
+ * prefer {@link #resourceUri()} for the full resource location.
  */
 public record SourceTypeEntry(
         String resourcePath,
@@ -35,7 +34,6 @@ public record SourceTypeEntry(
         SourceResolutionHints hints) implements TypeEntry {
 
     public SourceTypeEntry {
-        resourcePath = ResourceUris.compact(resourcePath, sourceUri);
         interfaceRefs = EmptyArrays.orEmpty(interfaceRefs, EmptyArrays.TYPE);
         typeParams = EmptyArrays.orEmpty(typeParams, EmptyArrays.TYPE_PARAM);
         fields = EmptyArrays.orEmpty(fields, EmptyArrays.FIELD);

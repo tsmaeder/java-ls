@@ -183,12 +183,12 @@ public final class MbtService {
                     continue;
                 }
                 if (!sources.containsKey(dependencyModuleInfo.id)) {
-                    sources.put(dependencyModuleInfo.id, new JarInput(binaryJarPath, collector));
+                    JarInput jarInput = new JarInput(binaryJarPath, collector);
+                    sources.put(dependencyModuleInfo.id, jarInput);
                     if (sourceJar != null) {
-                        // Key by the normalized file URI that the scanner stamps on
-                        // every indexed entry (JarInput.sourceUri() ==
-                        // binaryJarPath.toUri()), not the raw mbt.json `jar` string.
-                        sourceJarByBinaryJar.put(binaryJarPath.toUri().toString(), sourceJar);
+                        // Key by JarInput.sourceUri() (jar:file:…!/), matching
+                        // TypeEntry#sourceUri() stamped on indexed entries.
+                        sourceJarByBinaryJar.put(jarInput.sourceUri(), sourceJar);
                     }
                 }
             }
@@ -237,17 +237,18 @@ public final class MbtService {
             }
         }
         JrtInput jrtInput = new JrtInput(jdk, collector);
+        String jdkSourceUri = jrtInput.sourceUri();
 
-        if (!sources.containsKey(jrtInput.sourceUri().toString())) {
-            sources.put(jrtInput.sourceUri().toString(), jrtInput);
+        if (!sources.containsKey(jdkSourceUri)) {
+            sources.put(jdkSourceUri, jrtInput);
             Path sourcePath = jdk.resolve("lib/src.zip");
             if (Files.isRegularFile(sourcePath)) {
-                sourceJarByBinaryJar.put(jrtInput.sourceUri().toString(), sourcePath.toUri().toString());
+                sourceJarByBinaryJar.put(jdkSourceUri, sourcePath.toUri().toString());
             }
         }
 
         addDependencyJars(targetInfo.dependencyModules, dependencyModules, classpathEntries);
-        classpathEntries.add(UriClasspathEntry.of(jrtInput.sourceUri()));
+        classpathEntries.add(UriClasspathEntry.of(jdkSourceUri));
         return new Target(namespaceId, targetInfo, new ClasspathOrder(classpathEntries, false),
                 List.copyOf(ownSourceRootUris));
     }
@@ -284,9 +285,10 @@ public final class MbtService {
             }
             Path sourcePath = resolveWorkspacePath(workspacePath, source);
             if (Files.isDirectory(sourcePath)) {
-                String sourceUri = sourcePath.toUri().toString();
+                DirInput dirInput = new DirInput(sourcePath, collector);
+                String sourceUri = dirInput.sourceUri();
                 classpathEntries.add(UriClasspathEntry.of(sourceUri));
-                sources.putIfAbsent(sourceUri, new DirInput(sourcePath, collector));
+                sources.putIfAbsent(sourceUri, dirInput);
                 if (ownSourceRootUris != null) {
                     ownSourceRootUris.add(sourceUri);
                 }
@@ -307,7 +309,7 @@ public final class MbtService {
                 if (jarPath == null) {
                     continue;
                 }
-                classpathEntries.add(UriClasspathEntry.of(jarPath.toUri().toString()));
+                classpathEntries.add(UriClasspathEntry.of(new JarInput(jarPath).sourceUri()));
             }
         }
     }
@@ -332,7 +334,7 @@ public final class MbtService {
             Path sourceJar = pathFromUri(dm == null ? null : dm.sources);
             if (binaryJar == null || sourceJar == null) continue;
             if (!Files.isRegularFile(binaryJar) || !Files.isRegularFile(sourceJar)) continue;
-            out.putIfAbsent(binaryJar.toUri().toString(), sourceJar.toUri().toString());
+            out.putIfAbsent(new JarInput(binaryJar).sourceUri(), sourceJar.toUri().toString());
         }
         return out.isEmpty() ? Map.of() : Map.copyOf(out);
     }
@@ -361,16 +363,27 @@ public final class MbtService {
         return binaryJarBySourceJar.get(normalized);
     }
 
-    /** Normalize a jar/zip/file URI string to a canonical {@code file:} URI key. */
+    /**
+     * Normalize a jar/zip/file URI (possibly {@code jar:file:…!/} from
+     * {@link ResourceUris#classpathContainer}) to a canonical {@code file:} key.
+     */
     private static String normalizeArchiveUri(String uri) {
         if (uri == null || uri.isBlank()) {
             return null;
         }
-        Path path = pathFromUri(uri);
+        String trimmed = uri.trim();
+        if (trimmed.startsWith("jar:")) {
+            trimmed = trimmed.substring(4);
+        }
+        int bang = trimmed.indexOf("!/");
+        if (bang >= 0) {
+            trimmed = trimmed.substring(0, bang);
+        }
+        Path path = pathFromUri(trimmed);
         if (path != null) {
             return path.toUri().toString();
         }
-        return uri.trim();
+        return trimmed;
     }
 
     /** Resolves a workspace-relative (forward-slash) or absolute source path. */

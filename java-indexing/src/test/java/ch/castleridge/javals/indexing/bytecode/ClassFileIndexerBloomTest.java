@@ -64,7 +64,7 @@ class ClassFileIndexerBloomTest {
                     List.of(animal, dog)).call());
 
             InMemoryIndex index = new InMemoryIndex();
-            String sourceUri = "file:///lib.jar";
+            String sourceUri = "jar:file:///lib.jar!/";
             String dogPath = "p/Dog.class";
             indexer.index(
                     dogPath,

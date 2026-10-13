@@ -28,18 +28,18 @@ class ReferenceSearchScopeTest {
 
     @Test
     void jarsAreIncludedOnlyWhenEnabled() {
-        String jar = "file:///lib/dep.jar";
+        String jar = "jar:file:///lib/dep.jar!/";
         assertFalse(WORKSPACE_ONLY.include(jar, "com/example/Greeter.class"));
         assertFalse(JDK.include(jar, "com/example/Greeter.class"));
         assertTrue(JARS.include(jar, "com/example/Greeter.class"));
-        assertTrue(JARS.include("jar:" + jar, "com/example/Greeter.java"));
+        assertTrue(JARS.include(jar, "com/example/Greeter.java"));
     }
 
     @Test
     void jdkIsIncludedOnlyWhenEnabled() {
-        String jrt = "jrt:///C:/jdk-25";
-        assertFalse(WORKSPACE_ONLY.include(jrt, "java.base/java/lang/String.class"));
-        assertFalse(JARS.include(jrt, "java.base/java/lang/String.class"));
-        assertTrue(JDK.include(jrt, "java.base/java/lang/String.class"));
+        String jdk = "jdk:///C:/jdk-25!/";
+        assertFalse(WORKSPACE_ONLY.include(jdk, "java.base/java/lang/String.class"));
+        assertFalse(JARS.include(jdk, "java.base/java/lang/String.class"));
+        assertTrue(JDK.include(jdk, "java.base/java/lang/String.class"));
     }
 }

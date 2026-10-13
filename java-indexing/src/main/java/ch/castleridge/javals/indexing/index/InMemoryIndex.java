@@ -75,7 +75,7 @@ public final class InMemoryIndex implements Index {
     /** Package → type IDs (leaf packages that directly own types only). */
     private final Map<String, IntList> byPackage = new HashMap<>();
     /**
-     * {@code (sourceUri, compactedResourcePath)} → type IDs for O(file)
+     * {@code (sourceUri, resourcePath)} → type IDs for O(file)
      * removal via {@link #putResource}.
      */
     private final Map<String, IntList> byResource = new HashMap<>();
@@ -149,11 +149,9 @@ public final class InMemoryIndex implements Index {
     private void registerBloomLocked(String sourceUri, String resourcePath, IdentifierBloomFilter filter) {
         if (filter == null) return;
         if (sourceUri == null && resourcePath == null) return;
-        // Same compaction TypeEntry applies so hierarchy can match pairs directly.
-        String compactedPath = ResourceUris.compact(resourcePath, sourceUri);
         blooms.add(new BloomSlot(
                 StringTable.intern(sourceUri),
-                StringTable.intern(compactedPath),
+                StringTable.intern(resourcePath),
                 filter));
     }
 
@@ -209,7 +207,6 @@ public final class InMemoryIndex implements Index {
 
     @Override
     public void putResource(String sourceUri, String resourcePath, Index replacement) {
-        String compacted = ResourceUris.compact(resourcePath, sourceUri);
         List<EncodedType> encoded = List.of();
         Collection<ModuleEntry> modules = List.of();
         List<BloomEntry> bloomsToAdd = List.of();
@@ -249,7 +246,7 @@ public final class InMemoryIndex implements Index {
         boolean changed;
         rwLock.writeLock().lock();
         try {
-            changed = removeResourceLocked(sourceUri, compacted);
+            changed = removeResourceLocked(sourceUri, resourcePath);
             if (!encoded.isEmpty() || !modules.isEmpty() || !bloomsToAdd.isEmpty()) {
                 ensureTypeBlobCapacity(typeCount + encoded.size());
                 for (EncodedType e : encoded) {

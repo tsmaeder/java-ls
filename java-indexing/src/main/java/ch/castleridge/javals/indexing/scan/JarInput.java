@@ -68,11 +68,8 @@ public record JarInput(Path jar, ScanCollector collector) implements InputSource
 
     @Override
     public String sourceUri() {
-        // Use the underlying file URI (not the jar: wrapper): resource URIs
-        // for entries inside the jar are rebuilt as jar:<file-uri>!/<entry>,
-        // so the file URI is the cleanest prefix-free key for a jar as a
-        // classpath entry.
-        return jar.toUri().toString();
+        // Join prefix for entries inside the jar: resourceUri = sourceUri + entry.
+        return "jar:" + jar.toUri() + "!/";
     }
 
     private static String simpleName(String entryName) {

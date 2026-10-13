@@ -19,9 +19,10 @@ import java.nio.charset.StandardCharsets;
 /**
  * Reads the text of a Java source file addressed by an index resource URI.
  *
- * <p>Bytes go through {@link URLConnection}, so {@code file:}, {@code jar:}
- * and {@code jrt:} - the URI shapes the indexer stamps on its entries - all
- * work without special casing.
+ * <p>Bytes go through {@link URLConnection}, so {@code file:} and
+ * {@code jar:} source URIs work without special casing. Platform
+ * {@code jdk:} class URIs are not read here; navigation uses attached
+ * {@code src.zip} jar URIs instead.
  */
 public final class SourceText {
 

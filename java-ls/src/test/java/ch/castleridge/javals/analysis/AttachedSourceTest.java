@@ -26,11 +26,12 @@ class AttachedSourceTest {
     void mapsBytecodeEntryToSourcesJarJavaEntry(@TempDir Path workspace) {
         String binJarUri = jarUri(workspace, "dep.jar");
         String srcJarUri = jarUri(workspace, "dep-sources.jar");
+        String container = "jar:" + binJarUri + "!/";
 
         Optional<String> uri = AttachedSource.javaUri(
-                "jar:" + binJarUri + "!/com/example/Hello.class",
-                binJarUri,
-                Map.of(binJarUri, srcJarUri));
+                container + "com/example/Hello.class",
+                container,
+                Map.of(container, srcJarUri));
 
         assertTrue(uri.isPresent());
         assertEquals("jar:" + srcJarUri + "!/com/example/Hello.java", uri.get());
@@ -40,40 +41,26 @@ class AttachedSourceTest {
     void mapsNestedBytecodeEntryToOuterSourcesJarJavaEntry(@TempDir Path workspace) {
         String binJarUri = jarUri(workspace, "dep.jar");
         String srcJarUri = jarUri(workspace, "dep-sources.jar");
+        String container = "jar:" + binJarUri + "!/";
 
         Optional<String> uri = AttachedSource.javaUri(
-                "jar:" + binJarUri + "!/java/util/Base64$Encoder.class",
-                binJarUri,
-                Map.of(binJarUri, srcJarUri));
+                container + "java/util/Base64$Encoder.class",
+                container,
+                Map.of(container, srcJarUri));
 
         assertTrue(uri.isPresent());
         assertEquals("jar:" + srcJarUri + "!/java/util/Base64.java", uri.get());
     }
 
     @Test
-    void mapsJrtEntryToJdkSourceZipJavaEntry(@TempDir Path workspace) {
-        String jrtUri = "jrt:///C:/jdk-25";
+    void mapsJdkEntryToJdkSourceZipJavaEntry(@TempDir Path workspace) {
+        String jdkUri = "jdk:///C:/jdk-25!/";
         String srcZipUri = jarUri(workspace, "src.zip");
 
         Optional<String> uri = AttachedSource.javaUri(
-                jrtUri + "!/java.base/java/util/Base64$Encoder.class",
-                jrtUri,
-                Map.of(jrtUri, srcZipUri));
-
-        assertTrue(uri.isPresent());
-        assertEquals("jar:" + srcZipUri + "!/java.base/java/util/Base64.java", uri.get());
-    }
-
-    @Test
-    void mapsJrtWalkerPathToJdkSourceZipJavaEntry(@TempDir Path workspace) {
-        String jrtUri = "jrt:///C:/jdk-25";
-        String srcZipUri = jarUri(workspace, "src.zip");
-
-        // JrtInput stores modules/<module>/...; src.zip entries drop that prefix.
-        Optional<String> uri = AttachedSource.javaUri(
-                jrtUri + "!/modules/java.base/java/util/Base64$Encoder.class",
-                jrtUri,
-                Map.of(jrtUri, srcZipUri));
+                jdkUri + "java.base/java/util/Base64$Encoder.class",
+                jdkUri,
+                Map.of(jdkUri, srcZipUri));
 
         assertTrue(uri.isPresent());
         assertEquals("jar:" + srcZipUri + "!/java.base/java/util/Base64.java", uri.get());
@@ -89,8 +76,9 @@ class AttachedSourceTest {
     @Test
     void classFileWithoutAttachedSourcesHasNoNavigableSource(@TempDir Path workspace) {
         String binJarUri = jarUri(workspace, "dep.jar");
+        String container = "jar:" + binJarUri + "!/";
         assertEquals(Optional.empty(), AttachedSource.javaUri(
-                "jar:" + binJarUri + "!/com/example/Hello.class", binJarUri, Map.of()));
+                container + "com/example/Hello.class", container, Map.of()));
     }
 
     @Test

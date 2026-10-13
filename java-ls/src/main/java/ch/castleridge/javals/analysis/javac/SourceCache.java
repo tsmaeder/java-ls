@@ -41,9 +41,9 @@ import ch.castleridge.javals.indexing.index.InMemorySource;
  * into AST positions without re-parsing on every {@code definition}
  * request.
  *
- * <p>Reads through {@link SourceText}, so {@code file:}, {@code jar:} and
- * {@code jrt:} URIs all work. Parse failures yield an empty
- * {@link Optional} and are not cached.
+ * <p>Reads through {@link SourceText}, so {@code file:} and {@code jar:}
+ * source URIs work. Parse failures yield an empty {@link Optional} and
+ * are not cached.
  */
 public final class SourceCache {
 

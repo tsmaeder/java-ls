@@ -12,7 +12,6 @@ package ch.castleridge.javals.indexing.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -29,10 +28,10 @@ class ResourceUrisTest {
     }
 
     @Test
-    void packageRootUriStripsJrtModulePackageAndFile() {
-        String resource = "jrt:///C:/jdk!/modules/java.base/java/lang/Object.class";
+    void packageRootUriStripsJdkModulePackageAndFile() {
+        String resource = "jdk:///C:/jdk!/java.base/java/lang/Object.class";
         assertEquals(
-                "jrt:///C:/jdk!/modules/java.base/",
+                "jdk:///C:/jdk!/java.base/",
                 ResourceUris.packageRootUri(resource, "java/lang"));
     }
 
@@ -50,10 +49,10 @@ class ResourceUrisTest {
         assertEquals("jar:file:///mod.jar!/", ResourceUris.packageRootUri(type, ""));
         String moduleInfo = "jar:file:///mod.jar!/module-info.class";
         assertEquals("jar:file:///mod.jar!/", ResourceUris.packageRootUri(moduleInfo, ""));
-        String jrtModuleInfo = "jrt:///C:/jdk!/modules/java.base/module-info.class";
+        String jdkModuleInfo = "jdk:///C:/jdk!/java.base/module-info.class";
         assertEquals(
-                "jrt:///C:/jdk!/modules/java.base/",
-                ResourceUris.packageRootUri(jrtModuleInfo, ""));
+                "jdk:///C:/jdk!/java.base/",
+                ResourceUris.packageRootUri(jdkModuleInfo, ""));
     }
 
     @Test
@@ -63,17 +62,17 @@ class ResourceUrisTest {
     }
 
     @Test
-    void classpathContainerStripsJarBangPath() {
-        String jar = "file:///C:/lib/dep.jar";
-        String resource = "jar:" + jar + "!/com/example/Hello.class";
+    void classpathContainerKeepsJarBangInclusive() {
+        String jar = "jar:file:///C:/lib/dep.jar!/";
+        String resource = jar + "com/example/Hello.class";
         assertEquals(jar, ResourceUris.classpathContainer(resource));
     }
 
     @Test
-    void classpathContainerStripsJrtBangPath() {
-        String jrtHome = "jrt:///C:/jdk";
-        String resource = jrtHome + "!/modules/java.base/java/lang/Object.class";
-        assertEquals(jrtHome, ResourceUris.classpathContainer(resource));
+    void classpathContainerKeepsJdkBangInclusive() {
+        String jdkHome = "jdk:///C:/jdk!/";
+        String resource = jdkHome + "java.base/java/lang/Object.class";
+        assertEquals(jdkHome, ResourceUris.classpathContainer(resource));
     }
 
     @Test
@@ -89,71 +88,45 @@ class ResourceUrisTest {
     }
 
     @Test
-    void jarEntryCompactsToRelativePath() {
-        String jar = "file:///C:/lib/dep.jar";
-        String resource = "jar:" + jar + "!/com/example/Hello.class";
-        String compact = ResourceUris.compact(resource, jar);
-        assertEquals("com/example/Hello.class", compact);
-        assertEquals(resource, ResourceUris.resolve(jar, compact));
+    void resolveConcatenatesJarPrefix() {
+        String jar = "jar:file:///C:/lib/dep.jar!/";
+        String relative = "com/example/Hello.class";
+        assertEquals(jar + relative, ResourceUris.resolve(jar, relative));
     }
 
     @Test
-    void jrtEntryCompactsToRelativePath() {
-        String jrtHome = "jrt:///C:/jdk";
-        String resource = jrtHome + "!/modules/java.base/java/lang/Object.class";
-        String compact = ResourceUris.compact(resource, jrtHome);
-        assertEquals("modules/java.base/java/lang/Object.class", compact);
-        assertEquals(resource, ResourceUris.resolve(jrtHome, compact));
+    void resolveConcatenatesJdkPrefix() {
+        String jdkHome = "jdk:///C:/jdk!/";
+        String relative = "java.base/java/lang/Object.class";
+        assertEquals(jdkHome + relative, ResourceUris.resolve(jdkHome, relative));
     }
 
     @Test
-    void directoryEntryWithoutTrailingSlashCompacts() {
-        String root = "file:///C:/proj/out";
-        String resource = "file:///C:/proj/out/com/foo/Bar.class";
-        String compact = ResourceUris.compact(resource, root);
-        assertEquals("com/foo/Bar.class", compact);
-        assertEquals(resource, ResourceUris.resolve(root, compact));
-    }
-
-    @Test
-    void directoryEntryCompactsToRelativePath() {
+    void resolveConcatenatesDirectoryPrefix() {
         String root = "file:///C:/proj/out/";
-        String resource = "file:///C:/proj/out/com/foo/Bar.class";
-        String compact = ResourceUris.compact(resource, root);
-        assertEquals("com/foo/Bar.class", compact);
-        assertEquals(resource, ResourceUris.resolve(root, compact));
+        String relative = "com/foo/Bar.class";
+        assertEquals(root + relative, ResourceUris.resolve(root, relative));
     }
 
     @Test
-    void nonRoundTrippableIndexUriKeptAbsolute() {
+    void resolveLeavesAbsoluteStoredUriUnchanged() {
         String source = "index:///test-classpath/";
         String resource = "index:///com/example/Hello.class";
-        String compact = ResourceUris.compact(resource, source);
-        assertEquals(resource, compact);
-        assertEquals(resource, ResourceUris.resolve(source, compact));
-    }
-
-    @Test
-    void compactDoesNotInternSharedRelativePaths() {
-        String jar = "file:///lib.jar";
-        String a = ResourceUris.compact("jar:" + jar + "!/java/lang/Object.class", jar);
-        String b = ResourceUris.compact("jar:" + jar + "!/java/lang/Object.class", jar);
-        assertEquals(a, b);
-        assertNotSame(a, b);
+        assertEquals(resource, ResourceUris.resolve(source, resource));
     }
 
     @Test
     void classFileTypeEntryExposesFullUriWhileStoringRelative() {
-        String jar = "file:///lib.jar";
-        String resource = "jar:" + jar + "!/com/Foo.class";
+        String jar = "jar:file:///lib.jar!/";
+        String relative = "com/Foo.class";
         ClassFileTypeEntry entry = new ClassFileTypeEntry(
-                resource, jar, "com/Foo", 1,
+                relative, jar, "com/Foo", 1,
                 null, EmptyArrays.TYPE, EmptyArrays.TYPE_PARAM,
                 EmptyArrays.FIELD, EmptyArrays.METHOD, EmptyArrays.STRING,
                 EmptyArrays.TYPE_REF, EmptyArrays.RECORD_COMPONENT, EmptyArrays.ANNOTATION_REF);
-        assertEquals("com/Foo.class", entry.resourcePath());
-        assertEquals(resource, entry.resourceUri());
+        assertEquals(relative, entry.resourcePath());
+        assertEquals(jar + relative, entry.resourceUri());
         assertNotEquals(entry.resourcePath(), entry.resourceUri());
-        assertTrue(entry.resourceUri().contains(jar));
+        assertTrue(entry.resourceUri().startsWith(jar));
     }
 }

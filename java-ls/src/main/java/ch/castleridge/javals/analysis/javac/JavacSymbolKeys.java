@@ -123,7 +123,7 @@ public final class JavacSymbolKeys {
     /**
      * Recover the indexed {@code resourceUri} of the declaration that
      * {@code element} resolves to (workspace {@code .java}, dependency
-     * {@code .class}, or {@code jrt:} entries).
+     * {@code .class}, or {@code jdk:} entries).
      *
      * <p>A type loaded from the index keeps that entry's URI. A type declared
      * in this compilation uses the classpath winner's URI when the winner is

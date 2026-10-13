@@ -43,7 +43,8 @@ class MbtServiceTest {
 
         Map<String, String> out = MbtService.sourceJarLookup(info);
         assertEquals(1, out.size());
-        assertEquals(srcJar.toUri().toString(), out.get(binJar.toUri().toString()));
+        String binContainer = "jar:" + binJar.toUri() + "!/";
+        assertEquals(srcJar.toUri().toString(), out.get(binContainer));
     }
 
     @Test
@@ -124,6 +125,7 @@ class MbtServiceTest {
 
         String binUri = binJar.toUri().toString();
         String srcUri = srcJar.toUri().toString();
+        String binContainer = "jar:" + binUri + "!/";
         String mbt = """
                 {
                   "namespaces": {
@@ -154,9 +156,9 @@ class MbtServiceTest {
         mbtService.loadFrom(tempDir.resolve("mbt.json"), tempDir);
 
         assertEquals(3, mbtService.targets().size(), () -> "targets=" + mbtService.targets().keySet());
-        assertTrue(mbtService.targets().get("first").classpath().contains(binUri));
-        assertTrue(mbtService.targets().get("second").classpath().contains(binUri));
-        assertTrue(!mbtService.targets().get("alone").classpath().contains(binUri));
+        assertTrue(mbtService.targets().get("first").classpath().contains(binContainer));
+        assertTrue(mbtService.targets().get("second").classpath().contains(binContainer));
+        assertTrue(!mbtService.targets().get("alone").classpath().contains(binContainer));
 
         String attached = "jar:" + srcUri + "!/com/example/Lib.java";
         var target = mbtService.targetFor(attached);

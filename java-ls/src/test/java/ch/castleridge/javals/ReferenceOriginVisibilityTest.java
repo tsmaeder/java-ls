@@ -23,7 +23,7 @@ class ReferenceOriginVisibilityTest {
     private static final String LIB_ROOT = "file:///workspace/lib/src/";
     private static final String APP_ROOT = "file:///workspace/app/src/";
     private static final String OTHER_ROOT = "file:///workspace/other/src/";
-    private static final String DEP_JAR = "file:///deps/lib.jar";
+    private static final String DEP_JAR = "jar:file:///deps/lib.jar!/";
 
     private static final ClasspathOrder APP_CP = new ClasspathOrder(List.of(
             UriClasspathEntry.of(APP_ROOT),
@@ -38,7 +38,7 @@ class ReferenceOriginVisibilityTest {
 
     @Test
     void originContainerResolvesJarResourceToJarEntry() {
-        String origin = "jar:" + DEP_JAR + "!/com/example/Api.class";
+        String origin = DEP_JAR + "com/example/Api.class";
         assertEquals(DEP_JAR, ReferenceOriginVisibility.originContainer(APP_CP, origin));
     }
 
@@ -67,7 +67,7 @@ class ReferenceOriginVisibilityTest {
     @Test
     void jarOriginVisibleWhenJarIsOnClasspath() {
         String container = ReferenceOriginVisibility.originContainer(
-                APP_CP, "jar:" + DEP_JAR + "!/com/example/Api.class");
+                APP_CP, DEP_JAR + "com/example/Api.class");
         assertTrue(ReferenceOriginVisibility.candidateCanSeeOrigin(APP_CP, container));
     }
 
@@ -76,7 +76,7 @@ class ReferenceOriginVisibilityTest {
         ClasspathOrder cp = new ClasspathOrder(List.of(
                 UriClasspathEntry.of(APP_ROOT)), false);
         String container = ReferenceOriginVisibility.originContainer(
-                APP_CP, "jar:" + DEP_JAR + "!/com/example/Api.class");
+                APP_CP, DEP_JAR + "com/example/Api.class");
         assertFalse(ReferenceOriginVisibility.candidateCanSeeOrigin(cp, container));
     }
 

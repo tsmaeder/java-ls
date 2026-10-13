@@ -286,18 +286,18 @@ class IndexAbstractionTest {
     @Test
     void packagesInPackageRootAreScopedWhenSourceUriIsShared() {
         InMemoryIndex index = new InMemoryIndex();
-        String jrtHome = "jrt:///C:/jdk";
+        String jdkHome = "jdk:///C:/jdk!/";
         index.add(classFileAt(
-                jrtHome,
-                "modules/java.base/java/lang/Object.class",
+                jdkHome,
+                "java.base/java/lang/Object.class",
                 "java/lang/Object"));
         index.add(classFileAt(
-                jrtHome,
-                "modules/java.sql/java/sql/Connection.class",
+                jdkHome,
+                "java.sql/java/sql/Connection.class",
                 "java/sql/Connection"));
 
-        String baseRoot = "jrt:///C:/jdk!/modules/java.base/";
-        String sqlRoot = "jrt:///C:/jdk!/modules/java.sql/";
+        String baseRoot = "jdk:///C:/jdk!/java.base/";
+        String sqlRoot = "jdk:///C:/jdk!/java.sql/";
 
         assertTrue(index.packagesInPackageRoot(baseRoot).contains("java"));
         assertTrue(index.packagesInPackageRoot(baseRoot).contains("java/lang"));
@@ -308,12 +308,12 @@ class IndexAbstractionTest {
     }
 
     @Test
-    void modulesForSourceUriTracksSharedJrtHomeAndPutResourceDeletes() {
+    void modulesForSourceUriTracksSharedJdkHomeAndPutResourceDeletes() {
         InMemoryIndex index = new InMemoryIndex();
-        String jrtHome = "jrt:///C:/jdk";
+        String jdkHome = "jdk:///C:/jdk!/";
         ModuleEntry javaBase = new ModuleEntry(
-                "modules/java.base/module-info.class",
-                jrtHome,
+                "java.base/module-info.class",
+                jdkHome,
                 "java.base",
                 null,
                 0,
@@ -325,8 +325,8 @@ class IndexAbstractionTest {
                 EmptyArrays.STRING,
                 null);
         ModuleEntry javaSql = new ModuleEntry(
-                "modules/java.sql/module-info.class",
-                jrtHome,
+                "java.sql/module-info.class",
+                jdkHome,
                 "java.sql",
                 null,
                 0,
@@ -340,19 +340,19 @@ class IndexAbstractionTest {
         index.addModule(javaBase);
         index.addModule(javaSql);
 
-        assertEquals(List.of(javaBase, javaSql), index.modulesForSourceUri(jrtHome));
+        assertEquals(List.of(javaBase, javaSql), index.modulesForSourceUri(jdkHome));
         assertTrue(javaBase.contains(classFileAt(
-                jrtHome,
-                "modules/java.base/java/lang/Object.class",
+                jdkHome,
+                "java.base/java/lang/Object.class",
                 "java/lang/Object")));
         assertFalse(javaBase.contains(classFileAt(
-                jrtHome,
-                "modules/java.sql/java/sql/Connection.class",
+                jdkHome,
+                "java.sql/java/sql/Connection.class",
                 "java/sql/Connection")));
 
-        index.putResource(jrtHome, "modules/java.base/module-info.class", new InMemoryIndex());
+        index.putResource(jdkHome, "java.base/module-info.class", new InMemoryIndex());
 
-        assertEquals(List.of(javaSql), index.modulesForSourceUri(jrtHome));
+        assertEquals(List.of(javaSql), index.modulesForSourceUri(jdkHome));
         assertTrue(index.getAllModules("java.base").isEmpty());
         assertEquals(1, index.moduleCount());
     }
@@ -453,17 +453,15 @@ class IndexAbstractionTest {
 
         @Override
         public void putResource(String sourceUri, String resourcePath, Index replacement) {
-            String compacted = ch.castleridge.javals.indexing.model.ResourceUris.compact(resourcePath, sourceUri);
             types.removeIf(t -> {
                 String path = switch (t) {
                     case SourceTypeEntry s -> s.resourcePath();
                     case ClassFileTypeEntry c -> c.resourcePath();
                 };
-                return Objects.equals(sourceUri, t.sourceUri()) && Objects.equals(compacted, path);
+                return Objects.equals(sourceUri, t.sourceUri()) && Objects.equals(resourcePath, path);
             });
             blooms.removeIf(b -> Objects.equals(sourceUri, b.sourceUri())
-                    && Objects.equals(compacted, ch.castleridge.javals.indexing.model.ResourceUris.compact(
-                            b.resourcePath(), b.sourceUri())));
+                    && Objects.equals(resourcePath, b.resourcePath()));
             if (replacement != null && !replacement.isEmpty()) {
                 types.addAll(replacement.all());
                 modules.addAll(replacement.allModules());
