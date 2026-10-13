@@ -100,7 +100,56 @@ public final class WorkspaceBootstrap {
                 .orElse(null);
     }
 
-    private static List<Path> workspaceRoots(InitializeParams params) {
+    /**
+     * Locate {@code mbt.json} under {@code roots} without running importers.
+     * Precedence per root: {@code mbt.json}, {@code .javals/mbt.json},
+     * {@code .metals/mbt.json}.
+     */
+    public Optional<PreparedWorkspace> relocate(List<Path> roots, Path workspacePath) {
+        Path mbt = findMbtJson(roots);
+        if (mbt == null) {
+            return Optional.empty();
+        }
+        Path ws = workspacePath != null
+                ? workspacePath.toAbsolutePath().normalize()
+                : (roots.isEmpty()
+                        ? mbt.toAbsolutePath().normalize().getParent()
+                        : roots.get(0).toAbsolutePath().normalize());
+        return Optional.of(new PreparedWorkspace(mbt, ws));
+    }
+
+    static Path findMbtJson(List<Path> roots) {
+        for (Path root : roots) {
+            Path candidate = root.resolve("mbt.json");
+            if (Files.isRegularFile(candidate)) return candidate;
+            candidate = root.resolve(".javals", "mbt.json");
+            if (Files.isRegularFile(candidate)) return candidate;
+            candidate = root.resolve(".metals", "mbt.json");
+            if (Files.isRegularFile(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    /**
+     * True when {@code file} is one of the three consumer mbt paths under
+     * any workspace root (not importer fragments like {@code mbt.json.maven}).
+     */
+    static boolean isMbtCandidate(Path file, List<Path> roots) {
+        if (file == null || roots == null || roots.isEmpty()) return false;
+        Path abs = file.toAbsolutePath().normalize();
+        for (Path root : roots) {
+            if (root == null) continue;
+            Path r = root.toAbsolutePath().normalize();
+            if (abs.equals(r.resolve("mbt.json"))
+                    || abs.equals(r.resolve(".javals").resolve("mbt.json"))
+                    || abs.equals(r.resolve(".metals").resolve("mbt.json"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static List<Path> workspaceRoots(InitializeParams params) {
         List<Path> roots = new ArrayList<>();
         if (params == null) return roots;
         List<WorkspaceFolder> folders = params.getWorkspaceFolders();
@@ -124,18 +173,6 @@ public final class WorkspaceBootstrap {
             }
         }
         return roots;
-    }
-
-    private static Path findMbtJson(List<Path> roots) {
-        for (Path root : roots) {
-            Path candidate = root.resolve("mbt.json");
-            if (Files.isRegularFile(candidate)) return candidate;
-            candidate = root.resolve(".javals", "mbt.json");
-            if (Files.isRegularFile(candidate)) return candidate;
-            candidate = root.resolve(".metals", "mbt.json");
-            if (Files.isRegularFile(candidate)) return candidate;
-        }
-        return null;
     }
 
     /** Result of preparing a workspace for indexing. */

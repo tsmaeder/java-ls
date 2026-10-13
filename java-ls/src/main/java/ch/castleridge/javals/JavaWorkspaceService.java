@@ -40,7 +40,22 @@ public class JavaWorkspaceService implements WorkspaceService {
         if (params == null || params.getChanges() == null || params.getChanges().isEmpty()) {
             return;
         }
-        server.getIndexService().onWatchedFilesChanged(params.getChanges());
+        List<FileEvent> javaChanges = new ArrayList<>();
+        boolean mbtChanged = false;
+        for (FileEvent event : params.getChanges()) {
+            if (event == null || event.getUri() == null) continue;
+            if (server.isMbtCandidateUri(event.getUri())) {
+                mbtChanged = true;
+            } else {
+                javaChanges.add(event);
+            }
+        }
+        if (mbtChanged) {
+            server.scheduleMbtReload();
+        }
+        if (!javaChanges.isEmpty()) {
+            server.getIndexService().onWatchedFilesChanged(javaChanges);
+        }
     }
 
     @Override

@@ -135,6 +135,11 @@ class EcjAnalysisEngineAbortTest {
         }
 
         @Override
+        public void putSource(String sourceUri, Index replacement) {
+            delegate.putSource(sourceUri, replacement);
+        }
+
+        @Override
         public boolean isEmpty() {
             return delegate.isEmpty();
         }

@@ -78,6 +78,14 @@ public interface Index {
      */
     void putResource(String sourceUri, String resourcePath, Index replacement);
 
+    /**
+     * Replace every type entry, bloom filter, and module for
+     * {@code sourceUri}. {@code replacement} may be {@code null} or empty
+     * (delete-only). Fires a single change notification when the index
+     * mutates.
+     */
+    void putSource(String sourceUri, Index replacement);
+
     boolean isEmpty();
 
     /**

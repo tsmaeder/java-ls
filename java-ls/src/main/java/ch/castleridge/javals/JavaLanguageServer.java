@@ -13,20 +13,30 @@ package ch.castleridge.javals;
 import org.eclipse.lsp4j.*;
 import org.eclipse.lsp4j.jsonrpc.messages.Either;
 import org.eclipse.lsp4j.services.*;
+
+import ch.castleridge.javals.indexing.index.UriCoding;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.nio.file.Path;
 /**
  * Main Language Server implementation for Java LSP
  */
 public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     
+    private static final long MBT_RELOAD_DEBOUNCE_MS = 400L;
+
     private final TextDocumentService textDocumentService;
     private final WorkspaceService workspaceService;
     private final IndexService indexService;
@@ -38,6 +48,17 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     private volatile boolean watchedFilesDynamicRegistration;
     private volatile boolean workDoneProgressSupported;
     private final Map<Object, AtomicBoolean> progressCancels = new ConcurrentHashMap<>();
+
+    private volatile List<Path> workspaceRoots = List.of();
+    private volatile Path workspacePath;
+    private volatile String sourceWatcherRegistrationId;
+    private volatile String mbtWatcherRegistrationId;
+    private final AtomicLong mbtReloadGeneration = new AtomicLong();
+    private final ScheduledExecutorService mbtReloadScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "java-ls-mbt-reload");
+        t.setDaemon(true);
+        return t;
+    });
 
     public JavaLanguageServer() {
         this.indexService = new IndexService(this);
@@ -117,23 +138,13 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
                         + ", classIndexer=" + backend.classIndexer()
                         + ", compiler=" + backend.compiler());
 
+        List<Path> roots = WorkspaceBootstrap.workspaceRoots(params);
+        this.workspaceRoots = List.copyOf(roots);
+
         CompletableFuture.runAsync(() -> {
             workspaceBootstrap.prepare(params, this::logMessage).ifPresent(p -> {
-                mbtService.loadFrom(p.mbtJson(), p.workspace());
-                ch.castleridge.javals.analysis.WorkspaceCompiler current =
-                        ((JavaTextDocumentService) textDocumentService).workspaceCompiler();
-                if (current instanceof ch.castleridge.javals.analysis.ecj.EcjWorkspaceCompiler ecj) {
-                    ecj.clearEnvironments();
-                    ecj.setMbtService(mbtService);
-                    ecj.setSourceJarByBinaryJar(mbtService.sourceJarByBinaryJar());
-                }
-                if (mbtService.inputSources().isEmpty()) {
-                    return;
-                }
-                indexService.index(mbtService.inputSources(), mbtService.sourceRoots());
-                if (!mbtService.sourceRootUris().isEmpty()) {
-                    registerSourceFileWatchers(mbtService.sourceRootUris());
-                }
+                this.workspacePath = p.workspace();
+                applyPreparedWorkspace(p, true);
             });
         });
         applyReferencesFromOptions(params.getInitializationOptions(), false);
@@ -195,6 +206,144 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     }
 
     /**
+     * Load mbt state, refresh ECJ, index (cold) or apply input delta (reload),
+     * then (re)register file watchers.
+     */
+    void applyPreparedWorkspace(WorkspaceBootstrap.PreparedWorkspace prepared, boolean coldStart) {
+        if (prepared == null) return;
+        mbtService.loadFrom(prepared.mbtJson(), prepared.workspace());
+        refreshCompilerAfterMbtLoad();
+        if (!mbtService.inputSources().isEmpty()) {
+            if (coldStart) {
+                indexService.index(mbtService.inputSources(), mbtService.sourceRoots());
+            } else {
+                indexService.applyInputDelta(mbtService.inputSources(), mbtService.sourceRoots());
+            }
+        }
+        registerWatchers();
+    }
+
+    private void refreshCompilerAfterMbtLoad() {
+        ch.castleridge.javals.analysis.WorkspaceCompiler current =
+                ((JavaTextDocumentService) textDocumentService).workspaceCompiler();
+        if (current instanceof ch.castleridge.javals.analysis.ecj.EcjWorkspaceCompiler ecj) {
+            ecj.clearEnvironments();
+            ecj.setMbtService(mbtService);
+            ecj.setSourceJarByBinaryJar(mbtService.sourceJarByBinaryJar());
+        } else {
+            rebindWorkspaceCompiler();
+        }
+    }
+
+    /**
+     * Debounced mbt reload triggered by watched-file events for mbt candidates.
+     */
+    void scheduleMbtReload() {
+        long gen = mbtReloadGeneration.incrementAndGet();
+        mbtReloadScheduler.schedule(() -> {
+            if (gen != mbtReloadGeneration.get()) {
+                return;
+            }
+            reloadMbt();
+        }, MBT_RELOAD_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Relocate mbt without re-importing, then apply an incremental index update.
+     * Package-visible for tests.
+     */
+    void reloadMbt() {
+        List<Path> roots = workspaceRoots;
+        if (roots == null || roots.isEmpty()) {
+            logMessage(MessageType.Warning, "Cannot reload mbt.json: no workspace roots");
+            return;
+        }
+        var relocated = workspaceBootstrap.relocate(roots, workspacePath);
+        if (relocated.isEmpty()) {
+            logMessage(MessageType.Info, "No mbt.json found after change; keeping prior index");
+            return;
+        }
+        WorkspaceBootstrap.PreparedWorkspace prepared = relocated.get();
+        this.workspacePath = prepared.workspace();
+        logMessage(MessageType.Info, "Reloading mbt.json: " + prepared.mbtJson());
+        applyPreparedWorkspace(prepared, false);
+    }
+
+    /** True when {@code uri} is a watched mbt consumer path under known roots. */
+    boolean isMbtCandidateUri(String uri) {
+        if (uri == null || uri.isBlank()) return false;
+        Path file = ClientPaths.fromClientString(UriCoding.decode(uri));
+        return WorkspaceBootstrap.isMbtCandidate(file, workspaceRoots);
+    }
+
+    private void registerWatchers() {
+        if (!watchedFilesDynamicRegistration || client == null) {
+            return;
+        }
+        unregisterWatchers();
+        registerMbtFileWatchers();
+        registerSourceFileWatchers(mbtService.sourceRootUris());
+    }
+
+    private void unregisterWatchers() {
+        if (client == null) return;
+        List<Unregistration> unregs = new ArrayList<>(2);
+        if (sourceWatcherRegistrationId != null) {
+            unregs.add(new Unregistration(sourceWatcherRegistrationId, "workspace/didChangeWatchedFiles"));
+            sourceWatcherRegistrationId = null;
+        }
+        if (mbtWatcherRegistrationId != null) {
+            unregs.add(new Unregistration(mbtWatcherRegistrationId, "workspace/didChangeWatchedFiles"));
+            mbtWatcherRegistrationId = null;
+        }
+        if (unregs.isEmpty()) return;
+        try {
+            client.unregisterCapability(new UnregistrationParams(unregs));
+        } catch (RuntimeException e) {
+            logMessage(MessageType.Warning,
+                    "Could not unregister file watchers: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Dynamically register {@code workspace/didChangeWatchedFiles} watchers for
+     * mbt consumer files under each workspace root.
+     */
+    void registerMbtFileWatchers() {
+        if (!watchedFilesDynamicRegistration || client == null
+                || workspaceRoots == null || workspaceRoots.isEmpty()) {
+            return;
+        }
+        List<FileSystemWatcher> watchers = new ArrayList<>();
+        int kind = WatchKind.Create + WatchKind.Change + WatchKind.Delete;
+        for (Path root : workspaceRoots) {
+            if (root == null) continue;
+            String rootUri = root.toUri().toString();
+            watchers.add(new FileSystemWatcher(
+                    Either.forRight(new RelativePattern(Either.forRight(rootUri), "mbt.json")), kind));
+            watchers.add(new FileSystemWatcher(
+                    Either.forRight(new RelativePattern(Either.forRight(rootUri), ".javals/mbt.json")), kind));
+            watchers.add(new FileSystemWatcher(
+                    Either.forRight(new RelativePattern(Either.forRight(rootUri), ".metals/mbt.json")), kind));
+        }
+        if (watchers.isEmpty()) return;
+        String id = UUID.randomUUID().toString();
+        Registration registration = new Registration(
+                id,
+                "workspace/didChangeWatchedFiles",
+                new DidChangeWatchedFilesRegistrationOptions(watchers));
+        try {
+            client.registerCapability(new RegistrationParams(List.of(registration)));
+            mbtWatcherRegistrationId = id;
+            logMessage(MessageType.Info,
+                    "Registered mbt.json watchers for " + workspaceRoots.size() + " workspace root(s)");
+        } catch (RuntimeException e) {
+            logMessage(MessageType.Warning,
+                    "Could not register mbt.json watchers: " + e.getMessage());
+        }
+    }
+
+    /**
      * Dynamically register {@code workspace/didChangeWatchedFiles} watchers for
      * {@code **}/{@code *.java} under each mbt source root, when the client supports it.
      */
@@ -211,14 +360,16 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
             watchers.add(new FileSystemWatcher(Either.forRight(pattern), kind));
         }
         if (watchers.isEmpty()) return;
+        String id = UUID.randomUUID().toString();
         DidChangeWatchedFilesRegistrationOptions options =
                 new DidChangeWatchedFilesRegistrationOptions(watchers);
         Registration registration = new Registration(
-                UUID.randomUUID().toString(),
+                id,
                 "workspace/didChangeWatchedFiles",
                 options);
         try {
             client.registerCapability(new RegistrationParams(List.of(registration)));
+            sourceWatcherRegistrationId = id;
             logMessage(MessageType.Info,
                     "Registered file watchers for " + watchers.size() + " source root(s)");
         } catch (RuntimeException e) {
@@ -281,6 +432,7 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
     @Override
     public CompletableFuture<Object> shutdown() {
         errorCode = 0;
+        mbtReloadScheduler.shutdownNow();
         return CompletableFuture.completedFuture(null);
     }
 
@@ -325,5 +477,11 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
             MessageParams params = new MessageParams(MessageType.Error, e.getMessage() + "\n" + stackTrace);
             client.logMessage(params);
         }
+    }
+
+    /** Package-visible for tests that drive reload without LSP initialize. */
+    void setWorkspaceRootsForTest(List<Path> roots, Path workspace) {
+        this.workspaceRoots = roots == null ? List.of() : List.copyOf(roots);
+        this.workspacePath = workspace;
     }
 }

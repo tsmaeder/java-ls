@@ -212,64 +212,96 @@ public final class InMemoryIndex implements Index {
 
     @Override
     public void putResource(String sourceUri, String resourcePath, Index replacement) {
-        List<EncodedType> encoded = List.of();
-        Collection<ModuleEntry> modules = List.of();
-        List<BloomEntry> bloomsToAdd = List.of();
-        if (replacement != null && !replacement.isEmpty()) {
-            if (replacement instanceof InMemoryIndex mem) {
-                TypeStoreSnapshot snapshot = mem.snapshotTypeStore();
-                modules = mem.allModules();
-                bloomsToAdd = mem.bloomFilters();
-                List<EncodedType> fromSnap = new ArrayList<>(snapshot.blobs.length);
-                for (byte[] blob : snapshot.blobs) {
-                    if (blob == null) continue;
-                    String[] identity = TypeEntryCodec.peekIdentity(blob);
-                    String jvm = peekJvmOwnerName(blob);
-                    if (Index.isSkippedJvmName(jvm)) continue;
-                    fromSnap.add(new EncodedType(jvm, packageOf(jvm), blob,
-                            identity[0], identity[1]));
-                }
-                encoded = fromSnap;
-            } else {
-                Collection<TypeEntry> types = replacement.all();
-                modules = replacement.allModules();
-                bloomsToAdd = replacement.bloomFilters();
-                List<EncodedType> prepared = new ArrayList<>(types.size());
-                for (TypeEntry entry : types) {
-                    if (entry == null) continue;
-                    String jvm = entry.jvmOwnerName();
-                    if (Index.isSkippedJvmName(jvm)) continue;
-                    byte[] blob = TypeEntryCodec.encode(entry);
-                    String[] identity = TypeEntryCodec.peekIdentity(blob);
-                    prepared.add(new EncodedType(jvm, entry.packageJvm(), blob,
-                            identity[0], identity[1]));
-                }
-                encoded = prepared;
-            }
-        }
-
+        PreparedReplacement prepared = prepareReplacement(replacement);
         boolean changed;
         rwLock.writeLock().lock();
         try {
             changed = removeResourceLocked(sourceUri, resourcePath);
-            if (!encoded.isEmpty() || !modules.isEmpty() || !bloomsToAdd.isEmpty()) {
-                ensureTypeBlobCapacity(typeCount + encoded.size());
-                for (EncodedType e : encoded) {
-                    appendEncodedTypeLocked(e.jvm, e.pkg, e.blob);
-                }
-                for (ModuleEntry m : modules) {
-                    if (addModuleLocked(m)) changed = true;
-                }
-                for (BloomEntry bloom : bloomsToAdd) {
-                    registerBloomLocked(bloom.sourceUri(), bloom.resourcePath(), bloom.filter());
-                    changed = true;
-                }
-                if (!encoded.isEmpty()) changed = true;
-            }
+            changed |= applyPreparedReplacementLocked(prepared);
         } finally {
             rwLock.writeLock().unlock();
         }
         if (changed) notifyChanged();
+    }
+
+    @Override
+    public void putSource(String sourceUri, Index replacement) {
+        PreparedReplacement prepared = prepareReplacement(replacement);
+        boolean changed;
+        rwLock.writeLock().lock();
+        try {
+            changed = removeSourceLocked(sourceUri);
+            changed |= applyPreparedReplacementLocked(prepared);
+        } finally {
+            rwLock.writeLock().unlock();
+        }
+        if (changed) notifyChanged();
+    }
+
+    private record PreparedReplacement(
+            List<EncodedType> encoded,
+            Collection<ModuleEntry> modules,
+            List<BloomEntry> blooms) {
+        static PreparedReplacement empty() {
+            return new PreparedReplacement(List.of(), List.of(), List.of());
+        }
+
+        boolean isEmpty() {
+            return encoded.isEmpty() && modules.isEmpty() && blooms.isEmpty();
+        }
+    }
+
+    private static PreparedReplacement prepareReplacement(Index replacement) {
+        if (replacement == null || replacement.isEmpty()) {
+            return PreparedReplacement.empty();
+        }
+        if (replacement instanceof InMemoryIndex mem) {
+            TypeStoreSnapshot snapshot = mem.snapshotTypeStore();
+            Collection<ModuleEntry> modules = mem.allModules();
+            List<BloomEntry> bloomsToAdd = mem.bloomFilters();
+            List<EncodedType> fromSnap = new ArrayList<>(snapshot.blobs.length);
+            for (byte[] blob : snapshot.blobs) {
+                if (blob == null) continue;
+                String[] identity = TypeEntryCodec.peekIdentity(blob);
+                String jvm = peekJvmOwnerName(blob);
+                if (Index.isSkippedJvmName(jvm)) continue;
+                fromSnap.add(new EncodedType(jvm, packageOf(jvm), blob,
+                        identity[0], identity[1]));
+            }
+            return new PreparedReplacement(fromSnap, modules, bloomsToAdd);
+        }
+        Collection<TypeEntry> types = replacement.all();
+        Collection<ModuleEntry> modules = replacement.allModules();
+        List<BloomEntry> bloomsToAdd = replacement.bloomFilters();
+        List<EncodedType> prepared = new ArrayList<>(types.size());
+        for (TypeEntry entry : types) {
+            if (entry == null) continue;
+            String jvm = entry.jvmOwnerName();
+            if (Index.isSkippedJvmName(jvm)) continue;
+            byte[] blob = TypeEntryCodec.encode(entry);
+            String[] identity = TypeEntryCodec.peekIdentity(blob);
+            prepared.add(new EncodedType(jvm, entry.packageJvm(), blob,
+                    identity[0], identity[1]));
+        }
+        return new PreparedReplacement(prepared, modules, bloomsToAdd);
+    }
+
+    /** Caller must hold the write lock. */
+    private boolean applyPreparedReplacementLocked(PreparedReplacement prepared) {
+        if (prepared.isEmpty()) return false;
+        ensureTypeBlobCapacity(typeCount + prepared.encoded().size());
+        for (EncodedType e : prepared.encoded()) {
+            appendEncodedTypeLocked(e.jvm, e.pkg, e.blob);
+        }
+        boolean changed = !prepared.encoded().isEmpty();
+        for (ModuleEntry m : prepared.modules()) {
+            if (addModuleLocked(m)) changed = true;
+        }
+        for (BloomEntry bloom : prepared.blooms()) {
+            registerBloomLocked(bloom.sourceUri(), bloom.resourcePath(), bloom.filter());
+            changed = true;
+        }
+        return changed;
     }
 
     private void addAllInMemory(InMemoryIndex other) {
@@ -421,20 +453,8 @@ public final class InMemoryIndex implements Index {
         boolean changed = false;
         String key = resourceKey(sourceUri, compactedPath);
         IntList ids = byResource.remove(key);
-        if (ids != null && !ids.isEmpty()) {
+        if (tombstoneTypeIdsLocked(ids)) {
             changed = true;
-            for (int i = 0; i < ids.size(); i++) {
-                int id = ids.get(i);
-                byte[] blob = typeBlobs[id];
-                if (blob == null) continue;
-                String jvm = peekJvmOwnerName(blob);
-                String pkg = packageOf(jvm);
-                removeId(byJvmName, jvm, id);
-                removeId(byPackage, pkg, id);
-                typeBlobs[id] = null;
-                liveTypeCount--;
-                decodedCache.invalidate(id);
-            }
         }
         if (removeModulesForResourceLocked(sourceUri, compactedPath)) {
             changed = true;
@@ -449,6 +469,70 @@ public final class InMemoryIndex implements Index {
             }
         }
         return changed;
+    }
+
+    /**
+     * Caller must hold the write lock. Tombstones every type, bloom, and
+     * module for {@code sourceUri}. Returns {@code true} if anything was removed.
+     */
+    private boolean removeSourceLocked(String sourceUri) {
+        boolean changed = false;
+        String prefix = (sourceUri == null ? "" : sourceUri) + '\0';
+        var resources = byResource.entrySet().iterator();
+        while (resources.hasNext()) {
+            Map.Entry<String, IntList> entry = resources.next();
+            if (!entry.getKey().startsWith(prefix)) continue;
+            resources.remove();
+            if (tombstoneTypeIdsLocked(entry.getValue())) {
+                changed = true;
+            }
+        }
+        if (removeModulesForSourceLocked(sourceUri)) {
+            changed = true;
+        }
+        int sourceUriId = StringTable.intern(sourceUri);
+        for (int i = blooms.size() - 1; i >= 0; i--) {
+            BloomSlot slot = blooms.get(i);
+            if (slot.sourceUriId() == sourceUriId) {
+                blooms.remove(i);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    /** Caller must hold the write lock. */
+    private boolean tombstoneTypeIdsLocked(IntList ids) {
+        if (ids == null || ids.isEmpty()) return false;
+        for (int i = 0; i < ids.size(); i++) {
+            int id = ids.get(i);
+            byte[] blob = typeBlobs[id];
+            if (blob == null) continue;
+            String jvm = peekJvmOwnerName(blob);
+            String pkg = packageOf(jvm);
+            removeId(byJvmName, jvm, id);
+            removeId(byPackage, pkg, id);
+            typeBlobs[id] = null;
+            liveTypeCount--;
+            decodedCache.invalidate(id);
+        }
+        return true;
+    }
+
+    /**
+     * Caller must hold the write lock. Drops every module stamped with
+     * {@code sourceUri}. Returns {@code true} if any were removed.
+     */
+    private boolean removeModulesForSourceLocked(String sourceUri) {
+        List<ModuleEntry> bucket = modulesBySourceUri.remove(sourceUri);
+        if (bucket == null || bucket.isEmpty()) return false;
+        for (ModuleEntry module : bucket) {
+            List<ModuleEntry> byName = byModuleName.get(module.name());
+            if (byName == null) continue;
+            byName.remove(module);
+            if (byName.isEmpty()) byModuleName.remove(module.name());
+        }
+        return true;
     }
 
     /**

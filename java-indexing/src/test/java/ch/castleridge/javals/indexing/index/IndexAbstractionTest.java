@@ -284,6 +284,67 @@ class IndexAbstractionTest {
     }
 
     @Test
+    void putSourceEmptyDeletesAllTypesBloomsAndModulesForUri() {
+        InMemoryIndex index = new InMemoryIndex();
+        String jarUri = "jar:file:///lib.jar!/";
+        String otherUri = "file:///src/";
+        index.add(classFileAt(jarUri, "com/lib/A.class", "com/lib/A"));
+        index.add(classFileAt(jarUri, "com/lib/B.class", "com/lib/B"));
+        index.registerBloom(jarUri, "com/lib/A.class",
+                IdentifierBloomFilter.create(List.of("A")));
+        index.addModule(new ModuleEntry(
+                "module-info.class",
+                jarUri,
+                "com.lib",
+                null,
+                0,
+                EmptyArrays.REQUIRES,
+                EmptyArrays.EXPORTS,
+                EmptyArrays.OPENS,
+                EmptyArrays.STRING,
+                EmptyArrays.PROVIDES,
+                EmptyArrays.STRING,
+                null));
+        index.add(sourceTypeAt(otherUri, "com/example/Foo.java", "com/example/Foo"));
+
+        AtomicInteger notifications = new AtomicInteger();
+        index.addChangedListener(notifications::incrementAndGet);
+
+        index.putSource(jarUri, new InMemoryIndex());
+
+        assertEquals(1, notifications.get());
+        assertFalse(index.contains("com/lib/A"));
+        assertFalse(index.contains("com/lib/B"));
+        assertTrue(index.contains("com/example/Foo"));
+        assertTrue(index.modulesForSourceUri(jarUri).isEmpty());
+        assertTrue(index.getAllModules("com.lib").isEmpty());
+        assertTrue(index.bloomFilters().stream().noneMatch(b -> jarUri.equals(b.sourceUri())));
+        assertEquals(1, index.entryCount());
+    }
+
+    @Test
+    void putSourceReplaceDoesNotDuplicateEntries() {
+        InMemoryIndex index = new InMemoryIndex();
+        String jarUri = "jar:file:///lib.jar!/";
+        index.add(classFileAt(jarUri, "com/lib/A.class", "com/lib/A"));
+        index.add(classFileAt(jarUri, "com/lib/Old.class", "com/lib/Old"));
+
+        InMemoryIndex replacement = new InMemoryIndex();
+        replacement.add(classFileAt(jarUri, "com/lib/A.class", "com/lib/A"));
+        replacement.add(classFileAt(jarUri, "com/lib/New.class", "com/lib/New"));
+
+        AtomicInteger notifications = new AtomicInteger();
+        index.addChangedListener(notifications::incrementAndGet);
+        index.putSource(jarUri, replacement);
+
+        assertEquals(1, notifications.get());
+        assertEquals(1, index.getAll("com/lib/A").size());
+        assertTrue(index.contains("com/lib/New"));
+        assertFalse(index.contains("com/lib/Old"));
+        assertEquals(2, index.entryCount());
+    }
+
+    @Test
     void packagesInPackageRootAreScopedWhenSourceUriIsShared() {
         InMemoryIndex index = new InMemoryIndex();
         String jdkHome = "jdk:///C:/jdk!/";
@@ -472,6 +533,18 @@ class IndexAbstractionTest {
             });
             blooms.removeIf(b -> Objects.equals(sourceUri, b.sourceUri())
                     && Objects.equals(resourcePath, b.resourcePath()));
+            if (replacement != null && !replacement.isEmpty()) {
+                types.addAll(replacement.all());
+                modules.addAll(replacement.allModules());
+                blooms.addAll(replacement.bloomFilters());
+            }
+        }
+
+        @Override
+        public void putSource(String sourceUri, Index replacement) {
+            types.removeIf(t -> Objects.equals(sourceUri, t.sourceUri()));
+            modules.removeIf(m -> Objects.equals(sourceUri, m.sourceUri()));
+            blooms.removeIf(b -> Objects.equals(sourceUri, b.sourceUri()));
             if (replacement != null && !replacement.isEmpty()) {
                 types.addAll(replacement.all());
                 modules.addAll(replacement.allModules());
