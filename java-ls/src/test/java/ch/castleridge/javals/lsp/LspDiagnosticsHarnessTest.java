@@ -814,6 +814,43 @@ class LspDiagnosticsHarnessTest {
     }
 
     /**
+     * Opening attached JDK source must not publish compile errors (unnamed-module
+     * analysis of modular JDK sources is not meaningful), while still completing
+     * the diagnostics round-trip so clients clear prior squiggles.
+     */
+    @Test
+    void openingAttachedJdkSourcePublishesNoDiagnostics(@TempDir Path workspace) throws Exception {
+        Path srcZip = Path.of(System.getProperty("java.home")).resolve("lib/src.zip");
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                Files.isRegularFile(srcZip), "JDK src.zip not present");
+
+        Path sourceDir = workspace.resolve("src/main/java/com/example");
+        Files.createDirectories(sourceDir);
+        writeMbtJson(workspace);
+        Files.writeString(sourceDir.resolve("Main.java"), """
+                package com.example;
+                public class Main {}
+                """);
+
+        String vectorShape = "jar:" + srcZip.toUri()
+                + "!/jdk.incubator.vector/jdk/incubator/vector/VectorShape.java";
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+                ch.castleridge.javals.analysis.SourceText.read(vectorShape) != null,
+                "VectorShape.java not in JDK src.zip");
+
+        // ECJ reports the modular package conflicts; javac often reports none.
+        // Suppression must work after UriCoding.decode (spaces in Program Files).
+        Map<String, Object> ecj = Map.of("backend", Map.of("compiler", "ecj"));
+        try (LspDiagnosticsHarness harness = LspDiagnosticsHarness.start(workspace, TIMEOUT, ecj)) {
+            harness.awaitIndexReady(TIMEOUT);
+            List<Diagnostic> diagnostics =
+                    harness.openAndAwaitDiagnostics(vectorShape, TIMEOUT);
+            assertTrue(diagnostics.isEmpty(),
+                    () -> "expected no diagnostics for attached JDK source, got: " + diagnostics);
+        }
+    }
+
+    /**
      * A type hierarchy request goes through the wire twice: the item the client
      * gets from {@code prepare} is sent back verbatim on {@code supertypes}, so
      * whatever the server stamped on it has to survive JSON.

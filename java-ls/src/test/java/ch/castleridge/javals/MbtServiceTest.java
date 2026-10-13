@@ -7,6 +7,7 @@
 package ch.castleridge.javals;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -168,6 +169,41 @@ class MbtServiceTest {
         // First target in namespace-id order whose classpath contains the binary jar.
         assertEquals("first", target.get().id());
         assertSame(mbtService.targets().get("first").classpath(), mbtService.classPathFor(attached));
+        assertTrue(mbtService.isAttachedSource(attached));
+        assertFalse(mbtService.isAttachedSource(firstSrc.resolve("Main.java").toUri().toString()));
+    }
+
+    @Test
+    void isAttachedSourceMatchesDecodedSrcZipUriWithSpaces(@TempDir Path tempDir) throws Exception {
+        Path src = tempDir.resolve("src");
+        Files.createDirectories(src);
+        Files.writeString(src.resolve("Main.java"), "public class Main {}\n", StandardCharsets.UTF_8);
+        Files.writeString(tempDir.resolve("mbt.json"), """
+                {
+                  "namespaces": {
+                    "demo": {
+                      "sources": ["src"],
+                      "dependencyModules": [],
+                      "dependsOn": []
+                    }
+                  },
+                  "dependencyModules": []
+                }
+                """, StandardCharsets.UTF_8);
+
+        MbtService mbtService = new MbtService(null);
+        mbtService.loadFrom(tempDir.resolve("mbt.json"), tempDir);
+
+        Path srcZip = Path.of(System.getProperty("java.home")).resolve("lib/src.zip");
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isRegularFile(srcZip), "JDK src.zip not present");
+
+        String encoded = "jar:" + srcZip.toUri() + "!/java.base/java/lang/Object.java";
+        // didOpen runs UriCoding.decode, which turns Program%20Files into spaces.
+        String decoded = ch.castleridge.javals.indexing.index.UriCoding.decode(encoded);
+        assertTrue(mbtService.isAttachedSource(encoded), "encoded jar URI");
+        assertTrue(mbtService.isAttachedSource(decoded),
+                () -> "decoded jar URI should match sources archive map: " + decoded);
+        assertFalse(mbtService.isAttachedSource(src.resolve("Main.java").toUri().toString()));
     }
 
     @Test

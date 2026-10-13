@@ -64,6 +64,7 @@ import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageServer;
 
 import ch.castleridge.javals.App;
+import ch.castleridge.javals.analysis.SourceText;
 import ch.castleridge.javals.indexing.index.UriCoding;
 
 /**
@@ -211,6 +212,27 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
 
     public List<Diagnostic> openAndAwaitDiagnostics(URI uri, String text) throws Exception {
         return openAndAwaitDiagnostics(uri, text, DEFAULT_DIAGNOSTICS_TIMEOUT);
+    }
+
+    /**
+     * Open a {@code file:} or {@code jar:} URI, reading text via {@link SourceText}.
+     */
+    public List<Diagnostic> openAndAwaitDiagnostics(String uri) throws Exception {
+        return openAndAwaitDiagnostics(uri, DEFAULT_DIAGNOSTICS_TIMEOUT);
+    }
+
+    /**
+     * Open a {@code file:} or {@code jar:} URI, reading text via {@link SourceText}.
+     */
+    public List<Diagnostic> openAndAwaitDiagnostics(String uri, Duration timeout) throws Exception {
+        if (uri == null || uri.isBlank()) {
+            throw new IllegalArgumentException("uri is blank");
+        }
+        String text = SourceText.read(uri);
+        if (text == null) {
+            throw new IOException("cannot read source at " + uri);
+        }
+        return openAndAwaitDiagnostics(URI.create(uri), text, timeout);
     }
 
     public List<Diagnostic> openAndAwaitDiagnostics(URI uri, String text, Duration timeout) throws Exception {

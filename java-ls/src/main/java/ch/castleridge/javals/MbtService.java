@@ -144,6 +144,20 @@ public final class MbtService {
         return targetFor(uri).map(Target::classpath).orElse(ClasspathOrder.UNRESTRICTED);
     }
 
+    /**
+     * {@code true} when {@code uri} lives in a sources archive registered for
+     * some binary classpath entry (dependency {@code -sources.jar} or JDK
+     * {@code src.zip}). Workspace source roots are never attached sources.
+     */
+    public boolean isAttachedSource(String uri) {
+        if (uri == null || uri.isBlank()) {
+            return false;
+        }
+        State current = state.get();
+        String sourcesArchive = ResourceUris.classpathContainer(uri);
+        return binaryJarForSourcesArchive(current.binaryJarBySourceJar, sourcesArchive) != null;
+    }
+
     public Map<String, String> sourceJarByBinaryJar() {
         return state.get().sourceJarByBinaryJar;
     }
@@ -403,7 +417,9 @@ public final class MbtService {
         String trimmed = s.trim();
         if (trimmed.contains("://") || trimmed.startsWith("file:")) {
             try {
-                return Path.of(URI.create(trimmed)).toAbsolutePath().normalize();
+                // LSP / UriCoding.decode leave spaces; URI.create requires %20.
+                String encoded = trimmed.indexOf(' ') >= 0 ? trimmed.replace(" ", "%20") : trimmed;
+                return Path.of(URI.create(encoded)).toAbsolutePath().normalize();
             } catch (IllegalArgumentException | java.nio.file.FileSystemNotFoundException e) {
                 return null;
             }

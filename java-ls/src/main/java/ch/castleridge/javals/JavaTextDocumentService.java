@@ -214,7 +214,11 @@ public class JavaTextDocumentService implements TextDocumentService {
                 if (latestOnError == null || latestOnError.getVersion() != versionAtStart) {
                     return;
                 }
-                publishCompilerErrorDiagnostic(uri, e);
+                if (mbtService.isAttachedSource(uri)) {
+                    publishEmptyDiagnostics(uri);
+                } else {
+                    publishCompilerErrorDiagnostic(uri, e);
+                }
                 return;
             }
 
@@ -223,7 +227,13 @@ public class JavaTextDocumentService implements TextDocumentService {
                 return;
             }
             compileCache.put(uri, new CachedCompile(versionAtStart, session));
-            publishDiagnostics(uri, session.diagnostics());
+            // Attached jar/src.zip sources still get a session for navigation,
+            // but their compile problems are not useful in the editor.
+            if (mbtService.isAttachedSource(uri)) {
+                publishEmptyDiagnostics(uri);
+            } else {
+                publishDiagnostics(uri, session.diagnostics());
+            }
         });
     }
 

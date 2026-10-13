@@ -10,6 +10,7 @@
  */
 package ch.castleridge.javals.lsp;
 
+import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -21,7 +22,11 @@ import org.eclipse.lsp4j.Range;
 /**
  * Thin CLI wrapper around {@link LspDiagnosticsHarness}.
  *
- * <p>Usage: {@code LspDiagnosticsHarnessMain <workspace-root> <file> [<file> ...]}
+ * <p>Usage: {@code LspDiagnosticsHarnessMain <workspace-root> <file-or-uri> [<file-or-uri> ...]}
+ *
+ * <p>Each path argument may be a filesystem path or a URI ({@code file:},
+ * {@code jar:}, …) including attached JDK sources such as
+ * {@code jar:file:///…/lib/src.zip!/java.base/java/lang/Object.java}.
  */
 public final class LspDiagnosticsHarnessMain {
 
@@ -32,7 +37,8 @@ public final class LspDiagnosticsHarnessMain {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
-            System.err.println("Usage: LspDiagnosticsHarnessMain <workspace-root> <file> [<file> ...]");
+            System.err.println(
+                    "Usage: LspDiagnosticsHarnessMain <workspace-root> <file-or-uri> [<file-or-uri> ...]");
             System.exit(2);
         }
 
@@ -55,15 +61,16 @@ public final class LspDiagnosticsHarnessMain {
 
             int logsAlreadyPrinted = harness.logMessages().size();
             for (int i = 1; i < args.length; i++) {
-                Path file = Path.of(args[i]).toAbsolutePath().normalize();
+                String target = resolveOpenTarget(args[i]);
                 try {
-                    List<Diagnostic> diagnostics = harness.openAndAwaitDiagnostics(file, DIAGNOSTICS_TIMEOUT);
-                    printDiagnostics(file, diagnostics);
+                    List<Diagnostic> diagnostics =
+                            harness.openAndAwaitDiagnostics(target, DIAGNOSTICS_TIMEOUT);
+                    printDiagnostics(target, diagnostics);
                     if (diagnostics.stream().anyMatch(d -> d.getSeverity() == DiagnosticSeverity.Error)) {
                         hasErrors = true;
                     }
                 } catch (Exception e) {
-                    System.err.println(file + ": no diagnostics received (" + e + ")");
+                    System.err.println(target + ": no diagnostics received (" + e + ")");
                     hasErrors = true;
                 } finally {
                     List<String> logs = harness.logMessages();
@@ -79,8 +86,47 @@ public final class LspDiagnosticsHarnessMain {
         System.exit(hasErrors ? 1 : 0);
     }
 
-    private static void printDiagnostics(Path file, List<Diagnostic> diagnostics) {
-        System.err.println(file + ": " + diagnostics.size() + " diagnostic(s)");
+    /**
+     * Filesystem path → absolute {@code file:} URI; otherwise keep as URI string
+     * when it has a scheme or a jar entry separator.
+     */
+    static String resolveOpenTarget(String arg) {
+        if (arg == null || arg.isBlank()) {
+            throw new IllegalArgumentException("blank file-or-uri argument");
+        }
+        if (looksLikeUri(arg)) {
+            return URI.create(arg).toString();
+        }
+        return Path.of(arg).toAbsolutePath().normalize().toUri().toString();
+    }
+
+    private static boolean looksLikeUri(String arg) {
+        if (arg.contains("!/")) {
+            return true;
+        }
+        int schemeEnd = arg.indexOf(':');
+        if (schemeEnd <= 0) {
+            return false;
+        }
+        // Windows drive letters are a single letter before ':'; URIs need a scheme.
+        if (schemeEnd == 1) {
+            return false;
+        }
+        String scheme = arg.substring(0, schemeEnd);
+        for (int i = 0; i < scheme.length(); i++) {
+            char c = scheme.charAt(i);
+            if (!(c >= 'a' && c <= 'z')
+                    && !(c >= 'A' && c <= 'Z')
+                    && !(c >= '0' && c <= '9')
+                    && c != '+' && c != '-' && c != '.') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void printDiagnostics(String uri, List<Diagnostic> diagnostics) {
+        System.err.println(uri + ": " + diagnostics.size() + " diagnostic(s)");
         for (Diagnostic d : diagnostics) {
             String severity = severityLabel(d.getSeverity());
             Range range = d.getRange();
