@@ -9,7 +9,14 @@
   <packaging>pom</packaging>
 
   <name>java-ls parent</name>
-  <url>http://www.example.com</url>
+  <url>https://github.com/tsmaeder/java-ls</url>
+
+  <scm>
+    <connection>scm:git:https://github.com/tsmaeder/java-ls.git</connection>
+    <developerConnection>scm:git:https://github.com/tsmaeder/java-ls.git</developerConnection>
+    <url>https://github.com/tsmaeder/java-ls</url>
+    <tag>HEAD</tag>
+  </scm>
 
   <modules>
     <module>java-indexing</module>
