@@ -260,10 +260,13 @@ public final class JavacSourceIndexer {
                 if (isEnumConstant(vt)) {
                     fieldFlags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_ENUM;
                 }
+                if (declKind == TypeDeclKind.INTERFACE || declKind == TypeDeclKind.ANNOTATION) {
+                    fieldFlags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL;
+                }
                 if (!AccessVisibility.shouldIndexMember(fieldFlags, vt.getName().toString())) {
                     continue;
                 }
-                fields.add(toFieldEntry(vt, classTypeParams, localName));
+                fields.add(toFieldEntry(vt, classTypeParams, localName, declKind));
             } else if (member instanceof MethodTree mt) {
                 String methodName = mt.getName().toString();
                 if (!AccessVisibility.shouldIndexMember(modifierFlags(mt.getModifiers()), methodName)) {
@@ -315,7 +318,8 @@ public final class JavacSourceIndexer {
     }
 
     private static FieldEntry toFieldEntry(VariableTree vt,
-                                           Set<String> typeParams, String ownerJvm) {
+                                           Set<String> typeParams, String ownerJvm,
+                                           TypeDeclKind ownerKind) {
         int flags = modifierFlags(vt.getModifiers());
         if (isEnumConstant(vt)) {
             // An enum constant is implicitly public, static and final and
@@ -324,6 +328,13 @@ public final class JavacSourceIndexer {
             // non-static, so `MyEnum.CONSTANT` references report "cannot find
             // symbol: variable CONSTANT".
             flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_ENUM;
+        }
+        // Interface / annotation fields are implicitly public static final
+        // (JLS 9.3). Promote before constant extraction so bare
+        // `String C = "x";` is stored as a compile-time constant (needed for
+        // switch labels and annotation elements).
+        if (ownerKind == TypeDeclKind.INTERFACE || ownerKind == TypeDeclKind.ANNOTATION) {
+            flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL;
         }
         Object constantValue = null;
         TypeRef constantOwner = null;

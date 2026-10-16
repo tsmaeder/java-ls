@@ -282,11 +282,14 @@ final class EcjSourceIndexerEngine {
                 if (isEnumConstant(field)) {
                     fieldFlags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_ENUM;
                 }
+                if (declKind == TypeDeclKind.INTERFACE || declKind == TypeDeclKind.ANNOTATION) {
+                    fieldFlags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL;
+                }
                 String fieldName = field.name == null ? "" : new String(field.name);
                 if (!AccessVisibility.shouldIndexMember(fieldFlags, fieldName)) {
                     continue;
                 }
-                fields.add(toFieldEntry(field, classTypeParams, localName));
+                fields.add(toFieldEntry(field, classTypeParams, localName, declKind));
             }
         }
 
@@ -350,10 +353,17 @@ final class EcjSourceIndexerEngine {
 
     private static FieldEntry toFieldEntry(FieldDeclaration field,
                                            Set<String> typeParams,
-                                           String ownerJvm) {
+                                           String ownerJvm,
+                                           TypeDeclKind ownerKind) {
         int flags = modifierFlags(field.modifiers);
         if (isEnumConstant(field)) {
             flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_ENUM;
+        }
+        // Interface / annotation fields are implicitly public static final
+        // (JLS 9.3). Promote before constant extraction so bare
+        // `String C = "x";` is stored as a compile-time constant.
+        if (ownerKind == TypeDeclKind.INTERFACE || ownerKind == TypeDeclKind.ANNOTATION) {
+            flags |= Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL;
         }
         Object constantValue = null;
         TypeRef constantOwner = null;

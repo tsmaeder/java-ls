@@ -1153,9 +1153,16 @@ final class JavacAstLowerer {
 
     private SourceRange range(Tree tree) {
         if (tree == null || positions == null) return SourceRange.NONE;
-        long start = positions.getStartPosition(cu, tree);
-        long end = positions.getEndPosition(cu, tree);
-        if (start < 0) return SourceRange.NONE;
+        long startL = positions.getStartPosition(cu, tree);
+        long endL = positions.getEndPosition(cu, tree);
+        if (startL < 0) return SourceRange.NONE;
+        int len = source.length();
+        int start = (int) Math.min(Math.max(0L, startL), len);
+        // Bad tree positions can land at/past EOF; never construct end < start.
+        if (start == len) {
+            return new SourceRange(start, start);
+        }
+        int end = (int) endL;
         if (end < start) {
             if (tree instanceof IdentifierTree ident) {
                 end = start + ident.getName().length();
@@ -1165,15 +1172,43 @@ final class JavacAstLowerer {
                 end = start + 1;
             }
         }
-        return new SourceRange((int) start, (int) Math.min(source.length(), end));
+        return safeRange(start, end, len);
+    }
+
+    /**
+     * Clamp {@code [start, end)} into {@code [0, sourceLength]} so
+     * {@link SourceRange} never sees {@code end < start}. Package-visible for tests.
+     */
+    static SourceRange safeRange(int start, int end, int sourceLength) {
+        if (start < 0) {
+            return SourceRange.NONE;
+        }
+        if (sourceLength < 0) {
+            sourceLength = 0;
+        }
+        if (start > sourceLength) {
+            start = sourceLength;
+        }
+        if (start == sourceLength) {
+            return new SourceRange(start, start);
+        }
+        if (end < start) {
+            end = start;
+        }
+        if (end > sourceLength) {
+            end = sourceLength;
+        }
+        return new SourceRange(start, end);
     }
 
     private SourceRange nameRange(Tree tree, String name) {
         SourceRange full = range(tree);
         if (!full.isPresent() || name == null || name.isEmpty()) return full;
         int found = source.indexOf(name, full.start());
-        if (found < 0 || found >= full.end()) return new SourceRange(full.start(), Math.min(full.end(), full.start() + name.length()));
-        return new SourceRange(found, found + name.length());
+        if (found < 0 || found >= full.end()) {
+            return safeRange(full.start(), Math.min(full.end(), full.start() + name.length()), source.length());
+        }
+        return safeRange(found, found + name.length(), source.length());
     }
 
     private SourceRange selectNameRange(MemberSelectTree tree) {
@@ -1182,7 +1217,7 @@ final class JavacAstLowerer {
         if (!full.isPresent()) return SourceRange.NONE;
         int end = full.end();
         int start = Math.max(full.start(), end - name.length());
-        return new SourceRange(start, end);
+        return safeRange(start, end, source.length());
     }
 
     private String slice(SourceRange range) {

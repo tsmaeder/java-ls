@@ -3517,6 +3517,61 @@ class IndexCompileTest {
     }
 
     @Test
+    void sourceIndexedInterfaceFieldConstantsFoldForAnnotationsAndSwitches() throws Exception {
+        // Bare interface fields are implicitly public static final (JLS 9.3).
+        // The indexer must promote those flags before constant extraction so
+        // switch labels / annotation elements see a compile-time constant.
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String cpUri = "index:///cp/iface-constants/";
+
+        Index index = new InMemoryIndex();
+        assertTrue(new Scanner().scanAll(List.of(jrt), index).isEmpty());
+
+        JavacSourceIndexer.index("mem:///Hints.java", cpUri,
+                """
+                        package p;
+                        public interface Hints {
+                            String HINT_FLUSH_MODE = "org.hibernate.flushMode";
+                            int INSERT = 1;
+                        }
+                        """,
+                index);
+        JavacSourceIndexer.index("mem:///Ann.java", cpUri,
+                """
+                        package p;
+                        public @interface Ann {
+                            String value();
+                        }
+                        """,
+                index);
+
+        ClasspathOrder cp = classPathOf(List.of(cpUri, jrtUri));
+        var errors = compileSource(index, cp, "test:///User.java",
+                """
+                        package q;
+                        import p.Hints;
+                        import p.Ann;
+                        @Ann(Hints.HINT_FLUSH_MODE)
+                        public class User {
+                            void m(String s, int op) {
+                                switch (s) {
+                                    case Hints.HINT_FLUSH_MODE -> {}
+                                    default -> {}
+                                }
+                                switch (op) {
+                                    case Hints.INSERT -> {}
+                                    default -> {}
+                                }
+                            }
+                        }
+                        """);
+        assertTrue(errors.isEmpty(),
+                () -> "interface field constants must fold for annotations and switch cases; got: " + errors);
+    }
+
+    @Test
     void sourceIndexedRepeatableAnnotationAcceptsRepeatedUse() throws Exception {
         Path jdk = Path.of(System.getProperty("java.home"));
         JrtInput jrt = new JrtInput(jdk);

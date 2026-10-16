@@ -67,4 +67,40 @@ class EcjSourceIndexerSmokeTest {
         assertTrue(bloom.mightContain("value"));
         assertFalse(bloom.mightContain("definitelyNotInThisFile"));
     }
+
+    @Test
+    void interfaceFieldStoresCompileTimeConstant() {
+        Index index = new InMemoryIndex();
+        EcjSourceIndexer.index(
+                "mem:///Hints.java",
+                SOURCE_URI,
+                """
+                        package p;
+
+                        public interface Hints {
+                            String HINT_FLUSH_MODE = "org.hibernate.flushMode";
+                            int INSERT = 1;
+                        }
+                        """,
+                index);
+
+        SourceTypeEntry hints = (SourceTypeEntry) IndexTestUtils.get(index, "p/Hints");
+        assertNotNull(hints);
+        assertEquals(TypeDeclKind.INTERFACE, hints.declKind());
+
+        var flush = java.util.Arrays.stream(hints.fields())
+                .filter(f -> f.name().equals("HINT_FLUSH_MODE"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("org.hibernate.flushMode", flush.constantValue());
+        assertTrue((flush.modifiers() & Opcodes.ACC_PUBLIC) != 0);
+        assertTrue((flush.modifiers() & Opcodes.ACC_STATIC) != 0);
+        assertTrue((flush.modifiers() & Opcodes.ACC_FINAL) != 0);
+
+        var insert = java.util.Arrays.stream(hints.fields())
+                .filter(f -> f.name().equals("INSERT"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(1, insert.constantValue());
+    }
 }
