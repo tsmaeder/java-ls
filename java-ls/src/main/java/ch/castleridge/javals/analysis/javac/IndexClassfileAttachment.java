@@ -27,6 +27,9 @@ import ch.castleridge.javals.indexing.model.TypeEntry;
  */
 final class IndexClassfileAttachment {
 
+    /** Resource URI prefix for synthetic stubs when a type is not on the compile classpath. */
+    static final String MISSING_RESOURCE_PREFIX = "index:///missing/";
+
     private IndexClassfileAttachment() {}
 
     static void attachIfMissing(ClassSymbol symbol, Index index, ClasspathOrder classpath) {
@@ -42,9 +45,18 @@ final class IndexClassfileAttachment {
         symbol.classfile = new IndexClassFileObject(missingTypeEntry(jvmName));
     }
 
+    /** True when {@code entry} is the synthetic off-classpath stub from {@link #missingTypeEntry}. */
+    static boolean isMissing(TypeEntry entry) {
+        if (entry == null) {
+            return false;
+        }
+        String uri = entry.resourceUri();
+        return uri != null && uri.startsWith(MISSING_RESOURCE_PREFIX);
+    }
+
     static TypeEntry missingTypeEntry(String jvmName) {
         return new ClassFileTypeEntry(
-                "index:///missing/" + jvmName,
+                MISSING_RESOURCE_PREFIX + jvmName,
                 null,
                 jvmName,
                 0,

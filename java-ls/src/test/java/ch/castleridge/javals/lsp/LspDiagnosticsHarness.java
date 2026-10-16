@@ -110,8 +110,11 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
     /**
      * {@code -Dbackend.sourceIndexer=ecj -Dbackend.classIndexer=turbine -Dbackend.compiler=ecj}
      * select backend implementations for harness CLIs.
+     * {@code -Dimporters.gradle=/path/to/gradle-extractor.jar} (and other
+     * {@code -Dimporters.<system>=...}) populate {@code initializationOptions.importers}.
      */
     public static Map<String, Object> backendOptionsFromSystemProperties() {
+        Map<String, Object> options = new HashMap<>();
         Map<String, Object> backend = new HashMap<>();
         String sourceIndexer = System.getProperty("backend.sourceIndexer");
         String classIndexer = System.getProperty("backend.classIndexer");
@@ -119,7 +122,23 @@ public final class LspDiagnosticsHarness implements AutoCloseable {
         if (sourceIndexer != null) backend.put("sourceIndexer", sourceIndexer);
         if (classIndexer != null) backend.put("classIndexer", classIndexer);
         if (compiler != null) backend.put("compiler", compiler);
-        return backend.isEmpty() ? Map.of() : Map.of("backend", backend);
+        if (!backend.isEmpty()) {
+            options.put("backend", backend);
+        }
+        Map<String, String> importers = new HashMap<>();
+        for (String key : System.getProperties().stringPropertyNames()) {
+            if (key.startsWith("importers.")) {
+                String system = key.substring("importers.".length());
+                String value = System.getProperty(key);
+                if (!system.isBlank() && value != null && !value.isBlank()) {
+                    importers.put(system, value);
+                }
+            }
+        }
+        if (!importers.isEmpty()) {
+            options.put("importers", importers);
+        }
+        return options.isEmpty() ? Map.of() : options;
     }
 
     public static LspDiagnosticsHarness start(Path workspaceRoot,

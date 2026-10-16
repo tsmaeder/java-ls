@@ -606,6 +606,94 @@ class IndexCompileTest {
     }
 
     @Test
+    void publicTypeOffClasspathIsUnresolvedNotPackagePrivate() throws Exception {
+        // A public type may still be in the global index while absent from
+        // this file's compile classpath. Completing it via the missing stub
+        // must yield an error type (cannot find symbol), not a package-private
+        // class that triggers false "is not public" diagnostics.
+        Path jdk = Path.of(System.getProperty("java.home"));
+        JrtInput jrt = new JrtInput(jdk);
+        String jrtUri = jrt.sourceUri().toString();
+        String hiddenUri = "index:///cp/hidden-api/";
+        String consumerUri = "index:///cp/consumer/";
+
+        Index index = new InMemoryIndex();
+        List<Throwable> failures = new Scanner().scanAll(List.of(jrt), index);
+        assertTrue(failures.isEmpty(), () -> "JRT scan failures: " + failures);
+
+        JavacSourceIndexer.index(
+                "mem:///Api.java",
+                hiddenUri,
+                """
+                        package io.example.api;
+                        public interface SessionImplementor {
+                            void touch();
+                        }
+                        """,
+                index);
+
+        JavacSourceIndexer.index(
+                "mem:///Holder.java",
+                consumerUri,
+                """
+                        package io.example.user;
+                        public class Holder {}
+                        """,
+                index);
+
+        JavaFileObject user = new SimpleJavaFileObject(
+                URI.create("mem:///User.java"), JavaFileObject.Kind.SOURCE) {
+            @Override
+            public CharSequence getCharContent(boolean ignoreEncodingErrors) {
+                return """
+                        package io.example.user;
+                        import io.example.api.SessionImplementor;
+                        public class User {
+                            SessionImplementor s;
+                        }
+                        """;
+            }
+        };
+
+        // consumer sources + JRT only — SessionImplementor is indexed but off CP
+        ClasspathOrder cp = classPathOf(List.of(consumerUri, jrtUri));
+        JavacTool tool = JavacTool.create();
+        Context context = new Context();
+        IndexClassReader.preRegister(context, index, cp);
+        StandardJavaFileManager std = tool.getStandardFileManager(null, Locale.getDefault(), StandardCharsets.UTF_8);
+        IndexFileManager fm = new IndexFileManager(std, index, cp);
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavacTask task = (JavacTask) tool.getTask(
+                null, fm, diagnostics, List.of(), List.of(), List.of(user), context);
+        task.analyze();
+
+        List<Diagnostic<? extends JavaFileObject>> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> d : diagnostics.getDiagnostics()) {
+            if (d.getKind() == Diagnostic.Kind.ERROR) errors.add(d);
+        }
+        assertFalse(errors.isEmpty(), "expected unresolved-type errors for off-classpath SessionImplementor");
+
+        for (Diagnostic<? extends JavaFileObject> d : errors) {
+            String code = d.getCode() == null ? "" : d.getCode();
+            String msg = d.getMessage(Locale.ENGLISH);
+            assertFalse(
+                    code.contains("not.def.public")
+                            || (msg != null && msg.contains("is not public")),
+                    () -> "off-classpath public type must not report access error; got: " + d);
+        }
+
+        boolean unresolved = errors.stream().anyMatch(d -> {
+            String code = d.getCode() == null ? "" : d.getCode();
+            String msg = d.getMessage(Locale.ENGLISH);
+            return code.contains("cant.resolve")
+                    || code.contains("doesnt.exist")
+                    || (msg != null && msg.contains("cannot find symbol"));
+        });
+        assertTrue(unresolved, () -> "expected cannot-find-symbol style error; got: " + errors);
+    }
+
+    @Test
     void varargsCallOnIndexedBytecodeMethodCompilesCleanly() throws Exception {
         String varargHolder = """
                 public class VarargHolder {

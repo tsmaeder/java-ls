@@ -114,6 +114,12 @@ public final class IndexClassReader extends ClassReader {
     @Override
     public void readClassFile(ClassSymbol c) {
         if (c.classfile instanceof IndexClassFileObject icfo) {
+            // Off-classpath stubs must not be synthesized as package-private
+            // classes (javac then reports false "is not public" diagnostics).
+            if (IndexClassfileAttachment.isMissing(icfo.entry())) {
+                completeAsMissing(c);
+                return;
+            }
             try {
                 readFromIndex(c, icfo.entry());
             } catch (CompletionFailure ex) {
