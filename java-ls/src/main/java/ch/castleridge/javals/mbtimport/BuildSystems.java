@@ -19,6 +19,9 @@ public final class BuildSystems {
     /** Default / shipped Maven importer id (also used for generated-source-rules). */
     public static final String MAVEN = "maven";
 
+    /** Default / shipped Gradle importer id. */
+    public static final String GRADLE = "gradle";
+
     private BuildSystems() {}
 
     /** Fragment path: {@code <workspace>/.javals/mbt.json.<system>}. */

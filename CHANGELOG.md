@@ -4,7 +4,11 @@ All notable changes to the "java-ls" language server will be documented in this 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [Unreleased] 2026-10-01
+## [Unreleased] <tbd>
+
+- Added gradle importer as default importer
+
+## 0.1.0 2026-10-01
 
 - Added document symbol support (outline / breadcrumbs)
 - Added call hierarchy support (prepare / incoming / outgoing)

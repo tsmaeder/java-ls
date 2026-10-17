@@ -73,13 +73,18 @@ public final class BuildSystemImporter implements WorkspaceBuildImport {
     /** Default Maven importer preference: resolved against the java-ls install directory. */
     public static final String DEFAULT_MAVEN_IMPORTER = "mavenimporter.jar";
 
+    /** Default Gradle importer preference: resolved against the java-ls install directory. */
+    public static final String DEFAULT_GRADLE_IMPORTER = "gradle-extractor.jar";
+
     /**
-     * Defaults: {@code maven} → {@link #DEFAULT_MAVEN_IMPORTER} (relative to the java-ls
-     * install directory). Other build systems are added only via preferences.
+     * Defaults: {@code maven} → {@link #DEFAULT_MAVEN_IMPORTER} and {@code gradle} →
+     * {@link #DEFAULT_GRADLE_IMPORTER} (relative to the java-ls install directory). Other
+     * build systems are added only via preferences.
      */
     public static Map<String, String> defaultScripts() {
         Map<String, String> defaults = new LinkedHashMap<>();
         defaults.put(BuildSystems.MAVEN, DEFAULT_MAVEN_IMPORTER);
+        defaults.put(BuildSystems.GRADLE, DEFAULT_GRADLE_IMPORTER);
         return defaults;
     }
 

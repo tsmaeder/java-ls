@@ -110,10 +110,17 @@ class BuildSystemImporterTest {
     }
 
     @Test
+    void resolveScriptsKeepsGradleExtractorJarDefault() {
+        Map<String, String> resolved = BuildSystemImporter.resolveScripts(Map.of());
+        assertEquals(BuildSystemImporter.DEFAULT_GRADLE_IMPORTER, resolved.get(BuildSystems.GRADLE));
+    }
+
+    @Test
     void resolveScriptsRegistersUnknownBuildSystems() {
         Map<String, String> resolved = BuildSystemImporter.resolveScripts(
                 Map.of("custom", "/tools/custom-importer.jar"));
         assertEquals(BuildSystemImporter.DEFAULT_MAVEN_IMPORTER, resolved.get(BuildSystems.MAVEN));
+        assertEquals(BuildSystemImporter.DEFAULT_GRADLE_IMPORTER, resolved.get(BuildSystems.GRADLE));
         assertEquals("/tools/custom-importer.jar", resolved.get("custom"));
     }
 

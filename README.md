@@ -65,10 +65,27 @@ To build only the language server and its dependencies:
 mvn -pl java-ls -am package
 ```
 
-That produces the shaded runnable jar:
+That produces the shaded runnable jar and the Maven importer next to it:
 
 ```text
 java-ls/target/java-ls.jar
+java-ls/target/mavenimporter.jar
+```
+
+The default Gradle importer (`gradle-extractor.jar`) is resolved as a Maven dependency (`ch.castleridge:gradle-extractor`, version `${gradle-extractor.version}` in the parent POM). It is not a reactor module. Install or publish it first (sibling repo), then package java-ls:
+
+```bash
+# from ../gradle-extractor
+mvn install
+
+# from this repository
+mvn -pl java-ls -am package
+```
+
+That also copies the resolved artifact to:
+
+```text
+java-ls/target/gradle-extractor.jar
 ```
 
 Run tests with:
@@ -148,7 +165,7 @@ Settings are passed by the client in LSP `initialize` → `initializationOptions
 | `backend.sourceIndexer` | `"javac"` \| `"ecj"` \| `"turbine"` | `"javac"` | Parser used when indexing sources |
 | `backend.classIndexer` | `"asm"` \| `"turbine"` | `"asm"` | Class-file reader used when indexing jars / JRT |
 | `backend.compiler` | `"javac"` \| `"ecj"` | `"javac"` | Compiler used when analyzing open files (diagnostics, navigation, etc.) |
-| `importers` | object (string values) | `{ "maven": "mavenimporter.jar" }` | Free-form map of build-system id → importer script. Every key is run at workspace init and writes `.javals/mbt.json.<id>`; maven is only the shipped default entry. Blank/omitted entries keep defaults. Relative jar paths resolve against the **java-ls install directory** (folder containing `java-ls.jar`); shell importers also run with that directory as cwd. Absolute paths are used as-is. A value ending in `.jar` is run with the server's `java -jar`; any other value is a shell command line. Always receives `<workspace> --output <.javals/mbt.json.<id>>`. |
+| `importers` | object (string values) | `{ "maven": "mavenimporter.jar", "gradle": "gradle-extractor.jar" }` | Free-form map of build-system id → importer script. Every key is run at workspace init and writes `.javals/mbt.json.<id>`; maven and gradle are the shipped default entries (`mavenimporter.jar` and `gradle-extractor.jar` next to `java-ls.jar`). Blank/omitted entries keep defaults. Relative jar paths resolve against the **java-ls install directory** (folder containing `java-ls.jar`); shell importers also run with that directory as cwd. Absolute paths are used as-is. A value ending in `.jar` is run with the server's `java -jar`; any other value is a shell command line. Always receives `<workspace> --output <.javals/mbt.json.<id>>`. |
 | `maven.generatedSourceRules` | array of objects | `[]` (seed built-ins only) | Extra / overridden Maven generated-source rules. Full rule objects are appended; entries with `"enabled": false` disable matching built-ins (`pluginKey` required; optional `scope` / `goals` / `configPath` narrow the match). |
 
 In [vscode-javals](https://github.com/tsmaeder/vscode-javals), these map to `javals.references.inJars`, `javals.references.inJdk`, `javals.backend.sourceIndexer`, `javals.backend.classIndexer`, `javals.backend.compiler`, `javals.importers`, and `javals.maven.generatedSourceRules`. Changing `references.*` or `referencesCandidateCap` takes effect on the next `workspace/didChangeConfiguration` notification. Changing `backend.*`, `importers`, or `maven.generatedSourceRules` still requires restarting the language server.
