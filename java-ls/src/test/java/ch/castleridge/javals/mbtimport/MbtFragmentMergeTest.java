@@ -7,7 +7,6 @@
 package ch.castleridge.javals.mbtimport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -17,7 +16,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.eclipse.lsp4j.MessageType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -128,14 +126,16 @@ class MbtFragmentMergeTest {
     }
 
     @Test
-    void deletesMergedWhenNoFragmentsRemain() throws Exception {
+    void keepsMergedWhenNoFragmentsRemain() throws Exception {
         Path workspace = temp.resolve("ws");
         Path merged = BuildSystems.mergedPath(workspace);
         Files.createDirectories(merged.getParent());
-        Files.writeString(merged, "{\"namespaces\":{},\"dependencyModules\":[]}");
+        String content = "{\"namespaces\":{},\"dependencyModules\":[]}";
+        Files.writeString(merged, content);
 
         MbtFragmentMerge.mergeIfNeeded(workspace, List.of("maven"), (t, m) -> {});
-        assertFalse(Files.exists(merged));
+        assertTrue(Files.isRegularFile(merged));
+        assertEquals(content, Files.readString(merged));
     }
 
     @Test

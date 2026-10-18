@@ -38,7 +38,7 @@ public final class MbtFragmentMerge {
     /**
      * Applies merge rules for {@code workspace}:
      * <ul>
-     *   <li>No fragments → delete merged {@code .javals/mbt.json} if present.</li>
+     *   <li>No fragments → leave existing {@code .javals/mbt.json} untouched.</li>
      *   <li>Merged missing, or any fragment newer than merged → rewrite merged from fragments.</li>
      * </ul>
      */
@@ -48,10 +48,6 @@ public final class MbtFragmentMerge {
         List<Path> fragments = existingFragments(workspace, systems);
 
         if (fragments.isEmpty()) {
-            if (Files.isRegularFile(merged)) {
-                Files.delete(merged);
-                log.accept(MessageType.Info, "Removed " + merged + " (no build-system fragments)");
-            }
             return;
         }
 
