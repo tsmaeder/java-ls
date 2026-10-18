@@ -40,6 +40,12 @@
     </dependency>
     <dependency>
       <groupId>ch.castleridge</groupId>
+      <artifactId>maven-extractor</artifactId>
+      <version>${maven-extractor.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>ch.castleridge</groupId>
       <artifactId>gradle-extractor</artifactId>
       <version>${gradle-extractor.version}</version>
       <scope>provided</scope>
@@ -158,6 +164,25 @@
         <artifactId>maven-dependency-plugin</artifactId>
         <version>3.8.1</version>
         <executions>
+          <execution>
+            <id>copy-maven-extractor</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>ch.castleridge</groupId>
+                  <artifactId>maven-extractor</artifactId>
+                  <version>${maven-extractor.version}</version>
+                  <type>jar</type>
+                  <outputDirectory>${project.build.directory}</outputDirectory>
+                  <destFileName>maven-extractor.jar</destFileName>
+                </artifactItem>
+              </artifactItems>
+            </configuration>
+          </execution>
           <execution>
             <id>copy-gradle-extractor</id>
             <phase>package</phase>

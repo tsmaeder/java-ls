@@ -30,7 +30,7 @@ class BuildSystemImporterTest {
     void runsJarPreferenceWithJavaJar() throws Exception {
         Path workspace = temp.resolve("ws");
         Files.createDirectories(workspace);
-        Path fakeJar = temp.resolve("mavenimporter.jar");
+        Path fakeJar = temp.resolve("maven-extractor.jar");
         Files.writeString(fakeJar, "fake");
 
         AtomicInteger runs = new AtomicInteger();
@@ -163,7 +163,7 @@ class BuildSystemImporterTest {
     void writesGeneratedSourceRulesAndPassesFlag() throws Exception {
         Path workspace = temp.resolve("ws");
         Files.createDirectories(workspace);
-        Path fakeJar = temp.resolve("mavenimporter.jar");
+        Path fakeJar = temp.resolve("maven-extractor.jar");
         Files.writeString(fakeJar, "fake");
 
         AtomicReference<List<String>> seen = new AtomicReference<>();
@@ -197,7 +197,7 @@ class BuildSystemImporterTest {
     void preservesGeneratedSourceRulesMtimeWhenContentUnchanged() throws Exception {
         Path workspace = temp.resolve("ws");
         Files.createDirectories(workspace);
-        Path fakeJar = temp.resolve("mavenimporter.jar");
+        Path fakeJar = temp.resolve("maven-extractor.jar");
         Files.writeString(fakeJar, "fake");
 
         String rulesJson = "[{\"pluginKey\":\"org.example:x\",\"enabled\":false}]";
@@ -228,7 +228,7 @@ class BuildSystemImporterTest {
     void rewritesGeneratedSourceRulesWhenContentChanges() throws Exception {
         Path workspace = temp.resolve("ws");
         Files.createDirectories(workspace);
-        Path fakeJar = temp.resolve("mavenimporter.jar");
+        Path fakeJar = temp.resolve("maven-extractor.jar");
         Files.writeString(fakeJar, "fake");
 
         BuildSystemImporter.ProcessRunner runner = (command, log) -> {

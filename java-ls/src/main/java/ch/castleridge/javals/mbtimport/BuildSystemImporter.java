@@ -71,7 +71,7 @@ public final class BuildSystemImporter implements WorkspaceBuildImport {
     }
 
     /** Default Maven importer preference: resolved against the java-ls install directory. */
-    public static final String DEFAULT_MAVEN_IMPORTER = "mavenimporter.jar";
+    public static final String DEFAULT_MAVEN_IMPORTER = "maven-extractor.jar";
 
     /** Default Gradle importer preference: resolved against the java-ls install directory. */
     public static final String DEFAULT_GRADLE_IMPORTER = "gradle-extractor.jar";

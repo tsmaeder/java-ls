@@ -7,6 +7,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 ## [Unreleased] <tbd>
 
 - Added gradle importer as default importer
+- Extracted Maven importer to sibling repo `maven-extractor`; default jar renamed to `maven-extractor.jar`
 
 ## 0.1.0 2026-10-01
 

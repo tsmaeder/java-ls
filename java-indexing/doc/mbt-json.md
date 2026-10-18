@@ -10,7 +10,7 @@ Local consumers:
 
 - `java-indexing` — `MbtJson.read` / `MbtJson.toInputSources` (and `--mbt` on `IndexDecompilerMain`)
 - `java-ls` — `IndexService` builds a `ClasspathOrder` per namespace from the same file
-- `mavenimporter` — emits Metals-schema fragments (default `.javals/mbt.json.maven`)
+- `maven-extractor` — emits Metals-schema fragments (default `.javals/mbt.json.maven`)
 - `gradle-extractor` — emits Metals-schema fragments (default `.javals/mbt.json.gradle`)
 
 Field names match the schema (`javacOptions`, `sources`, `dependencyModules`, `dependsOn`,

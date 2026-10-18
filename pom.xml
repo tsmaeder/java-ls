@@ -21,7 +21,6 @@
     <module>java-indexing</module>
     <module>java-ast</module>
     <module>java-ls</module>
-    <module>mavenimporter</module>
   </modules>
 
   <properties>
@@ -29,6 +28,7 @@
     <maven.compiler.source>25</maven.compiler.source>
     <maven.compiler.target>25</maven.compiler.target>
     <lsp4j.version>0.23.1</lsp4j.version>
+    <maven-extractor.version>0.1.0-SNAPSHOT</maven-extractor.version>
     <gradle-extractor.version>0.1.0-SNAPSHOT</gradle-extractor.version>
   </properties>
 

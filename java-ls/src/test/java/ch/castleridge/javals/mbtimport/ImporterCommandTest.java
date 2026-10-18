@@ -57,15 +57,15 @@ class ImporterCommandTest {
     @Test
     void relativeJarResolvesAgainstBase() {
         List<String> command =
-                ImporterCommand.build("mavenimporter.jar", temp, temp.resolve("o.json"), null, temp);
-        assertEquals(temp.resolve("mavenimporter.jar").normalize().toString(), command.get(2));
+                ImporterCommand.build("maven-extractor.jar", temp, temp.resolve("o.json"), null, temp);
+        assertEquals(temp.resolve("maven-extractor.jar").normalize().toString(), command.get(2));
     }
 
     @Test
     void relativeJarLeftUnchangedWhenBaseNull() {
         List<String> command =
-                ImporterCommand.build("mavenimporter.jar", temp, temp.resolve("o.json"), null, null);
-        assertEquals("mavenimporter.jar", command.get(2));
+                ImporterCommand.build("maven-extractor.jar", temp, temp.resolve("o.json"), null, null);
+        assertEquals("maven-extractor.jar", command.get(2));
     }
 
     @Test

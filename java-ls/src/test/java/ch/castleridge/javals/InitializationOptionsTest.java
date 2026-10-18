@@ -222,9 +222,9 @@ class InitializationOptionsTest {
         assertTrue(InitializationOptions.importerScripts(Map.of()).isEmpty());
 
         Map<String, Object> options = Map.of(
-                "importers", Map.of("maven", "/custom/mavenimporter.jar", "gradle", "gradle-import.sh"));
+                "importers", Map.of("maven", "/custom/maven-extractor.jar", "gradle", "gradle-import.sh"));
         Map<String, String> scripts = InitializationOptions.importerScripts(options);
-        assertEquals("/custom/mavenimporter.jar", scripts.get("maven"));
+        assertEquals("/custom/maven-extractor.jar", scripts.get("maven"));
         assertEquals("gradle-import.sh", scripts.get("gradle"));
 
         JsonObject json = new JsonObject();
