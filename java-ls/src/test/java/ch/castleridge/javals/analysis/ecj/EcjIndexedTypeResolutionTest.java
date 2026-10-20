@@ -222,4 +222,87 @@ class EcjIndexedTypeResolutionTest {
                 }
                 """);
     }
+
+    /**
+     * ECJ source indexing must record {@code MethodEntry.varargs()} so overload
+     * resolution accepts discrete arguments against {@code T...} APIs.
+     */
+    @Test
+    void varargsCallOnEcjSourceIndexedMethodCompilesCleanly() {
+        indexSource("api/VarargHolder.java", """
+                package api;
+                public class VarargHolder {
+                    public static void all(int... parts) {}
+                }
+                """);
+
+        assertNoErrors("""
+                package demo;
+                import api.VarargHolder;
+                class Use {
+                    void go() {
+                        VarargHolder.all(1, 2, 3);
+                    }
+                }
+                """);
+    }
+
+    /** Mirrors Gradle {@code ObjectFactory.newInstance(Class, Object...)}. */
+    @Test
+    void genericInterfaceVarargsCallCompilesCleanly() {
+        indexSource("api/ObjectFactory.java", """
+                package api;
+                public interface ObjectFactory {
+                    <T> T newInstance(Class<? extends T> type, Object... parameters);
+                }
+                """);
+        indexSource("api/Thing.java", "package api; public class Thing { public Thing(String a, int b) {} }");
+
+        assertNoErrors("""
+                package demo;
+                import api.ObjectFactory;
+                import api.Thing;
+                class Use {
+                    Thing go(ObjectFactory factory, String a, int b) {
+                        return factory.newInstance(Thing.class, a, b);
+                    }
+                }
+                """);
+    }
+
+    /**
+     * Annotated varargs (as on Gradle {@code Instantiator}) plus a
+     * same-file override that is varargs against a non-varargs index peer —
+     * the dependency interface must carry {@code AccVarargs}.
+     */
+    @Test
+    void annotatedInterfaceVarargsAndOverrideCompilesCleanly() {
+        indexSource("api/CopySourceSpec.java", """
+                package api;
+                public interface CopySourceSpec {
+                    CopySourceSpec from(Object... sourcePaths);
+                }
+                """);
+        indexSource("api/Instantiator.java", """
+                package api;
+                import org.jspecify.annotations.Nullable;
+                public interface Instantiator {
+                    <T> T newInstance(Class<? extends T> type, @Nullable Object... parameters);
+                }
+                """);
+
+        assertNoErrors("""
+                package demo;
+                import api.CopySourceSpec;
+                import api.Instantiator;
+                class Use implements CopySourceSpec {
+                    Instantiator instantiator;
+                    public CopySourceSpec from(Object... sourcePaths) { return this; }
+                    void go(Object path) {
+                        from(path);
+                        instantiator.newInstance(String.class, "x");
+                    }
+                }
+                """);
+    }
 }

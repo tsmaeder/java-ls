@@ -53,6 +53,7 @@ import ch.castleridge.javals.ast.TypeSymbol;
 import ch.castleridge.javals.ast.VarFragment;
 import ch.castleridge.javals.classpath.ClasspathOrder;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.model.AccessVisibility;
 import ch.castleridge.javals.indexing.model.ClassFileTypeEntry;
 import ch.castleridge.javals.indexing.model.FieldEntry;
 import ch.castleridge.javals.indexing.model.MethodEntry;
@@ -268,6 +269,7 @@ final class AstCompleter {
         int added = 0;
         for (TypeEntry entry : index.searchTypesBySimpleNamePrefix(prefix, UNIMPORTED_TYPE_LIMIT)) {
             if (classpath.pick(index.getAll(entry.jvmOwnerName()), TypeEntry::sourceUri) != entry) continue;
+            if (AccessVisibility.isPrivate(entry.modifiers())) continue;
             String simple = simpleName(entry.jvmOwnerName());
             if (items.containsKey("n:" + simple)) continue;
             String fqcn = entry.jvmOwnerName().replace('/', '.').replace('$', '.');
@@ -344,6 +346,8 @@ final class AstCompleter {
             items.putIfAbsent(methodKey(method), methodItem(method, simpleName(entry.jvmOwnerName())));
         }
         for (String nested : entry.innerTypeJvmNames()) {
+            TypeEntry nestedEntry = classpath.pick(index.getAll(nested), TypeEntry::sourceUri);
+            if (nestedEntry != null && AccessVisibility.isPrivate(nestedEntry.modifiers())) continue;
             String simple = simpleName(nested);
             if (simple.startsWith(prefix)) {
                 items.putIfAbsent("n:" + simple, typeItem(simple, nested.replace('/', '.').replace('$', '.')));
@@ -368,6 +372,7 @@ final class AstCompleter {
                     && classpath.pick(index.getAll(entry.jvmOwnerName()), TypeEntry::sourceUri) != entry) {
                 continue;
             }
+            if (AccessVisibility.isPrivate(entry.modifiers())) continue;
             String jvm = entry.jvmOwnerName();
             if (!jvm.startsWith(wanted)) continue;
             String rest = jvm.substring(wanted.length());

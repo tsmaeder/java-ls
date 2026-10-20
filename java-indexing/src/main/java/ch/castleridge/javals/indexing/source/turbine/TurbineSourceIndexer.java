@@ -188,7 +188,7 @@ public final class TurbineSourceIndexer {
                 }
                 methods.add(indexed);
             } else if (member instanceof Tree.TyDecl nested) {
-                if (!AccessVisibility.shouldIndexType(typeModifierFlags(nested, declaration))) continue;
+                if (!AccessVisibility.shouldIndexSourceType(typeModifierFlags(nested, declaration))) continue;
                 nestedTypes.add(nested);
                 innerNames.add(localName + "$" + nested.name().value());
             }

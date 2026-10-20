@@ -57,7 +57,9 @@ import ch.castleridge.javals.indexing.model.TypeRef;
  *
  * <p>Only members that might be visible from another compilation unit are
  * stored: private fields and methods are skipped (private {@code <init>}
- * constructors are kept), and private nested types are omitted entirely.
+ * constructors are kept). Private nested types are indexed as stubs so
+ * binary resolution can follow indirect references (e.g.
+ * {@code LinkedList$Node}) without retaining their members.
  *
  * <p>Code, debug info and stack map frames are skipped because the index only
  * needs declaration shape and annotations.
@@ -425,7 +427,7 @@ public final class ClassFileIndexer {
                 this.access |= (access & INNER_CLASS_ACCESS_MASK);
             }
             if (outerName != null && outerName.equals(jvmName)
-                    && AccessVisibility.shouldIndexType(access)) {
+                    && AccessVisibility.shouldIndexBinaryType(access)) {
                 innerTypes.add(name);
             }
         }
@@ -572,8 +574,8 @@ public final class ClassFileIndexer {
             // off the type index altogether.
             if (moduleEntry != null) return null;
             if (Index.isSkippedJvmName(jvmName)) return null;
-            // Private nested types are never visible from another CU.
-            if (!AccessVisibility.shouldIndexType(access)) return null;
+            if (!AccessVisibility.shouldIndexBinaryType(access)) return null;
+            boolean stub = AccessVisibility.shouldStubBinaryType(access, jvmName);
             return new ClassFileTypeEntry(
                     resourcePath,
                     sourceUri,
@@ -581,13 +583,15 @@ public final class ClassFileIndexer {
                     access,
                     superRef,
                     EmptyArrays.toArray(interfaces, EmptyArrays.TYPE),
-                    EmptyArrays.toArray(typeParams, EmptyArrays.TYPE_PARAM),
-                    EmptyArrays.toArray(fields, EmptyArrays.FIELD),
-                    EmptyArrays.toArray(methods, EmptyArrays.METHOD),
+                    stub ? EmptyArrays.TYPE_PARAM : EmptyArrays.toArray(typeParams, EmptyArrays.TYPE_PARAM),
+                    stub ? EmptyArrays.FIELD : EmptyArrays.toArray(fields, EmptyArrays.FIELD),
+                    stub ? EmptyArrays.METHOD : EmptyArrays.toArray(methods, EmptyArrays.METHOD),
                     EmptyArrays.toArray(innerTypes, EmptyArrays.STRING),
-                    EmptyArrays.toArray(permittedSubclasses, EmptyArrays.TYPE_REF),
-                    EmptyArrays.toArray(recordComponents, EmptyArrays.RECORD_COMPONENT),
-                    EmptyArrays.toArray(annotations, EmptyArrays.ANNOTATION_REF));
+                    stub ? EmptyArrays.TYPE_REF : EmptyArrays.toArray(permittedSubclasses, EmptyArrays.TYPE_REF),
+                    stub ? EmptyArrays.RECORD_COMPONENT
+                            : EmptyArrays.toArray(recordComponents, EmptyArrays.RECORD_COMPONENT),
+                    stub ? EmptyArrays.ANNOTATION_REF
+                            : EmptyArrays.toArray(annotations, EmptyArrays.ANNOTATION_REF));
         }
     }
 

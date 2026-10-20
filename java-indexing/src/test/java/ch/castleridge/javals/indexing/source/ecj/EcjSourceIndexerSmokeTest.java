@@ -18,6 +18,7 @@ import ch.castleridge.javals.indexing.bloom.BloomEntry;
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.SourceTypeEntry;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
 
@@ -102,5 +103,29 @@ class EcjSourceIndexerSmokeTest {
                 .findFirst()
                 .orElseThrow();
         assertEquals(1, insert.constantValue());
+    }
+
+    @Test
+    void varargsMethodSetsVarargsFlag() {
+        Index index = new InMemoryIndex();
+        EcjSourceIndexer.index(
+                "mem:///V.java",
+                SOURCE_URI,
+                """
+                        package p;
+
+                        class V {
+                            static void all(int... xs) {}
+                        }
+                        """,
+                index);
+
+        SourceTypeEntry v = (SourceTypeEntry) IndexTestUtils.get(index, "p/V");
+        assertNotNull(v);
+        MethodEntry all = java.util.Arrays.stream(v.methods())
+                .filter(m -> m.name().equals("all"))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(all.varargs(), "int... should be indexed as a varargs method after parse-only ECJ indexing");
     }
 }

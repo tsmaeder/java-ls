@@ -314,7 +314,7 @@ final class EcjSourceIndexerEngine {
         if (td.memberTypes != null) {
             for (TypeDeclaration inner : td.memberTypes) {
                 if (inner == null) continue;
-                if (!AccessVisibility.shouldIndexType(modifierFlags(inner.modifiers))) {
+                if (!AccessVisibility.shouldIndexSourceType(modifierFlags(inner.modifiers))) {
                     continue;
                 }
                 nested.add(inner);
@@ -513,8 +513,11 @@ final class EcjSourceIndexerEngine {
         if (method.arguments == null || method.arguments.length == 0) return false;
         Argument last = method.arguments[method.arguments.length - 1];
         if (last == null) return false;
-        return (last.bits & ASTNode.IsVarArgs) != 0
-                || (method.modifiers & ClassFileConstants.AccVarargs) != 0;
+        // Parser sets IsVarArgs on Argument.type.bits, not Argument.bits.
+        // AccVarargs on method.modifiers appears only after resolve, which this
+        // parse-only indexer never runs.
+        boolean typeFlag = last.type != null && (last.type.bits & ASTNode.IsVarArgs) != 0;
+        return typeFlag || (method.modifiers & ClassFileConstants.AccVarargs) != 0;
     }
 
     private static TypeParamRef toTypeParamRef(TypeParameter tp,

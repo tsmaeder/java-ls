@@ -155,7 +155,7 @@ public final class TurbineClassFileIndexer {
                 access |= (inner.access() & INNER_CLASS_ACCESS_MASK);
             }
         }
-        if (!AccessVisibility.shouldIndexType(access)) {
+        if (!AccessVisibility.shouldIndexBinaryType(access)) {
             return null;
         }
 
@@ -184,53 +184,56 @@ public final class TurbineClassFileIndexer {
             }
         }
 
-        List<FieldEntry> fields = new ArrayList<>();
-        for (Object o : cf.fields()) {
-            FieldEntry field = toFieldEntry((FieldInfo) o);
-            if (field != null) {
-                fields.add(field);
-            }
-        }
+        boolean stub = AccessVisibility.shouldStubBinaryType(access, jvmName);
 
+        List<FieldEntry> fields = new ArrayList<>();
         List<MethodEntry> methods = new ArrayList<>();
-        for (Object o : cf.methods()) {
-            MethodEntry method = toMethodEntry((MethodInfo) o);
-            if (method != null) {
-                methods.add(method);
+        List<RecordComponentEntry> recordComponents = new ArrayList<>();
+        List<TypeRef> permitted = new ArrayList<>();
+        AnnotationRef[] annotations = EmptyArrays.ANNOTATION_REF;
+        if (!stub) {
+            for (Object o : cf.fields()) {
+                FieldEntry field = toFieldEntry((FieldInfo) o);
+                if (field != null) {
+                    fields.add(field);
+                }
             }
+            for (Object o : cf.methods()) {
+                MethodEntry method = toMethodEntry((MethodInfo) o);
+                if (method != null) {
+                    methods.add(method);
+                }
+            }
+            for (Object o : cf.permits()) {
+                String p = (String) o;
+                if (p != null && !p.isEmpty()) {
+                    permitted.add(TypeRef.resolved(p));
+                }
+            }
+            RecordInfo record = cf.record();
+            if (record != null) {
+                for (Object o : record.recordComponents()) {
+                    RecordInfo.RecordComponentInfo rc = (RecordInfo.RecordComponentInfo) o;
+                    Type componentType = rc.signature() != null
+                            ? SignatureRefs.parseType(rc.signature())
+                            : Descriptors.parseField(rc.descriptor());
+                    if (componentType == null) {
+                        componentType = Descriptors.parseField(rc.descriptor());
+                    }
+                    recordComponents.add(new RecordComponentEntry(
+                            rc.name(),
+                            componentType,
+                            EmptyArrays.toArray(toAnnotationRefs(rc.annotations()), EmptyArrays.ANNOTATION_REF)));
+                }
+            }
+            annotations = EmptyArrays.toArray(toAnnotationRefs(cf.annotations()), EmptyArrays.ANNOTATION_REF);
         }
 
         List<String> innerTypes = new ArrayList<>();
         for (Object o : cf.innerClasses()) {
             InnerClass inner = (InnerClass) o;
-            if (jvmName.equals(inner.outerClass()) && AccessVisibility.shouldIndexType(inner.access())) {
+            if (jvmName.equals(inner.outerClass()) && AccessVisibility.shouldIndexBinaryType(inner.access())) {
                 innerTypes.add(inner.innerClass());
-            }
-        }
-
-        List<TypeRef> permitted = new ArrayList<>();
-        for (Object o : cf.permits()) {
-            String p = (String) o;
-            if (p != null && !p.isEmpty()) {
-                permitted.add(TypeRef.resolved(p));
-            }
-        }
-
-        List<RecordComponentEntry> recordComponents = new ArrayList<>();
-        RecordInfo record = cf.record();
-        if (record != null) {
-            for (Object o : record.recordComponents()) {
-                RecordInfo.RecordComponentInfo rc = (RecordInfo.RecordComponentInfo) o;
-                Type componentType = rc.signature() != null
-                        ? SignatureRefs.parseType(rc.signature())
-                        : Descriptors.parseField(rc.descriptor());
-                if (componentType == null) {
-                    componentType = Descriptors.parseField(rc.descriptor());
-                }
-                recordComponents.add(new RecordComponentEntry(
-                        rc.name(),
-                        componentType,
-                        EmptyArrays.toArray(toAnnotationRefs(rc.annotations()), EmptyArrays.ANNOTATION_REF)));
             }
         }
 
@@ -241,13 +244,13 @@ public final class TurbineClassFileIndexer {
                 access,
                 superRef,
                 EmptyArrays.toArray(interfaces, EmptyArrays.TYPE),
-                EmptyArrays.toArray(typeParams, EmptyArrays.TYPE_PARAM),
+                stub ? EmptyArrays.TYPE_PARAM : EmptyArrays.toArray(typeParams, EmptyArrays.TYPE_PARAM),
                 EmptyArrays.toArray(fields, EmptyArrays.FIELD),
                 EmptyArrays.toArray(methods, EmptyArrays.METHOD),
                 EmptyArrays.toArray(innerTypes, EmptyArrays.STRING),
                 EmptyArrays.toArray(permitted, EmptyArrays.TYPE_REF),
                 EmptyArrays.toArray(recordComponents, EmptyArrays.RECORD_COMPONENT),
-                EmptyArrays.toArray(toAnnotationRefs(cf.annotations()), EmptyArrays.ANNOTATION_REF));
+                annotations);
     }
 
     private static FieldEntry toFieldEntry(FieldInfo field) {

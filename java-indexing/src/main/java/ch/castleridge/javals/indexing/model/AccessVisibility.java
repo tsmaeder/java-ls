@@ -13,13 +13,19 @@ package ch.castleridge.javals.indexing.model;
 import org.objectweb.asm.Opcodes;
 
 /**
- * Rules for which declarations belong in the structural index: only
- * members that might be visible from another compilation unit.
+ * Rules for which declarations belong in the structural index.
  *
  * <p>Private fields and methods are omitted; package-private, protected,
  * and public stay. Private constructors ({@code <init>}) are kept so a
  * type with only private constructors is not misread as having a public
- * default constructor. Private nested types are omitted entirely.
+ * default constructor.
+ *
+ * <p>Private nested types are omitted from <em>source</em> indexing (not
+ * visible across compilation units). They <em>are</em> indexed from
+ * classfiles so compilers can resolve indirect references such as
+ * {@code LinkedList$Node}; those binary entries may be stubs (identity
+ * only). User-facing completion/search should hide them via
+ * {@link #isPrivate(int)}.
  */
 public final class AccessVisibility {
 
@@ -39,10 +45,28 @@ public final class AccessVisibility {
     }
 
     /**
-     * Whether a nested type (or its classfile) should produce a
+     * Whether a nested type from <em>source</em> should produce a
      * {@link TypeEntry}. Private nested types are skipped.
      */
-    public static boolean shouldIndexType(int modifiers) {
+    public static boolean shouldIndexSourceType(int modifiers) {
         return !isPrivate(modifiers);
+    }
+
+    /**
+     * Whether a nested type from a <em>classfile</em> should produce a
+     * {@link TypeEntry}. Always true: private nesteds are required for
+     * binary binding when they appear in signatures of the enclosing type.
+     */
+    public static boolean shouldIndexBinaryType(int modifiers) {
+        return true;
+    }
+
+    /**
+     * Whether a classfile type entry should be stored as a stub (identity /
+     * hierarchy only, no members). Private nested types use stubs to limit
+     * index footprint while remaining resolvable.
+     */
+    public static boolean shouldStubBinaryType(int modifiers, String jvmOwnerName) {
+        return isPrivate(modifiers) && jvmOwnerName != null && jvmOwnerName.indexOf('$') >= 0;
     }
 }

@@ -35,8 +35,8 @@ import ch.castleridge.javals.indexing.index.InMemoryIndex;
 import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClassFileIndexerVisibilityTest {
@@ -111,9 +111,13 @@ class ClassFileIndexerVisibilityTest {
             assertTrue((ctor.modifiers() & Opcodes.ACC_PRIVATE) != 0);
 
             assertTrue(Arrays.asList(visible.innerTypeJvmNames()).contains("p/Visible$NestedPub"));
-            assertTrue(!Arrays.asList(visible.innerTypeJvmNames()).contains("p/Visible$NestedPriv"));
+            assertTrue(Arrays.asList(visible.innerTypeJvmNames()).contains("p/Visible$NestedPriv"));
             assertNotNull(ch.castleridge.javals.indexing.IndexTestUtils.get(index, "p/Visible$NestedPub"));
-            assertNull(ch.castleridge.javals.indexing.IndexTestUtils.get(index, "p/Visible$NestedPriv"));
+            TypeEntry nestedPriv = ch.castleridge.javals.indexing.IndexTestUtils.get(index, "p/Visible$NestedPriv");
+            assertNotNull(nestedPriv, "private nested classfiles stay in the index for binary resolution");
+            assertTrue((nestedPriv.modifiers() & Opcodes.ACC_PRIVATE) != 0);
+            assertEquals(0, nestedPriv.fields().length, "private nested binary types are stubs");
+            assertEquals(0, nestedPriv.methods().length, "private nested binary types are stubs");
         } finally {
             Files.walk(outDir)
                     .sorted(Comparator.reverseOrder())

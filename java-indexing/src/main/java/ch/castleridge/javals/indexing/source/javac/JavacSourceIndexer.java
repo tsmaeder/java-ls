@@ -280,7 +280,7 @@ public final class JavacSourceIndexer {
                 }
                 methods.add(method);
             } else if (member instanceof ClassTree inner) {
-                if (!AccessVisibility.shouldIndexType(modifierFlags(inner.getModifiers()))) {
+                if (!AccessVisibility.shouldIndexSourceType(modifierFlags(inner.getModifiers()))) {
                     continue;
                 }
                 nested.add(inner);
