@@ -13,7 +13,10 @@ package ch.castleridge.javals.indexing.scan;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -21,6 +24,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import ch.castleridge.javals.indexing.FileIndexerRegistry;
 import ch.castleridge.javals.indexing.bytecode.BytecodeIndexer;
@@ -135,16 +139,17 @@ public final class Scanner {
         }
 
         List<Throwable> failures = Collections.synchronizedList(new ArrayList<>());
+        ConcurrentHashMap<String, AtomicLong> indexWorkNanos = new ConcurrentHashMap<>();
         long t0 = System.nanoTime();
         long classFilesMs;
         long sourceFilesMs;
         try {
             long c0 = System.nanoTime();
-            driveAll(classSources, into, failures, progress);
+            driveAll(classSources, into, failures, progress, indexWorkNanos);
             classFilesMs = (System.nanoTime() - c0) / 1_000_000L;
 
             long s0 = System.nanoTime();
-            driveAll(sourceDirs, into, failures, progress);
+            driveAll(sourceDirs, into, failures, progress, indexWorkNanos);
             sourceFilesMs = (System.nanoTime() - s0) / 1_000_000L;
         } finally {
             if (ownsPool) {
@@ -152,11 +157,20 @@ public final class Scanner {
             }
         }
         long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
-        return new ScanResult(List.copyOf(failures), classFilesMs, sourceFilesMs, elapsedMs);
+        return new ScanResult(List.copyOf(failures), classFilesMs, sourceFilesMs, elapsedMs,
+                toWorkMs(indexWorkNanos));
+    }
+
+    private static Map<String, Long> toWorkMs(ConcurrentHashMap<String, AtomicLong> nanosByExt) {
+        Map<String, Long> ms = new HashMap<>();
+        for (Map.Entry<String, AtomicLong> e : nanosByExt.entrySet()) {
+            ms.put(e.getKey(), e.getValue().get() / 1_000_000L);
+        }
+        return ms;
     }
 
     private void driveAll(Collection<SourceSlot> sources, Index into, List<Throwable> failures,
-            ScanProgressListener progress) {
+            ScanProgressListener progress, ConcurrentHashMap<String, AtomicLong> indexWorkNanos) {
         if (sources.isEmpty()) {
             return;
         }
@@ -174,7 +188,7 @@ public final class Scanner {
             List<Future<?>> sourceFutures = new ArrayList<>(sources.size());
             for (SourceSlot slot : sources) {
                 sourceFutures.add(driverPool.submit(
-                        () -> scanOneSource(slot, into, failures, progress)));
+                        () -> scanOneSource(slot, into, failures, progress, indexWorkNanos)));
             }
             for (Future<?> f : sourceFutures) {
                 try {
@@ -192,7 +206,7 @@ public final class Scanner {
     }
 
     private void scanOneSource(SourceSlot slot, Index into, List<Throwable> failures,
-            ScanProgressListener progress) {
+            ScanProgressListener progress, ConcurrentHashMap<String, AtomicLong> indexWorkNanos) {
         InputSource src = slot.source();
         String srcUri = src.sourceUri();
         Index temp = new InMemoryIndex();
@@ -201,6 +215,7 @@ public final class Scanner {
         try {
             src.walk((relativePath, fileName, bytes) -> {
                 ForkJoinTask<?> task = pool.submit(() -> {
+                    long t0 = System.nanoTime();
                     try {
                         indexers.indexOne(relativePath, srcUri, fileName, bytes.get(), temp);
                         int n = filesInSource.incrementAndGet();
@@ -209,6 +224,12 @@ public final class Scanner {
                         }
                     } catch (Throwable t) {
                         failures.add(t);
+                    } finally {
+                        String ext = FileIndexerRegistry.extensionOf(fileName);
+                        if (!ext.isEmpty()) {
+                            indexWorkNanos.computeIfAbsent(ext, k -> new AtomicLong())
+                                    .addAndGet(System.nanoTime() - t0);
+                        }
                     }
                 });
                 indexTasks.add(task);

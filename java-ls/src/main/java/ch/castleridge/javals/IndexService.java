@@ -323,7 +323,7 @@ public final class IndexService {
     private void logScanResult(Index index, Collection<InputSource> sources, ScanResult scan,
                                ScanCollector collector) {
         List<Throwable> failures = scan.failures();
-        ScanStats stats = collector == null ? new ScanStats(0, 0L) : collector.snapshot();
+        ScanStats stats = collector == null ? ScanStats.EMPTY : collector.snapshot();
 
         int jarCount = 0;
         long jarBytes = 0L;
@@ -346,7 +346,9 @@ public final class IndexService {
                 + (failures.isEmpty() ? "" : "; " + failures.size() + " failures"));
         log(MessageType.Info, "Index stats: " + stats.sourceFileCount() + " source files, "
                 + jarCount + " jars (" + HeapSizeEstimator.formatBytes(jarBytes) + "); class files "
-                + HeapSizeEstimator.formatBytes(stats.classFileBytes()));
+                + HeapSizeEstimator.formatBytes(stats.classFileBytes())
+                + "; by extension: "
+                + stats.formatWithWorkMs(scan.indexWorkMsByExtension()));
         failures.forEach(f -> {
             StringWriter writer = new StringWriter();
             f.printStackTrace(new PrintWriter(writer));

@@ -104,9 +104,9 @@ public final class JrtInput implements InputSource {
 
     private void recordStats(String name, long size) {
         if (collector == null) return;
-        if (FileIndexerRegistry.isSourceFileName(name)) {
-            collector.addSourceFile();
-        } else if (FileIndexerRegistry.EXT_CLASS.equals(FileIndexerRegistry.extensionOf(name))) {
+        String ext = FileIndexerRegistry.extensionOf(name);
+        collector.addFile(ext);
+        if (FileIndexerRegistry.EXT_CLASS.equals(ext)) {
             collector.addClassFileBytes(size);
         }
     }

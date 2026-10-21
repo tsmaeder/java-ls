@@ -10,6 +10,9 @@
  */
 package ch.castleridge.javals.indexing.scan;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -20,11 +23,16 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class ScanCollector {
 
-    private final AtomicInteger sourceFileCount = new AtomicInteger();
+    private final ConcurrentHashMap<String, AtomicInteger> fileCounts = new ConcurrentHashMap<>();
     private final AtomicLong classFileBytes = new AtomicLong();
 
-    public void addSourceFile() {
-        sourceFileCount.incrementAndGet();
+    /**
+     * Records one walked file under {@code extension} (including the leading
+     * dot, lower-cased). No-op when {@code extension} is null or blank.
+     */
+    public void addFile(String extension) {
+        if (extension == null || extension.isBlank()) return;
+        fileCounts.computeIfAbsent(extension, k -> new AtomicInteger()).incrementAndGet();
     }
 
     public void addClassFileBytes(long n) {
@@ -34,6 +42,10 @@ public final class ScanCollector {
     }
 
     public ScanStats snapshot() {
-        return new ScanStats(sourceFileCount.get(), classFileBytes.get());
+        Map<String, Integer> counts = new HashMap<>();
+        for (Map.Entry<String, AtomicInteger> e : fileCounts.entrySet()) {
+            counts.put(e.getKey(), e.getValue().get());
+        }
+        return new ScanStats(counts, classFileBytes.get());
     }
 }

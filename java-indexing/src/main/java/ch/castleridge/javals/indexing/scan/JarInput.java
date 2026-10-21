@@ -62,10 +62,9 @@ public record JarInput(Path jar, ScanCollector collector) implements InputSource
 
     private void recordStats(String simple, long entrySize) {
         if (collector == null) return;
-        if (FileIndexerRegistry.isSourceFileName(simple)) {
-            collector.addSourceFile();
-        } else if (FileIndexerRegistry.EXT_CLASS.equals(FileIndexerRegistry.extensionOf(simple))
-                && entrySize >= 0) {
+        String ext = FileIndexerRegistry.extensionOf(simple);
+        collector.addFile(ext);
+        if (FileIndexerRegistry.EXT_CLASS.equals(ext) && entrySize >= 0) {
             collector.addClassFileBytes(entrySize);
         }
     }

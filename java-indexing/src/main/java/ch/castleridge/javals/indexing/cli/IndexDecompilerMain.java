@@ -18,6 +18,8 @@ import java.lang.management.MemoryUsage;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeSet;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.index.InMemoryIndex;
@@ -71,6 +73,10 @@ public final class IndexDecompilerMain {
         System.out.println("Elapsed: " + scan.elapsedMs() + " ms"
                 + " (class files: " + scan.classFilesMs() + " ms, source files: "
                 + scan.sourceFilesMs() + " ms)");
+        if (!scan.indexWorkMsByExtension().isEmpty()) {
+            System.out.println("Index work by extension (summed parallel task ms): "
+                    + formatWorkMs(scan.indexWorkMsByExtension()));
+        }
         System.out.println("Memory (heap, JVM delta):");
         System.out.println("  baseline:  " + formatBytes(baselineBytes));
         System.out.println("  retained:  " + formatBytes(retainedBytes)
@@ -154,6 +160,17 @@ public final class IndexDecompilerMain {
         double mb = kb / 1024.0;
         if (mb < 1024.0) return String.format("%.1f MiB", mb);
         return String.format("%.2f GiB", mb / 1024.0);
+    }
+
+    private static String formatWorkMs(Map<String, Long> workMs) {
+        StringBuilder sb = new StringBuilder();
+        for (String ext : new TreeSet<>(workMs.keySet())) {
+            if (sb.length() > 0) {
+                sb.append("; ");
+            }
+            sb.append(ext).append(": ").append(workMs.get(ext)).append(" ms");
+        }
+        return sb.toString();
     }
 
     private static List<InputSource> parseArgs(String[] args) {
