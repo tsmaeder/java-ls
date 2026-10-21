@@ -345,19 +345,23 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
 
     /**
      * Dynamically register {@code workspace/didChangeWatchedFiles} watchers for
-     * {@code **}/{@code *.java} under each mbt source root, when the client supports it.
+     * {@code **}/{@code *.java} and {@code **}/{@code *.kt} under each mbt
+     * source root, when the client supports it.
      */
     public void registerSourceFileWatchers(List<String> sourceRootUris) {
         if (!watchedFilesDynamicRegistration || client == null
                 || sourceRootUris == null || sourceRootUris.isEmpty()) {
             return;
         }
-        List<FileSystemWatcher> watchers = new ArrayList<>(sourceRootUris.size());
+        String[] globs = {"**/*.java", "**/*.kt"};
+        List<FileSystemWatcher> watchers = new ArrayList<>(sourceRootUris.size() * globs.length);
         int kind = WatchKind.Create + WatchKind.Change + WatchKind.Delete;
         for (String sourceUri : sourceRootUris) {
             if (sourceUri == null || sourceUri.isBlank()) continue;
-            RelativePattern pattern = new RelativePattern(Either.forRight(sourceUri), "**/*.java");
-            watchers.add(new FileSystemWatcher(Either.forRight(pattern), kind));
+            for (String glob : globs) {
+                RelativePattern pattern = new RelativePattern(Either.forRight(sourceUri), glob);
+                watchers.add(new FileSystemWatcher(Either.forRight(pattern), kind));
+            }
         }
         if (watchers.isEmpty()) return;
         String id = UUID.randomUUID().toString();
@@ -371,7 +375,7 @@ public class JavaLanguageServer implements LanguageServer, LanguageClientAware {
             client.registerCapability(new RegistrationParams(List.of(registration)));
             sourceWatcherRegistrationId = id;
             logMessage(MessageType.Info,
-                    "Registered file watchers for " + watchers.size() + " source root(s)");
+                    "Registered file watchers for " + sourceRootUris.size() + " source root(s)");
         } catch (RuntimeException e) {
             logMessage(MessageType.Warning,
                     "Could not register source file watchers: " + e.getMessage());

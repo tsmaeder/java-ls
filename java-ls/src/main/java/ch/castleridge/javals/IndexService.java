@@ -13,7 +13,6 @@ package ch.castleridge.javals;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -30,6 +29,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 
+import ch.castleridge.javals.indexing.FileIndexerRegistry;
+import ch.castleridge.javals.indexing.bytecode.BytecodeIndexer;
 import ch.castleridge.javals.indexing.cli.HeapSizeEstimator;
 import ch.castleridge.javals.indexing.scan.DirInput;
 import ch.castleridge.javals.indexing.scan.InputSource;
@@ -39,6 +40,7 @@ import ch.castleridge.javals.indexing.scan.ScanCollector;
 import ch.castleridge.javals.indexing.scan.ScanResult;
 import ch.castleridge.javals.indexing.scan.ScanStats;
 import ch.castleridge.javals.indexing.scan.Scanner;
+import ch.castleridge.javals.indexing.source.SourceIndexer;
 import org.eclipse.lsp4j.FileChangeType;
 import org.eclipse.lsp4j.FileEvent;
 import org.eclipse.lsp4j.MessageType;
@@ -65,25 +67,26 @@ public final class IndexService {
         t.setDaemon(true);
         return t;
     });
-    private volatile ch.castleridge.javals.indexing.source.SourceIndexer sourceIndexer =
-            ch.castleridge.javals.indexing.source.SourceIndexer.javac();
-    private volatile ch.castleridge.javals.indexing.bytecode.BytecodeIndexer bytecodeIndexer =
-            ch.castleridge.javals.indexing.bytecode.BytecodeIndexer.asm();
+    private volatile SourceIndexer sourceIndexer = SourceIndexer.javac();
+    private volatile BytecodeIndexer bytecodeIndexer = BytecodeIndexer.asm();
+    private volatile FileIndexerRegistry fileIndexers = FileIndexerRegistry.defaults();
 
     public IndexService(JavaLanguageServer server) {
         this.server = server;
     }
 
-    public void setSourceIndexer(ch.castleridge.javals.indexing.source.SourceIndexer sourceIndexer) {
-        this.sourceIndexer = sourceIndexer == null
-                ? ch.castleridge.javals.indexing.source.SourceIndexer.javac()
-                : sourceIndexer;
+    public void setSourceIndexer(SourceIndexer sourceIndexer) {
+        this.sourceIndexer = sourceIndexer == null ? SourceIndexer.javac() : sourceIndexer;
+        rebuildFileIndexers();
     }
 
-    public void setBytecodeIndexer(ch.castleridge.javals.indexing.bytecode.BytecodeIndexer bytecodeIndexer) {
-        this.bytecodeIndexer = bytecodeIndexer == null
-                ? ch.castleridge.javals.indexing.bytecode.BytecodeIndexer.asm()
-                : bytecodeIndexer;
+    public void setBytecodeIndexer(BytecodeIndexer bytecodeIndexer) {
+        this.bytecodeIndexer = bytecodeIndexer == null ? BytecodeIndexer.asm() : bytecodeIndexer;
+        rebuildFileIndexers();
+    }
+
+    private void rebuildFileIndexers() {
+        this.fileIndexers = FileIndexerRegistry.of(this.sourceIndexer, this.bytecodeIndexer);
     }
 
     public void addIndexChangedListener(Runnable listener) {
@@ -97,8 +100,9 @@ public final class IndexService {
 
     /**
      * Apply LSP {@code workspace/didChangeWatchedFiles} events: reindex or
-     * drop {@code .java} files that fall under a known source root.
-     * Returns a future that completes when the batch has been applied.
+     * drop source files ({@code .java}, {@code .kt}, …) that fall under a
+     * known source root. Returns a future that completes when the batch has
+     * been applied.
      */
     public CompletableFuture<Void> onWatchedFilesChanged(List<FileEvent> changes) {
         if (changes == null || changes.isEmpty()) {
@@ -131,7 +135,12 @@ public final class IndexService {
         if (file == null) return;
         file = file.toAbsolutePath().normalize();
         String fileName = file.getFileName() == null ? "" : file.getFileName().toString();
-        if (!fileName.endsWith(".java") || Index.isSkippedFileName(fileName)) return;
+        FileIndexerRegistry registry = fileIndexers;
+        if (!FileIndexerRegistry.isSourceFileName(fileName)
+                || !registry.accepts(fileName)
+                || Index.isSkippedFileName(fileName)) {
+            return;
+        }
 
         ResolvedResource resolved = resolveUnderSourceRoots(file, sourceRoots);
         if (resolved == null) return;
@@ -143,15 +152,15 @@ public final class IndexService {
             return;
         }
 
-        String content;
+        byte[] content;
         try {
-            content = Files.readString(file, StandardCharsets.UTF_8);
+            content = Files.readAllBytes(file);
         } catch (IOException e) {
             log(MessageType.Warning, "Could not read " + file + " for reindex: " + e.getMessage());
             return;
         }
         InMemoryIndex replacement = new InMemoryIndex();
-        sourceIndexer.index(resolved.relativePath(), resolved.sourceUri(), content, replacement);
+        registry.indexOne(resolved.relativePath(), resolved.sourceUri(), fileName, content, replacement);
         index.putResource(resolved.sourceUri(), resolved.relativePath(), replacement);
         log(MessageType.Log, "Index updated " + resolved.relativePath()
                 + " (" + replacement.entryCount() + " types)");
@@ -195,7 +204,7 @@ public final class IndexService {
             ScanResult scan;
             ScanCollector collector = findScanCollector(sources);
             try {
-                Scanner scanner = new Scanner(sourceIndexer, bytecodeIndexer);
+                Scanner scanner = new Scanner(fileIndexers);
                 scan = scanner.scan(sources, index, progress::fileIndexed);
             } finally {
                 // End before the "Indexed" ready log so awaitIndexReady cannot
@@ -299,7 +308,7 @@ public final class IndexService {
         ScanResult scan;
         ScanCollector collector = findScanCollector(toScan);
         try {
-            Scanner scanner = new Scanner(sourceIndexer, bytecodeIndexer);
+            Scanner scanner = new Scanner(fileIndexers);
             scan = scanner.scan(toScan, index, progress::fileIndexed);
         } finally {
             progress.end(null);

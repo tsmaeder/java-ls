@@ -22,7 +22,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Map;
 import java.util.stream.Stream;
 
-import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.FileIndexerRegistry;
 
 /**
  * JRT image entries for a JDK install.
@@ -85,7 +85,10 @@ public final class JrtInput implements InputSource {
                     // and the jrt filesystem may close before that task runs.
                     try {
                         byte[] bytes = Files.readAllBytes(file);
-                        if (collector != null && name.endsWith(".class") && attrs.size() < 0) {
+                        if (collector != null
+                                && FileIndexerRegistry.EXT_CLASS.equals(
+                                        FileIndexerRegistry.extensionOf(name))
+                                && attrs.size() < 0) {
                             collector.addClassFileBytes(bytes.length);
                         }
                         sink.accept(relativePath, name, () -> bytes);
@@ -101,14 +104,14 @@ public final class JrtInput implements InputSource {
 
     private void recordStats(String name, long size) {
         if (collector == null) return;
-        if (name.endsWith(".java")) {
+        if (FileIndexerRegistry.isSourceFileName(name)) {
             collector.addSourceFile();
-        } else if (name.endsWith(".class")) {
+        } else if (FileIndexerRegistry.EXT_CLASS.equals(FileIndexerRegistry.extensionOf(name))) {
             collector.addClassFileBytes(size);
         }
     }
 
     private static boolean isIndexable(String name) {
-        return (name.endsWith(".java") || name.endsWith(".class")) && !Index.isSkippedFileName(name);
+        return FileIndexerRegistry.isIndexableFileName(name);
     }
 }

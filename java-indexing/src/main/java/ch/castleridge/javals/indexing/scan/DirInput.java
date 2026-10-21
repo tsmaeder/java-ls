@@ -17,7 +17,7 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 
-import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.FileIndexerRegistry;
 
 /** Directory on the local filesystem, walked recursively. */
 public record DirInput(Path root, ScanCollector collector) implements InputSource {
@@ -49,9 +49,9 @@ public record DirInput(Path root, ScanCollector collector) implements InputSourc
 
     private void recordStats(String name, long size) {
         if (collector == null) return;
-        if (name.endsWith(".java")) {
+        if (FileIndexerRegistry.isSourceFileName(name)) {
             collector.addSourceFile();
-        } else if (name.endsWith(".class")) {
+        } else if (FileIndexerRegistry.EXT_CLASS.equals(FileIndexerRegistry.extensionOf(name))) {
             collector.addClassFileBytes(size);
         }
     }
@@ -63,6 +63,6 @@ public record DirInput(Path root, ScanCollector collector) implements InputSourc
     }
 
     private static boolean isIndexable(String name) {
-        return (name.endsWith(".java") || name.endsWith(".class")) && !Index.isSkippedFileName(name);
+        return FileIndexerRegistry.isIndexableFileName(name);
     }
 }

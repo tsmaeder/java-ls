@@ -16,7 +16,7 @@ import java.util.Enumeration;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
-import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.FileIndexerRegistry;
 
 /** A single {@code .jar} file. */
 public record JarInput(Path jar, ScanCollector collector) implements InputSource {
@@ -41,7 +41,10 @@ public record JarInput(Path jar, ScanCollector collector) implements InputSource
                     // try-with-resources below would have closed the JarFile.
                     try {
                         byte[] bytes = jf.getInputStream(e).readAllBytes();
-                        if (collector != null && simple.endsWith(".class") && e.getSize() < 0) {
+                        if (collector != null
+                                && FileIndexerRegistry.EXT_CLASS.equals(
+                                        FileIndexerRegistry.extensionOf(simple))
+                                && e.getSize() < 0) {
                             collector.addClassFileBytes(bytes.length);
                         }
                         sink.accept(name, simple, () -> bytes);
@@ -59,9 +62,10 @@ public record JarInput(Path jar, ScanCollector collector) implements InputSource
 
     private void recordStats(String simple, long entrySize) {
         if (collector == null) return;
-        if (simple.endsWith(".java")) {
+        if (FileIndexerRegistry.isSourceFileName(simple)) {
             collector.addSourceFile();
-        } else if (simple.endsWith(".class") && entrySize >= 0) {
+        } else if (FileIndexerRegistry.EXT_CLASS.equals(FileIndexerRegistry.extensionOf(simple))
+                && entrySize >= 0) {
             collector.addClassFileBytes(entrySize);
         }
     }
@@ -78,6 +82,6 @@ public record JarInput(Path jar, ScanCollector collector) implements InputSource
     }
 
     private static boolean isIndexable(String name) {
-        return (name.endsWith(".java") || name.endsWith(".class")) && !Index.isSkippedFileName(name);
+        return FileIndexerRegistry.isIndexableFileName(name);
     }
 }
