@@ -14,36 +14,13 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
-import org.jetbrains.kotlin.lexer.KtTokens;
-import org.jetbrains.kotlin.name.FqName;
-import org.jetbrains.kotlin.name.Name;
-import org.jetbrains.kotlin.psi.KtAnnotationEntry;
-import org.jetbrains.kotlin.psi.KtClass;
-import org.jetbrains.kotlin.psi.KtClassBody;
-import org.jetbrains.kotlin.psi.KtClassOrObject;
-import org.jetbrains.kotlin.psi.KtConstructor;
-import org.jetbrains.kotlin.psi.KtDeclaration;
-import org.jetbrains.kotlin.psi.KtEnumEntry;
-import org.jetbrains.kotlin.psi.KtFile;
-import org.jetbrains.kotlin.psi.KtModifierListOwner;
-import org.jetbrains.kotlin.psi.KtNamedFunction;
-import org.jetbrains.kotlin.psi.KtNullableType;
-import org.jetbrains.kotlin.psi.KtObjectDeclaration;
-import org.jetbrains.kotlin.psi.KtParameter;
-import org.jetbrains.kotlin.psi.KtPrimaryConstructor;
-import org.jetbrains.kotlin.psi.KtProperty;
-import org.jetbrains.kotlin.psi.KtSecondaryConstructor;
-import org.jetbrains.kotlin.psi.KtSuperTypeListEntry;
-import org.jetbrains.kotlin.psi.KtTypeAlias;
-import org.jetbrains.kotlin.psi.KtTypeArgumentList;
-import org.jetbrains.kotlin.psi.KtTypeElement;
-import org.jetbrains.kotlin.psi.KtTypeParameter;
-import org.jetbrains.kotlin.psi.KtTypeProjection;
-import org.jetbrains.kotlin.psi.KtTypeReference;
-import org.jetbrains.kotlin.psi.KtUserType;
 import org.objectweb.asm.Opcodes;
+
+import io.github.treesitter.jtreesitter.Node;
+import io.github.treesitter.jtreesitter.Tree;
 
 import ch.castleridge.javals.indexing.index.Index;
 import ch.castleridge.javals.indexing.model.AccessVisibility;
@@ -59,7 +36,7 @@ import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.TypeRef;
 
 /**
- * Walks a parse-only Kotlin PSI tree and emits {@link SourceTypeEntry}
+ * Walks a Kotlin tree-sitter CST and emits {@link SourceTypeEntry}
  * declarations plus an identifier bloom filter.
  */
 final class KotlinSourceIndexerImpl {
@@ -70,57 +47,68 @@ final class KotlinSourceIndexerImpl {
         if (resourcePath == null || sourceUri == null || content == null || into == null) {
             return;
         }
-        String fileName = simpleName(resourcePath);
+        String source = content.toString();
         try {
-            KotlinPsiEnvironment.withParsed(fileName, content, ktFile -> {
-                indexFile(resourcePath, sourceUri, ktFile, into);
+            Optional<Tree> parsed = KotlinTreeSitter.parse(source);
+            if (parsed.isEmpty()) {
+                System.err.println("Failed to parse Kotlin source " + resourcePath);
+                return;
+            }
+            try (Tree tree = parsed.get()) {
+                Node root = tree.getRootNode();
+                indexFile(resourcePath, sourceUri, root, into);
                 try {
                     into.registerBloom(sourceUri, resourcePath,
-                            KotlinIdentifierCollector.collectAndBuild(ktFile));
+                            KotlinIdentifierCollector.collectAndBuild(root));
                 } catch (RuntimeException | StackOverflowError e) {
                     System.err.println("Failed to build identifier bloom filter for " + resourcePath
                             + ": " + e.getClass().getSimpleName() + ": " + e.getMessage());
                 }
-                return null;
-            });
-        } catch (RuntimeException | StackOverflowError e) {
+            }
+        } catch (RuntimeException | Error e) {
             System.err.println("Failed to index Kotlin source " + resourcePath
                     + ": " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 
-    private static void indexFile(String resourcePath, String sourceUri, KtFile file, Index into) {
-        FqName pkgFq = file.getPackageFqName();
-        String packageJvm = pkgFq == null || pkgFq.isRoot() ? "" : pkgFq.asString().replace('.', '/');
-
+    private static void indexFile(String resourcePath, String sourceUri, Node root, Index into) {
+        String packageJvm = "";
         Map<String, String> singleTypeImports = new HashMap<>();
         List<String> onDemandImports = new ArrayList<>();
-        file.getImportDirectives().forEach(imp -> {
-            if (imp.isAllUnder()) {
-                FqName imported = imp.getImportedFqName();
-                if (imported != null) {
-                    onDemandImports.add(imported.asString().replace('.', '/'));
-                }
-                return;
-            }
-            FqName imported = imp.getImportedFqName();
-            if (imported == null) return;
-            Name shortName = imported.shortNameOrSpecial();
-            if (shortName.isSpecial()) return;
-            String alias = imp.getAliasName();
-            String simple = alias != null ? alias : shortName.asString();
-            singleTypeImports.put(simple, imported.asString().replace('.', '/'));
-        });
+        List<Node> topTypes = new ArrayList<>();
+        List<Node> topCallables = new ArrayList<>();
+        String facadeFromJvmName = null;
 
-        Set<String> siblings = new LinkedHashSet<>();
-        for (KtDeclaration decl : file.getDeclarations()) {
-            if (decl instanceof KtClassOrObject co) {
-                String name = co.getName();
-                if (name != null && !name.isEmpty()) siblings.add(name);
+        for (Node child : namedChildren(root)) {
+            switch (child.getType()) {
+                case "package_header" -> packageJvm = identifierToJvm(childNamed(child, "identifier"));
+                case "import_list" -> {
+                    for (Node imp : namedChildren(child)) {
+                        if ("import_header".equals(imp.getType())) {
+                            collectImport(imp, singleTypeImports, onDemandImports);
+                        }
+                    }
+                }
+                case "import_header" -> collectImport(child, singleTypeImports, onDemandImports);
+                case "file_annotation" -> {
+                    String jvmName = parseFileJvmName(child);
+                    if (jvmName != null) facadeFromJvmName = jvmName;
+                }
+                case "class_declaration", "object_declaration" -> topTypes.add(child);
+                case "function_declaration", "property_declaration" -> topCallables.add(child);
+                default -> {
+                }
             }
         }
-        String facadeSimple = fileFacadeSimpleName(file, fileName(resourcePath));
-        boolean hasTopLevelMembers = hasTopLevelCallable(file);
+
+        Set<String> siblings = new LinkedHashSet<>();
+        for (Node typeNode : topTypes) {
+            String name = typeSimpleName(typeNode);
+            if (name != null && !name.isEmpty()) siblings.add(name);
+        }
+        String fileName = simpleName(resourcePath);
+        String facadeSimple = facadeFromJvmName != null ? facadeFromJvmName : defaultFileFacadeName(fileName);
+        boolean hasTopLevelMembers = !topCallables.isEmpty();
         if (hasTopLevelMembers) {
             siblings.add(facadeSimple);
         }
@@ -132,48 +120,60 @@ final class KotlinSourceIndexerImpl {
                 siblings);
 
         Deque<String> enclosing = new ArrayDeque<>();
-        for (KtDeclaration decl : file.getDeclarations()) {
-            if (decl instanceof KtClassOrObject co) {
-                indexClassOrObject(resourcePath, sourceUri, co, packageJvm, enclosing,
-                        new HashSet<>(), hints, into);
-            }
+        for (Node typeNode : topTypes) {
+            indexType(resourcePath, sourceUri, typeNode, packageJvm, enclosing,
+                    new HashSet<>(), hints, into, false);
         }
 
         if (hasTopLevelMembers) {
-            indexFileFacade(resourcePath, sourceUri, file, packageJvm, facadeSimple, hints, into);
+            indexFileFacade(resourcePath, sourceUri, topCallables, packageJvm, facadeSimple, hints, into);
         }
     }
 
-    private static boolean hasTopLevelCallable(KtFile file) {
-        for (KtDeclaration decl : file.getDeclarations()) {
-            if (decl instanceof KtNamedFunction || decl instanceof KtProperty) {
-                return true;
-            }
+    private static void collectImport(Node importHeader, Map<String, String> single,
+                                      List<String> onDemand) {
+        Node id = childNamed(importHeader, "identifier");
+        String jvm = identifierToJvm(id);
+        if (jvm == null || jvm.isEmpty()) return;
+        if (childNamed(importHeader, "wildcard_import") != null) {
+            onDemand.add(jvm);
+            return;
         }
-        return false;
+        Node alias = childNamed(importHeader, "import_alias");
+        String simple;
+        if (alias != null) {
+            Node aliasId = firstNamedOfTypes(alias, "type_identifier", "simple_identifier");
+            simple = text(aliasId);
+        } else {
+            int slash = jvm.lastIndexOf('/');
+            simple = slash < 0 ? jvm : jvm.substring(slash + 1);
+        }
+        if (simple != null && !simple.isEmpty()) {
+            single.put(simple, jvm);
+        }
     }
 
-    private static void indexFileFacade(String resourcePath, String sourceUri, KtFile file,
+    private static void indexFileFacade(String resourcePath, String sourceUri, List<Node> callables,
                                         String packageJvm, String facadeSimple,
                                         SourceResolutionHints hints, Index into) {
         String jvmOwner = packageJvm.isEmpty() ? facadeSimple : packageJvm + "/" + facadeSimple;
         List<FieldEntry> fields = new ArrayList<>();
         List<MethodEntry> methods = new ArrayList<>();
 
-        for (KtDeclaration decl : file.getDeclarations()) {
-            if (decl instanceof KtProperty prop) {
-                FieldEntry field = toFieldEntry(prop, Set.of(), jvmOwner, true);
+        for (Node decl : callables) {
+            if ("property_declaration".equals(decl.getType())) {
+                FieldEntry field = toFieldEntry(decl, Set.of(), jvmOwner, true);
                 if (field != null && AccessVisibility.shouldIndexMember(field.modifiers(), field.name())) {
                     fields.add(field);
                 }
-                MethodEntry getter = syntheticPropertyAccessor(prop, true, true, Set.of(), jvmOwner);
+                MethodEntry getter = syntheticPropertyAccessor(decl, true, true, Set.of(), jvmOwner);
                 if (getter != null) methods.add(getter);
-                if (prop.isVar()) {
-                    MethodEntry setter = syntheticPropertyAccessor(prop, false, true, Set.of(), jvmOwner);
+                if (isVarProperty(decl)) {
+                    MethodEntry setter = syntheticPropertyAccessor(decl, false, true, Set.of(), jvmOwner);
                     if (setter != null) methods.add(setter);
                 }
-            } else if (decl instanceof KtNamedFunction fn) {
-                MethodEntry method = toMethodEntry(fn, Set.of(), jvmOwner, true);
+            } else if ("function_declaration".equals(decl.getType())) {
+                MethodEntry method = toMethodEntry(decl, Set.of(), jvmOwner, true);
                 if (method != null && AccessVisibility.shouldIndexMember(method.modifiers(), method.name())) {
                     methods.add(method);
                 }
@@ -198,17 +198,19 @@ final class KotlinSourceIndexerImpl {
                 hints));
     }
 
-    private static void indexClassOrObject(String resourcePath, String sourceUri,
-                                           KtClassOrObject co, String packageJvm,
-                                           Deque<String> enclosing, Set<String> outerTypeParams,
-                                           SourceResolutionHints hints, Index into) {
-        String simple = co.getName();
-        if ((simple == null || simple.isEmpty())
-                && co instanceof KtObjectDeclaration obj && obj.isCompanion()) {
+    private static void indexType(String resourcePath, String sourceUri, Node typeNode,
+                                  String packageJvm, Deque<String> enclosing,
+                                  Set<String> outerTypeParams, SourceResolutionHints hints,
+                                  Index into, boolean nested) {
+        boolean isObject = "object_declaration".equals(typeNode.getType())
+                || "companion_object".equals(typeNode.getType());
+        boolean isCompanion = "companion_object".equals(typeNode.getType());
+
+        String simple = typeSimpleName(typeNode);
+        if ((simple == null || simple.isEmpty()) && isCompanion) {
             simple = "Companion";
         }
         if (simple == null || simple.isEmpty()) {
-            // Anonymous object — skip as a named index entry.
             return;
         }
 
@@ -219,35 +221,38 @@ final class KotlinSourceIndexerImpl {
             localName = enclosing.peekLast() + "$" + simple;
         }
 
-        if (!AccessVisibility.shouldIndexSourceType(visibilityFlags(co))) {
+        int vis = visibilityFlags(typeNode);
+        if (!AccessVisibility.shouldIndexSourceType(vis)) {
             return;
         }
 
         Set<String> typeParams = new HashSet<>(outerTypeParams);
         List<TypeParamRef> declaredTypeParams = new ArrayList<>();
-        if (co instanceof KtClass klass) {
-            for (KtTypeParameter tp : klass.getTypeParameters()) {
-                String tpName = tp.getName();
+        Node typeParamsNode = childNamed(typeNode, "type_parameters");
+        if (typeParamsNode != null) {
+            for (Node tp : namedChildren(typeParamsNode)) {
+                if (!"type_parameter".equals(tp.getType())) continue;
+                String tpName = text(childNamed(tp, "type_identifier"));
                 if (tpName != null) typeParams.add(tpName);
             }
-            for (KtTypeParameter tp : klass.getTypeParameters()) {
+            for (Node tp : namedChildren(typeParamsNode)) {
+                if (!"type_parameter".equals(tp.getType())) continue;
                 declaredTypeParams.add(toTypeParamRef(tp, typeParams, localName));
             }
         }
 
-        TypeDeclKind declKind = declKind(co);
-        int modifiers = typeModifiers(co, declKind);
+        TypeDeclKind declKind = declKind(typeNode, isObject);
+        int modifiers = typeModifiers(typeNode, declKind, isObject, nested);
 
         Type superRef = null;
         List<Type> interfaceRefs = new ArrayList<>();
-        for (KtSuperTypeListEntry entry : co.getSuperTypeListEntries()) {
-            Type t = toType(entry.getTypeReference(), typeParams, localName);
+        for (Node del : namedChildren(typeNode)) {
+            if (!"delegation_specifier".equals(del.getType())) continue;
+            Type t = delegationType(del, typeParams, localName);
             if (t == null) continue;
-            // Without resolve we cannot tell class vs interface; treat the first
-            // as superclass for classes/objects and all as interfaces for interfaces.
             if (declKind == TypeDeclKind.INTERFACE || declKind == TypeDeclKind.ANNOTATION) {
                 interfaceRefs.add(t);
-            } else if (superRef == null && !(co instanceof KtObjectDeclaration)) {
+            } else if (superRef == null && !isObject) {
                 superRef = t;
             } else {
                 interfaceRefs.add(t);
@@ -257,33 +262,29 @@ final class KotlinSourceIndexerImpl {
         List<FieldEntry> fields = new ArrayList<>();
         List<MethodEntry> methods = new ArrayList<>();
         List<String> innerTypes = new ArrayList<>();
-        List<KtClassOrObject> nested = new ArrayList<>();
+        List<Node> nestedTypes = new ArrayList<>();
 
-        // Primary constructor parameters that are also properties.
-        KtPrimaryConstructor primary = co.getPrimaryConstructor();
+        Node primary = childNamed(typeNode, "primary_constructor");
         if (primary != null) {
-            MethodEntry ctor = toConstructorEntry(primary, typeParams, localName, declKind);
+            MethodEntry ctor = toConstructorEntry(primary, typeParams, localName);
             if (ctor != null && AccessVisibility.shouldIndexMember(ctor.modifiers(), ctor.name())) {
                 methods.add(ctor);
             }
-            for (KtParameter param : primary.getValueParameters()) {
-                if (param.hasValOrVar()) {
-                    FieldEntry field = constructorPropertyField(param, typeParams, localName);
-                    if (field != null && AccessVisibility.shouldIndexMember(field.modifiers(), field.name())) {
-                        fields.add(field);
-                    }
+            for (Node param : namedChildren(primary)) {
+                if (!"class_parameter".equals(param.getType())) continue;
+                if (childNamed(param, "binding_pattern_kind") == null) continue;
+                FieldEntry field = constructorPropertyField(param, typeParams, localName);
+                if (field != null && AccessVisibility.shouldIndexMember(field.modifiers(), field.name())) {
+                    fields.add(field);
                 }
             }
-        } else if (declKind != TypeDeclKind.INTERFACE && declKind != TypeDeclKind.ANNOTATION
-                && !(co instanceof KtObjectDeclaration)) {
-            // Implicit default constructor.
+        } else if (declKind != TypeDeclKind.INTERFACE && declKind != TypeDeclKind.ANNOTATION && !isObject) {
             methods.add(new MethodEntry(
                     Opcodes.ACC_PUBLIC, "<init>", Type.Primitive.VOID,
                     EmptyArrays.TYPE, EmptyArrays.TYPE, EmptyArrays.ANNOTATION_REF));
         }
 
-        if (co instanceof KtObjectDeclaration) {
-            // Kotlin objects expose a static INSTANCE field to Java.
+        if (isObject) {
             fields.add(new FieldEntry(
                     Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL,
                     "INSTANCE",
@@ -291,51 +292,9 @@ final class KotlinSourceIndexerImpl {
                     EmptyArrays.ANNOTATION_REF));
         }
 
-        KtClassBody body = co.getBody();
+        Node body = firstNamedOfTypes(typeNode, "class_body", "enum_class_body");
         if (body != null) {
-            for (KtDeclaration member : body.getDeclarations()) {
-                if (member instanceof KtEnumEntry enumEntry) {
-                    FieldEntry field = enumConstantField(enumEntry, localName);
-                    if (field != null) fields.add(field);
-                    continue;
-                }
-                if (member instanceof KtProperty prop) {
-                    FieldEntry field = toFieldEntry(prop, typeParams, localName, false);
-                    if (field != null && AccessVisibility.shouldIndexMember(field.modifiers(), field.name())) {
-                        fields.add(field);
-                    }
-                    MethodEntry getter = syntheticPropertyAccessor(prop, true, false, typeParams, localName);
-                    if (getter != null) methods.add(getter);
-                    if (prop.isVar()) {
-                        MethodEntry setter = syntheticPropertyAccessor(prop, false, false, typeParams, localName);
-                        if (setter != null) methods.add(setter);
-                    }
-                } else if (member instanceof KtNamedFunction fn) {
-                    MethodEntry method = toMethodEntry(fn, typeParams, localName, false);
-                    if (method != null && AccessVisibility.shouldIndexMember(method.modifiers(), method.name())) {
-                        methods.add(method);
-                    }
-                } else if (member instanceof KtSecondaryConstructor secondary) {
-                    MethodEntry ctor = toConstructorEntry(secondary, typeParams, localName, declKind);
-                    if (ctor != null && AccessVisibility.shouldIndexMember(ctor.modifiers(), ctor.name())) {
-                        methods.add(ctor);
-                    }
-                } else if (member instanceof KtClassOrObject nestedCo) {
-                    if (!AccessVisibility.shouldIndexSourceType(visibilityFlags(nestedCo))) {
-                        continue;
-                    }
-                    String nestedName = nestedCo.getName();
-                    if (nestedCo instanceof KtObjectDeclaration obj && obj.isCompanion()
-                            && (nestedName == null || nestedName.isEmpty())) {
-                        nestedName = "Companion";
-                    }
-                    if (nestedName == null || nestedName.isEmpty()) continue;
-                    nested.add(nestedCo);
-                    innerTypes.add(localName + "$" + nestedName);
-                } else if (member instanceof KtTypeAlias) {
-                    // Type aliases are compile-time only; skip JVM entries.
-                }
-            }
+            collectBodyMembers(body, typeParams, localName, fields, methods, nestedTypes, innerTypes);
         }
 
         into.add(new SourceTypeEntry(
@@ -357,27 +316,77 @@ final class KotlinSourceIndexerImpl {
 
         enclosing.addLast(localName);
         try {
-            for (KtClassOrObject child : nested) {
-                indexClassOrObject(resourcePath, sourceUri, child, packageJvm, enclosing,
-                        typeParams, hints, into);
+            for (Node child : nestedTypes) {
+                indexType(resourcePath, sourceUri, child, packageJvm, enclosing,
+                        typeParams, hints, into, true);
             }
         } finally {
             enclosing.removeLast();
         }
     }
 
-    private static TypeDeclKind declKind(KtClassOrObject co) {
-        if (co instanceof KtClass klass) {
-            if (klass.isInterface()) return TypeDeclKind.INTERFACE;
-            if (klass.isEnum()) return TypeDeclKind.ENUM;
-            if (klass.isAnnotation()) return TypeDeclKind.ANNOTATION;
-            if (klass.isData()) return TypeDeclKind.CLASS;
+    private static void collectBodyMembers(Node body, Set<String> typeParams, String localName,
+                                           List<FieldEntry> fields, List<MethodEntry> methods,
+                                           List<Node> nestedTypes, List<String> innerTypes) {
+        for (Node member : namedChildren(body)) {
+            switch (member.getType()) {
+                case "enum_entry" -> {
+                    FieldEntry field = enumConstantField(member, localName);
+                    if (field != null) fields.add(field);
+                }
+                case "property_declaration" -> {
+                    FieldEntry field = toFieldEntry(member, typeParams, localName, false);
+                    if (field != null && AccessVisibility.shouldIndexMember(field.modifiers(), field.name())) {
+                        fields.add(field);
+                    }
+                    MethodEntry getter = syntheticPropertyAccessor(member, true, false, typeParams, localName);
+                    if (getter != null) methods.add(getter);
+                    if (isVarProperty(member)) {
+                        MethodEntry setter = syntheticPropertyAccessor(member, false, false, typeParams, localName);
+                        if (setter != null) methods.add(setter);
+                    }
+                }
+                case "function_declaration" -> {
+                    MethodEntry method = toMethodEntry(member, typeParams, localName, false);
+                    if (method != null && AccessVisibility.shouldIndexMember(method.modifiers(), method.name())) {
+                        methods.add(method);
+                    }
+                }
+                case "secondary_constructor" -> {
+                    MethodEntry ctor = toConstructorEntry(member, typeParams, localName);
+                    if (ctor != null && AccessVisibility.shouldIndexMember(ctor.modifiers(), ctor.name())) {
+                        methods.add(ctor);
+                    }
+                }
+                case "class_declaration", "object_declaration", "companion_object" -> {
+                    if (!AccessVisibility.shouldIndexSourceType(visibilityFlags(member))) {
+                        break;
+                    }
+                    String nestedName = typeSimpleName(member);
+                    if ("companion_object".equals(member.getType())
+                            && (nestedName == null || nestedName.isEmpty())) {
+                        nestedName = "Companion";
+                    }
+                    if (nestedName == null || nestedName.isEmpty()) break;
+                    nestedTypes.add(member);
+                    innerTypes.add(localName + "$" + nestedName);
+                }
+                default -> {
+                }
+            }
         }
+    }
+
+    private static TypeDeclKind declKind(Node typeNode, boolean isObject) {
+        if (isObject) return TypeDeclKind.CLASS;
+        if (hasAnonText(typeNode, "interface")) return TypeDeclKind.INTERFACE;
+        if (hasAnonText(typeNode, "enum")) return TypeDeclKind.ENUM;
+        if (modifierContains(typeNode, "class_modifier", "annotation")) return TypeDeclKind.ANNOTATION;
         return TypeDeclKind.CLASS;
     }
 
-    private static int typeModifiers(KtClassOrObject co, TypeDeclKind kind) {
-        int flags = visibilityFlags(co);
+    private static int typeModifiers(Node typeNode, TypeDeclKind kind, boolean isObject, boolean nested) {
+        int flags = visibilityFlags(typeNode);
         if (kind == TypeDeclKind.INTERFACE || kind == TypeDeclKind.ANNOTATION) {
             flags |= Opcodes.ACC_ABSTRACT | Opcodes.ACC_INTERFACE;
             if (kind == TypeDeclKind.ANNOTATION) {
@@ -387,80 +396,86 @@ final class KotlinSourceIndexerImpl {
             flags |= Opcodes.ACC_ENUM | Opcodes.ACC_FINAL | Opcodes.ACC_SUPER;
         } else {
             flags |= Opcodes.ACC_SUPER;
-            if (co.hasModifier(KtTokens.ABSTRACT_KEYWORD) || co.hasModifier(KtTokens.SEALED_KEYWORD)) {
+            if (modifierContains(typeNode, "inheritance_modifier", "abstract")
+                    || modifierContains(typeNode, "class_modifier", "sealed")
+                    || modifierContains(typeNode, "inheritance_modifier", "sealed")) {
                 flags |= Opcodes.ACC_ABSTRACT;
-            } else if (!co.hasModifier(KtTokens.OPEN_KEYWORD)) {
+            } else if (!modifierContains(typeNode, "inheritance_modifier", "open")) {
                 flags |= Opcodes.ACC_FINAL;
             }
         }
-        if (co instanceof KtObjectDeclaration) {
+        if (isObject) {
             flags |= Opcodes.ACC_FINAL;
         }
-        if (co.hasModifier(KtTokens.INNER_KEYWORD)) {
-            // Non-static nested; leave ACC_STATIC clear.
-        } else if (!enclosingWouldBeTopLevel(co) && !(co instanceof KtEnumEntry)) {
-            // Nested class/object/companion defaults to static nested from Java's view
-            // except for `inner` classes.
-            if (co.getParent() instanceof KtClassBody) {
-                flags |= Opcodes.ACC_STATIC;
-            }
+        if (nested && !modifierContains(typeNode, "class_modifier", "inner")) {
+            flags |= Opcodes.ACC_STATIC;
         }
         return flags;
     }
 
-    private static boolean enclosingWouldBeTopLevel(KtClassOrObject co) {
-        org.jetbrains.kotlin.com.intellij.psi.PsiElement parent = co.getParent();
-        while (parent != null) {
-            if (parent instanceof KtClassOrObject) return false;
-            if (parent instanceof KtFile) return true;
-            parent = parent.getParent();
+    private static int visibilityFlags(Node owner) {
+        Node modifiers = childNamed(owner, "modifiers");
+        if (modifiers == null) return Opcodes.ACC_PUBLIC;
+        for (Node child : namedChildren(modifiers)) {
+            if (!"visibility_modifier".equals(child.getType())) continue;
+            return switch (text(child)) {
+                case "private" -> Opcodes.ACC_PRIVATE;
+                case "protected" -> Opcodes.ACC_PROTECTED;
+                case "internal" -> 0;
+                default -> Opcodes.ACC_PUBLIC;
+            };
         }
-        return true;
-    }
-
-    private static int visibilityFlags(KtModifierListOwner owner) {
-        if (owner.hasModifier(KtTokens.PRIVATE_KEYWORD)) return Opcodes.ACC_PRIVATE;
-        if (owner.hasModifier(KtTokens.PROTECTED_KEYWORD)) return Opcodes.ACC_PROTECTED;
-        if (owner.hasModifier(KtTokens.INTERNAL_KEYWORD)) return 0; // package-private to Java
         return Opcodes.ACC_PUBLIC;
     }
 
-    private static FieldEntry toFieldEntry(KtProperty prop, Set<String> typeParams,
+    private static boolean modifierContains(Node owner, String modifierType, String text) {
+        Node modifiers = childNamed(owner, "modifiers");
+        if (modifiers == null) return false;
+        for (Node child : namedChildren(modifiers)) {
+            if (modifierType.equals(child.getType()) && text.equals(text(child))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static FieldEntry toFieldEntry(Node prop, Set<String> typeParams,
                                            String ownerJvm, boolean topLevel) {
-        String name = prop.getName();
+        String name = propertyName(prop);
         if (name == null || name.isEmpty()) return null;
         int flags = visibilityFlags(prop);
-        if (topLevel || prop.hasModifier(KtTokens.CONST_KEYWORD) || !prop.isVar()) {
-            // Top-level and val properties compile to static fields (with accessors);
-            // const val is always static final.
-        }
         if (topLevel) {
             flags |= Opcodes.ACC_STATIC;
         }
-        if (!prop.isVar() || prop.hasModifier(KtTokens.CONST_KEYWORD)) {
+        boolean isVar = isVarProperty(prop);
+        boolean isConst = modifierContains(prop, "property_modifier", "const");
+        if (!isVar || isConst) {
             flags |= Opcodes.ACC_FINAL;
         }
-        if (prop.hasModifier(KtTokens.CONST_KEYWORD)) {
+        if (isConst) {
             flags |= Opcodes.ACC_STATIC;
         }
-        Type type = toType(prop.getTypeReference(), typeParams, ownerJvm);
+        Type type = propertyType(prop, typeParams, ownerJvm);
         if (type == null) type = TypeRef.unresolved("Any");
         return new FieldEntry(flags, name, type, EmptyArrays.ANNOTATION_REF);
     }
 
-    private static FieldEntry constructorPropertyField(KtParameter param, Set<String> typeParams,
+    private static FieldEntry constructorPropertyField(Node param, Set<String> typeParams,
                                                        String ownerJvm) {
-        String name = param.getName();
+        String name = text(childNamed(param, "simple_identifier"));
         if (name == null || name.isEmpty()) return null;
         int flags = visibilityFlags(param);
-        if (!param.isMutable()) flags |= Opcodes.ACC_FINAL;
-        Type type = toType(param.getTypeReference(), typeParams, ownerJvm);
+        Node binding = childNamed(param, "binding_pattern_kind");
+        if (binding == null || "val".equals(text(binding))) {
+            flags |= Opcodes.ACC_FINAL;
+        }
+        Type type = toTypeNode(typeChild(param), typeParams, ownerJvm);
         if (type == null) type = TypeRef.unresolved("Any");
         return new FieldEntry(flags, name, type, EmptyArrays.ANNOTATION_REF);
     }
 
-    private static FieldEntry enumConstantField(KtEnumEntry entry, String ownerJvm) {
-        String name = entry.getName();
+    private static FieldEntry enumConstantField(Node entry, String ownerJvm) {
+        String name = text(childNamed(entry, "simple_identifier"));
         if (name == null || name.isEmpty()) return null;
         return new FieldEntry(
                 Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL | Opcodes.ACC_ENUM,
@@ -469,23 +484,20 @@ final class KotlinSourceIndexerImpl {
                 EmptyArrays.ANNOTATION_REF);
     }
 
-    private static MethodEntry syntheticPropertyAccessor(KtProperty prop, boolean getter,
+    private static MethodEntry syntheticPropertyAccessor(Node prop, boolean getter,
                                                          boolean topLevel,
                                                          Set<String> typeParams, String ownerJvm) {
-        String name = prop.getName();
+        String name = propertyName(prop);
         if (name == null || name.isEmpty()) return null;
-        // Private properties without annotated JVM field still get accessors when
-        // visible; skip private to match AccessVisibility on members.
         int flags = visibilityFlags(prop);
         if (AccessVisibility.isPrivate(flags)) return null;
         if (topLevel) flags |= Opcodes.ACC_STATIC;
-        Type propType = toType(prop.getTypeReference(), typeParams, ownerJvm);
+        Type propType = propertyType(prop, typeParams, ownerJvm);
         if (propType == null) propType = TypeRef.unresolved("Any");
         if (getter) {
             String methodName = "get" + capitalize(name);
-            if (propType == Type.Primitive.BOOLEAN || isBooleanName(prop.getTypeReference())) {
+            if (propType == Type.Primitive.BOOLEAN || isBooleanTypeName(propType)) {
                 methodName = "is" + capitalize(name);
-                // Prefer isX when property already starts with "is".
                 if (name.length() > 2 && name.startsWith("is") && Character.isUpperCase(name.charAt(2))) {
                     methodName = name;
                 }
@@ -498,50 +510,68 @@ final class KotlinSourceIndexerImpl {
                 new Type[]{propType}, EmptyArrays.TYPE, EmptyArrays.ANNOTATION_REF);
     }
 
-    private static boolean isBooleanName(KtTypeReference ref) {
-        if (ref == null) return false;
-        KtTypeElement el = ref.getTypeElement();
-        if (el instanceof KtUserType user) {
-            String n = user.getReferencedName();
-            return "Boolean".equals(n) || "boolean".equals(n);
+    private static boolean isBooleanTypeName(Type type) {
+        if (type instanceof TypeRef.Unresolved u) {
+            return "Boolean".equals(u.simpleName()) || "boolean".equals(u.simpleName());
         }
         return false;
     }
 
-    private static MethodEntry toMethodEntry(KtNamedFunction fn, Set<String> typeParams,
+    private static MethodEntry toMethodEntry(Node fn, Set<String> typeParams,
                                              String ownerJvm, boolean topLevel) {
-        String name = fn.getName();
+        String name = text(childNamed(fn, "simple_identifier"));
         if (name == null || name.isEmpty()) return null;
         int flags = visibilityFlags(fn);
         if (topLevel) flags |= Opcodes.ACC_STATIC;
-        if (fn.hasModifier(KtTokens.ABSTRACT_KEYWORD)) flags |= Opcodes.ACC_ABSTRACT;
-        if (fn.hasModifier(KtTokens.FINAL_KEYWORD)) flags |= Opcodes.ACC_FINAL;
-        if (fn.hasModifier(KtTokens.OPEN_KEYWORD)) {
+        if (modifierContains(fn, "inheritance_modifier", "abstract")) flags |= Opcodes.ACC_ABSTRACT;
+        if (modifierContains(fn, "inheritance_modifier", "final")) flags |= Opcodes.ACC_FINAL;
+        if (modifierContains(fn, "inheritance_modifier", "open")) {
             flags &= ~Opcodes.ACC_FINAL;
         }
 
         Set<String> methodTypeParams = new HashSet<>(typeParams);
         List<TypeParamRef> typeParamRefs = new ArrayList<>();
-        for (KtTypeParameter tp : fn.getTypeParameters()) {
-            String tpName = tp.getName();
-            if (tpName != null) methodTypeParams.add(tpName);
-        }
-        for (KtTypeParameter tp : fn.getTypeParameters()) {
-            typeParamRefs.add(toTypeParamRef(tp, methodTypeParams, ownerJvm));
+        Node typeParamsNode = childNamed(fn, "type_parameters");
+        if (typeParamsNode != null) {
+            for (Node tp : namedChildren(typeParamsNode)) {
+                if (!"type_parameter".equals(tp.getType())) continue;
+                String tpName = text(childNamed(tp, "type_identifier"));
+                if (tpName != null) methodTypeParams.add(tpName);
+            }
+            for (Node tp : namedChildren(typeParamsNode)) {
+                if (!"type_parameter".equals(tp.getType())) continue;
+                typeParamRefs.add(toTypeParamRef(tp, methodTypeParams, ownerJvm));
+            }
         }
 
-        Type returnType = toType(fn.getTypeReference(), methodTypeParams, ownerJvm);
+        Type returnType = toTypeNode(typeChild(fn), methodTypeParams, ownerJvm);
         if (returnType == null) {
-            returnType = fn.hasBlockBody() ? Type.Primitive.VOID : TypeRef.unresolved("Any");
+            returnType = childNamed(fn, "function_body") != null && hasBlockBody(fn)
+                    ? Type.Primitive.VOID
+                    : TypeRef.unresolved("Any");
+            // Expression-body functions without explicit type: Any; block without type: VOID.
+            if (childNamed(fn, "function_body") != null && !hasBlockBody(fn)) {
+                returnType = TypeRef.unresolved("Any");
+            } else if (childNamed(fn, "function_body") != null && hasBlockBody(fn) && typeChild(fn) == null) {
+                returnType = Type.Primitive.VOID;
+            } else if (childNamed(fn, "function_body") == null && typeChild(fn) == null) {
+                returnType = Type.Primitive.VOID;
+            }
         }
 
         List<ParameterEntry> params = new ArrayList<>();
         boolean varargs = false;
-        for (KtParameter param : fn.getValueParameters()) {
-            if (param.isVarArg()) varargs = true;
-            Type pt = toType(param.getTypeReference(), methodTypeParams, ownerJvm);
-            if (pt == null) pt = TypeRef.unresolved("Any");
-            params.add(new ParameterEntry(param.getName(), 0, pt, EmptyArrays.ANNOTATION_REF));
+        Node valueParams = childNamed(fn, "function_value_parameters");
+        if (valueParams != null) {
+            for (Node p : namedChildren(valueParams)) {
+                if (!"parameter".equals(p.getType())) continue;
+                // vararg is on parameter_modifiers sibling / parent — check preceding modifiers on parent seq
+                if (hasVarargNearby(valueParams, p)) varargs = true;
+                Type pt = toTypeNode(typeChild(p), methodTypeParams, ownerJvm);
+                if (pt == null) pt = TypeRef.unresolved("Any");
+                params.add(new ParameterEntry(text(childNamed(p, "simple_identifier")),
+                        0, pt, EmptyArrays.ANNOTATION_REF));
+            }
         }
 
         return new MethodEntry(
@@ -552,21 +582,51 @@ final class KotlinSourceIndexerImpl {
                 EmptyArrays.TYPE,
                 EmptyArrays.toArray(typeParamRefs, EmptyArrays.TYPE_PARAM),
                 varargs,
-                fn.hasBody(),
+                childNamed(fn, "function_body") != null,
                 null,
                 EmptyArrays.ANNOTATION_REF);
     }
 
-    private static MethodEntry toConstructorEntry(KtConstructor<?> ctor, Set<String> typeParams,
-                                                  String ownerJvm, TypeDeclKind declKind) {
+    private static boolean hasVarargNearby(Node valueParams, Node parameter) {
+        // parameter_modifiers may be a sibling before parameter in grammar as _function_value_parameter
+        // In CST, parameter_modifiers may wrap or sit as sibling; scan valueParams children textually.
+        List<Node> kids = namedChildren(valueParams);
+        for (int i = 0; i < kids.size(); i++) {
+            if (kids.get(i) == parameter || kids.get(i).equals(parameter)) {
+                // look at previous named sibling
+                if (i > 0 && "parameter_modifiers".equals(kids.get(i - 1).getType())) {
+                    return text(kids.get(i - 1)).contains("vararg");
+                }
+            }
+        }
+        Node mods = childNamed(parameter, "parameter_modifiers");
+        return mods != null && text(mods).contains("vararg");
+    }
+
+    private static MethodEntry toConstructorEntry(Node ctor, Set<String> typeParams, String ownerJvm) {
         int flags = visibilityFlags(ctor);
         List<ParameterEntry> params = new ArrayList<>();
         boolean varargs = false;
-        for (KtParameter param : ctor.getValueParameters()) {
-            if (param.isVarArg()) varargs = true;
-            Type pt = toType(param.getTypeReference(), typeParams, ownerJvm);
-            if (pt == null) pt = TypeRef.unresolved("Any");
-            params.add(new ParameterEntry(param.getName(), 0, pt, EmptyArrays.ANNOTATION_REF));
+        if ("primary_constructor".equals(ctor.getType())) {
+            for (Node param : namedChildren(ctor)) {
+                if (!"class_parameter".equals(param.getType())) continue;
+                Type pt = toTypeNode(typeChild(param), typeParams, ownerJvm);
+                if (pt == null) pt = TypeRef.unresolved("Any");
+                params.add(new ParameterEntry(text(childNamed(param, "simple_identifier")),
+                        0, pt, EmptyArrays.ANNOTATION_REF));
+            }
+        } else {
+            Node valueParams = childNamed(ctor, "function_value_parameters");
+            if (valueParams != null) {
+                for (Node p : namedChildren(valueParams)) {
+                    if (!"parameter".equals(p.getType())) continue;
+                    if (hasVarargNearby(valueParams, p)) varargs = true;
+                    Type pt = toTypeNode(typeChild(p), typeParams, ownerJvm);
+                    if (pt == null) pt = TypeRef.unresolved("Any");
+                    params.add(new ParameterEntry(text(childNamed(p, "simple_identifier")),
+                            0, pt, EmptyArrays.ANNOTATION_REF));
+                }
+            }
         }
         return new MethodEntry(
                 flags,
@@ -581,61 +641,68 @@ final class KotlinSourceIndexerImpl {
                 EmptyArrays.ANNOTATION_REF);
     }
 
-    private static TypeParamRef toTypeParamRef(KtTypeParameter tp, Set<String> typeParams,
-                                               String ownerJvm) {
-        String name = tp.getName() == null ? "?" : tp.getName();
+    private static TypeParamRef toTypeParamRef(Node tp, Set<String> typeParams, String ownerJvm) {
+        String name = text(childNamed(tp, "type_identifier"));
+        if (name == null) name = "?";
         List<Type> bounds = new ArrayList<>();
-        KtTypeReference extendsBound = tp.getExtendsBound();
-        if (extendsBound != null) {
-            Type b = toType(extendsBound, typeParams, ownerJvm);
-            if (b != null) bounds.add(b);
-        }
+        Type bound = toTypeNode(typeChild(tp), typeParams, ownerJvm);
+        if (bound != null) bounds.add(bound);
         return new TypeParamRef(name, EmptyArrays.toArray(bounds, EmptyArrays.TYPE));
     }
 
-    private static Type toType(KtTypeReference ref, Set<String> typeParams, String ownerJvm) {
-        if (ref == null) return null;
-        return toTypeElement(ref.getTypeElement(), typeParams, ownerJvm);
-    }
-
-    private static Type toTypeElement(KtTypeElement element, Set<String> typeParams, String ownerJvm) {
-        if (element == null) return null;
-        if (element instanceof KtNullableType nullable) {
-            Type inner = toTypeElement(nullable.getInnerType(), typeParams, ownerJvm);
-            return inner != null ? inner : TypeRef.unresolved("Any");
+    private static Type delegationType(Node del, Set<String> typeParams, String ownerJvm) {
+        Node user = childNamed(del, "user_type");
+        if (user != null) return toUserType(user, typeParams, ownerJvm);
+        Node ctorInv = childNamed(del, "constructor_invocation");
+        if (ctorInv != null) {
+            Node ut = childNamed(ctorInv, "user_type");
+            if (ut != null) return toUserType(ut, typeParams, ownerJvm);
         }
-        if (element instanceof KtUserType user) {
-            return toUserType(user, typeParams, ownerJvm);
+        Node explicit = childNamed(del, "explicit_delegation");
+        if (explicit != null) {
+            Node ut = childNamed(explicit, "user_type");
+            if (ut != null) return toUserType(ut, typeParams, ownerJvm);
         }
         return TypeRef.unresolved("Any");
     }
 
-    private static Type toUserType(KtUserType user, Set<String> typeParams, String ownerJvm) {
-        String referenced = user.getReferencedName();
-        if (referenced == null || referenced.isEmpty()) {
-            return TypeRef.unresolved("Any");
+    private static Type toTypeNode(Node typeNode, Set<String> typeParams, String ownerJvm) {
+        if (typeNode == null) return null;
+        return switch (typeNode.getType()) {
+            case "nullable_type" -> {
+                Type inner = toTypeNode(firstNamedOfTypes(typeNode, "user_type", "parenthesized_type"),
+                        typeParams, ownerJvm);
+                yield inner != null ? inner : TypeRef.unresolved("Any");
+            }
+            case "user_type" -> toUserType(typeNode, typeParams, ownerJvm);
+            case "parenthesized_type" -> toTypeNode(typeChild(typeNode), typeParams, ownerJvm);
+            case "not_nullable_type" -> toTypeNode(typeChild(typeNode), typeParams, ownerJvm);
+            case "function_type" -> TypeRef.unresolved("Function");
+            default -> TypeRef.unresolved("Any");
+        };
+    }
+
+    private static Type toUserType(Node user, Set<String> typeParams, String ownerJvm) {
+        List<String> parts = new ArrayList<>();
+        for (Node child : namedChildren(user)) {
+            if ("type_identifier".equals(child.getType())) {
+                parts.add(text(child));
+            }
         }
+        if (parts.isEmpty()) return TypeRef.unresolved("Any");
+        String referenced = parts.get(parts.size() - 1);
         Type primitive = primitiveOrUnit(referenced);
-        if (primitive != null && user.getQualifier() == null) {
+        if (primitive != null && parts.size() == 1) {
             return primitive;
         }
-        if (typeParams.contains(referenced) && user.getQualifier() == null) {
+        if (typeParams.contains(referenced) && parts.size() == 1) {
             return Type.typeVariable(referenced);
-        }
-
-        List<String> parts = new ArrayList<>();
-        KtUserType cur = user;
-        while (cur != null) {
-            String part = cur.getReferencedName();
-            if (part != null) parts.add(0, part);
-            cur = cur.getQualifier();
         }
 
         TypeRef base;
         if (parts.size() == 1) {
             base = TypeRef.unresolved(parts.get(0));
         } else {
-            // Without resolve, treat a qualified name as a package/type JVM path.
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < parts.size(); i++) {
                 if (i > 0) sb.append('/');
@@ -644,15 +711,27 @@ final class KotlinSourceIndexerImpl {
             base = TypeRef.resolved(sb.toString());
         }
 
-        KtTypeArgumentList argList = user.getTypeArgumentList();
-        if (argList == null || argList.getArguments().isEmpty()) {
+        Node argList = childNamed(user, "type_arguments");
+        if (argList == null) {
             return base;
         }
         List<Type> args = new ArrayList<>();
-        for (KtTypeProjection proj : argList.getArguments()) {
-            Type arg = toType(proj.getTypeReference(), typeParams, ownerJvm);
-            args.add(arg == null ? TypeRef.unresolved("Any") : arg);
+        for (Node proj : namedChildren(argList)) {
+            if (!"type_projection".equals(proj.getType()) && typeChild(proj) == null
+                    && !"user_type".equals(proj.getType())
+                    && !"nullable_type".equals(proj.getType())) {
+                continue;
+            }
+            Type arg = toTypeNode(typeChild(proj) != null ? typeChild(proj) : proj, typeParams, ownerJvm);
+            if (arg == null && "user_type".equals(proj.getType())) {
+                arg = toUserType(proj, typeParams, ownerJvm);
+            }
+            if (arg == null) arg = TypeRef.unresolved("Any");
+            // Skip punctuation-only children
+            if ("*".equals(text(proj))) continue;
+            args.add(arg);
         }
+        if (args.isEmpty()) return base;
         return Type.parameterized(base, EmptyArrays.toArray(args, EmptyArrays.TYPE));
     }
 
@@ -671,30 +750,16 @@ final class KotlinSourceIndexerImpl {
         };
     }
 
-    private static String fileFacadeSimpleName(KtFile file, String fileName) {
-        for (KtAnnotationEntry entry : file.getAnnotationEntries()) {
-            // @file:JvmName("X") lives on file annotation list; short name JvmName.
-            String shortName = entry.getShortName() == null ? null : entry.getShortName().asString();
-            if ("JvmName".equals(shortName)) {
-                String value = firstAnnotationStringArg(entry);
-                if (value != null && !value.isEmpty()) return value;
-            }
-        }
-        return defaultFileFacadeName(fileName);
-    }
-
-    private static String firstAnnotationStringArg(KtAnnotationEntry entry) {
-        var args = entry.getValueArguments();
-        if (args == null || args.isEmpty()) return null;
-        var arg = args.get(0).getArgumentExpression();
-        if (arg == null) return null;
-        String text = arg.getText();
-        if (text == null) return null;
-        text = text.trim();
-        if (text.length() >= 2 && text.charAt(0) == '"' && text.charAt(text.length() - 1) == '"') {
-            return text.substring(1, text.length() - 1);
-        }
-        return null;
+    private static String parseFileJvmName(Node fileAnnotation) {
+        // @file:JvmName("X") — look for user_type JvmName and a string literal child somewhere.
+        String text = text(fileAnnotation);
+        if (text == null || !text.contains("JvmName")) return null;
+        int q1 = text.indexOf('"');
+        if (q1 < 0) return null;
+        int q2 = text.indexOf('"', q1 + 1);
+        if (q2 < 0) return null;
+        String value = text.substring(q1 + 1, q2);
+        return value.isEmpty() ? null : value;
     }
 
     private static String defaultFileFacadeName(String fileName) {
@@ -710,8 +775,106 @@ final class KotlinSourceIndexerImpl {
         return base + "Kt";
     }
 
-    private static String fileName(String resourcePath) {
-        return simpleName(resourcePath);
+    private static String typeSimpleName(Node typeNode) {
+        return text(childNamed(typeNode, "type_identifier"));
+    }
+
+    private static String propertyName(Node prop) {
+        Node varDecl = childNamed(prop, "variable_declaration");
+        if (varDecl != null) {
+            return text(childNamed(varDecl, "simple_identifier"));
+        }
+        Node multi = childNamed(prop, "multi_variable_declaration");
+        if (multi != null) {
+            Node first = childNamed(multi, "variable_declaration");
+            if (first != null) return text(childNamed(first, "simple_identifier"));
+        }
+        return null;
+    }
+
+    private static Type propertyType(Node prop, Set<String> typeParams, String ownerJvm) {
+        Node varDecl = childNamed(prop, "variable_declaration");
+        if (varDecl != null) {
+            return toTypeNode(typeChild(varDecl), typeParams, ownerJvm);
+        }
+        return null;
+    }
+
+    private static boolean isVarProperty(Node prop) {
+        Node binding = childNamed(prop, "binding_pattern_kind");
+        return binding != null && "var".equals(text(binding));
+    }
+
+    private static boolean hasBlockBody(Node fn) {
+        Node body = childNamed(fn, "function_body");
+        if (body == null) return false;
+        return childNamed(body, "statements") != null || hasAnonText(body, "{");
+    }
+
+    private static Node typeChild(Node parent) {
+        if (parent == null) return null;
+        return firstNamedOfTypes(parent,
+                "user_type", "nullable_type", "parenthesized_type",
+                "not_nullable_type", "function_type");
+    }
+
+    private static String identifierToJvm(Node identifier) {
+        if (identifier == null) return "";
+        List<String> parts = new ArrayList<>();
+        for (Node child : namedChildren(identifier)) {
+            if ("simple_identifier".equals(child.getType())) {
+                parts.add(text(child));
+            }
+        }
+        if (parts.isEmpty()) {
+            String t = text(identifier);
+            if (t == null || t.isEmpty()) return "";
+            return t.replace('.', '/');
+        }
+        return String.join("/", parts);
+    }
+
+    private static List<Node> namedChildren(Node node) {
+        if (node == null) return List.of();
+        return node.getNamedChildren();
+    }
+
+    private static Node childNamed(Node parent, String type) {
+        if (parent == null) return null;
+        for (Node child : namedChildren(parent)) {
+            if (type.equals(child.getType())) return child;
+        }
+        return null;
+    }
+
+    private static Node firstNamedOfTypes(Node parent, String... types) {
+        if (parent == null) return null;
+        Set<String> wanted = Set.of(types);
+        for (Node child : namedChildren(parent)) {
+            if (wanted.contains(child.getType())) return child;
+        }
+        return null;
+    }
+
+    private static boolean hasAnonText(Node parent, String text) {
+        if (parent == null) return false;
+        for (Node child : parent.getChildren()) {
+            if (child == null) continue;
+            if (!child.isNamed() && text.equals(child.getText())) {
+                return true;
+            }
+            // Some grammars expose keyword as type == text
+            if (text.equals(child.getType())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String text(Node node) {
+        if (node == null) return null;
+        String t = node.getText();
+        return t == null ? null : t;
     }
 
     private static String simpleName(String path) {

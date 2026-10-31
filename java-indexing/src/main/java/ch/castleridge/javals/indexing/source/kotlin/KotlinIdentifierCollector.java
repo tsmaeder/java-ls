@@ -9,36 +9,32 @@ package ch.castleridge.javals.indexing.source.kotlin;
 import java.util.HashSet;
 import java.util.Set;
 
-import org.jetbrains.kotlin.com.intellij.psi.PsiElement;
-import org.jetbrains.kotlin.com.intellij.psi.PsiRecursiveElementVisitor;
-import org.jetbrains.kotlin.psi.KtFile;
-import org.jetbrains.kotlin.psi.KtNamedDeclaration;
-import org.jetbrains.kotlin.psi.KtSimpleNameExpression;
+import io.github.treesitter.jtreesitter.Node;
 
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
 
 /**
- * Collects simple identifier names from a parsed Kotlin file for bloom
- * filters.
+ * Collects simple identifier names from a Kotlin CST for bloom filters.
  */
 final class KotlinIdentifierCollector {
 
     private KotlinIdentifierCollector() {}
 
-    static IdentifierBloomFilter collectAndBuild(KtFile file) {
+    static IdentifierBloomFilter collectAndBuild(Node root) {
         Set<String> names = new HashSet<>();
-        file.accept(new PsiRecursiveElementVisitor() {
-            @Override
-            public void visitElement(PsiElement element) {
-                if (element instanceof KtSimpleNameExpression nameExpr) {
-                    add(names, nameExpr.getReferencedName());
-                } else if (element instanceof KtNamedDeclaration named) {
-                    add(names, named.getName());
-                }
-                super.visitElement(element);
-            }
-        });
+        walk(root, names);
         return IdentifierBloomFilter.create(names);
+    }
+
+    private static void walk(Node node, Set<String> names) {
+        if (node == null) return;
+        String type = node.getType();
+        if ("simple_identifier".equals(type) || "type_identifier".equals(type)) {
+            add(names, node.getText());
+        }
+        for (Node child : node.getNamedChildren()) {
+            walk(child, names);
+        }
     }
 
     private static void add(Set<String> names, String name) {

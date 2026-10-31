@@ -40,9 +40,9 @@
       <version>1.15.0</version>
     </dependency>
     <dependency>
-      <groupId>org.jetbrains.kotlin</groupId>
-      <artifactId>kotlin-compiler-embeddable</artifactId>
-      <version>${kotlin.version}</version>
+      <groupId>io.github.tree-sitter</groupId>
+      <artifactId>jtreesitter</artifactId>
+      <version>${jtreesitter.version}</version>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
@@ -70,10 +70,84 @@
         </configuration>
       </plugin>
       <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.5.0</version>
+        <executions>
+          <execution>
+            <id>fetch-tree-sitter-natives</id>
+            <phase>process-classes</phase>
+            <goals>
+              <goal>java</goal>
+            </goals>
+            <configuration>
+              <mainClass>ch.castleridge.javals.indexing.treesitter.FetchTreeSitterNatives</mainClass>
+              <classpathScope>compile</classpathScope>
+              <systemProperties>
+                <systemProperty>
+                  <key>treesitter.natives.dir</key>
+                  <value>${project.build.directory}/natives</value>
+                </systemProperty>
+                <systemProperty>
+                  <key>treesitter.repo.root</key>
+                  <value>${maven.multiModuleProjectDirectory}</value>
+                </systemProperty>
+                <systemProperty>
+                  <key>treesitter.project.version</key>
+                  <value>${project.version}</value>
+                </systemProperty>
+                <systemProperty>
+                  <key>treesitter.javals.tag</key>
+                  <value>${tree-sitter-javals.tag}</value>
+                </systemProperty>
+                <systemProperty>
+                  <key>treesitter.runtime.tag</key>
+                  <value>${tree-sitter.runtime.tag}</value>
+                </systemProperty>
+                <systemProperty>
+                  <key>treesitter.kotlin.tag</key>
+                  <value>${tree-sitter.kotlin.tag}</value>
+                </systemProperty>
+              </systemProperties>
+            </configuration>
+          </execution>
+        </executions>
+        <configuration>
+          <mainClass>ch.castleridge.javals.indexing.cli.IndexDecompilerMain</mainClass>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-natives-beside-jar</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-resources</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}</outputDirectory>
+              <resources>
+                <resource>
+                  <directory>${project.build.directory}/natives</directory>
+                  <includes>
+                    <include>*</include>
+                  </includes>
+                </resource>
+              </resources>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <argLine>--add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED</argLine>
+          <argLine>--enable-native-access=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED</argLine>
+          <systemPropertyVariables>
+            <javals.treeSitter.dir>${project.build.directory}/natives</javals.treeSitter.dir>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
       <plugin>
@@ -85,14 +159,6 @@
               <mainClass>ch.castleridge.javals.indexing.cli.IndexDecompilerMain</mainClass>
             </manifest>
           </archive>
-        </configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>exec-maven-plugin</artifactId>
-        <version>3.5.0</version>
-        <configuration>
-          <mainClass>ch.castleridge.javals.indexing.cli.IndexDecompilerMain</mainClass>
         </configuration>
       </plugin>
       <plugin>
@@ -112,6 +178,7 @@
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                   <mainClass>ch.castleridge.javals.indexing.cli.IndexDecompilerMain</mainClass>
                 </transformer>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
               </transformers>
             </configuration>
           </execution>
