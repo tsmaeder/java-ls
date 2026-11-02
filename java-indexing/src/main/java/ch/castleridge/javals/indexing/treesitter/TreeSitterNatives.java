@@ -14,7 +14,11 @@ import java.util.Optional;
 
 /**
  * Resolves the directory that holds {@code tree-sitter} and
- * {@code tree-sitter-kotlin} shared libraries.
+ * {@code tree-sitter-kotlin} shared libraries for the host platform.
+ *
+ * <p>Natives are laid out as {@code {root}/{os}-{arch}/} (e.g.
+ * {@code natives/windows-x64/}). Property/env values and search roots point at
+ * the parent; this class resolves into the host platform subdirectory.
  */
 public final class TreeSitterNatives {
 
@@ -38,7 +42,7 @@ public final class TreeSitterNatives {
             Path found = locate();
             if (found != null) {
                 cachedDir = found;
-                return Optional.of(found);
+                return Optional.of(cachedDir);
             }
             return Optional.empty();
         }
@@ -47,7 +51,8 @@ public final class TreeSitterNatives {
     public static Path requireDirectory() {
         return directory().orElseThrow(() -> new IllegalStateException(
                 "tree-sitter natives not found. Set " + ENV_DIR
-                        + " or place libs next to the jar / in target/natives."));
+                        + " or place libs next to the jar / in target/natives/"
+                        + hostPlatformStem() + "."));
     }
 
     public static Path runtimeLibrary() {
@@ -58,44 +63,76 @@ public final class TreeSitterNatives {
         return requireDirectory().resolve(System.mapLibraryName("tree-sitter-kotlin"));
     }
 
+    /** Host platform stem matching release layout ({@code windows-x64}, etc.). */
+    public static String hostPlatformStem() {
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        String arch = System.getProperty("os.arch", "").toLowerCase();
+        boolean x64 = arch.equals("amd64") || arch.equals("x86_64") || arch.equals("x64");
+        boolean arm64 = arch.equals("aarch64") || arch.equals("arm64");
+
+        if (osName.contains("win") && x64) {
+            return "windows-x64";
+        }
+        if (osName.contains("linux") && x64) {
+            return "linux-x64";
+        }
+        if ((osName.contains("mac") || osName.contains("darwin")) && arm64) {
+            return "macos-arm64";
+        }
+        throw new IllegalStateException(
+                "Unsupported host platform for tree-sitter natives: os.name="
+                        + System.getProperty("os.name") + " os.arch="
+                        + System.getProperty("os.arch"));
+    }
+
     private static Path locate() {
         String prop = System.getProperty(PROP_DIR);
         if (prop != null && !prop.isBlank()) {
-            Path p = Path.of(prop).toAbsolutePath().normalize();
-            if (hasLibs(p)) return p;
+            Path found = resolvePlatformDir(Path.of(prop).toAbsolutePath().normalize());
+            if (found != null) return found;
         }
         String env = System.getenv(ENV_DIR);
         if (env != null && !env.isBlank()) {
-            Path p = Path.of(env).toAbsolutePath().normalize();
-            if (hasLibs(p)) return p;
+            Path found = resolvePlatformDir(Path.of(env).toAbsolutePath().normalize());
+            if (found != null) return found;
         }
 
         Path besideCode = directoryBesideCodeSource();
-        if (besideCode != null && hasLibs(besideCode)) return besideCode;
+        if (besideCode != null) {
+            Path found = resolvePlatformDir(besideCode);
+            if (found != null) return found;
+        }
 
         // Maven test / module target/natives relative to cwd or class location.
         Path fromClasses = directoryBesideCodeSource();
         if (fromClasses != null) {
-            Path natives = fromClasses.resolve("natives");
-            if (hasLibs(natives)) return natives;
+            Path found = resolvePlatformDir(fromClasses.resolve("natives"));
+            if (found != null) return found;
             // classes -> target/classes; natives is target/natives
             Path target = fromClasses.getFileName() != null
                     && "classes".equals(fromClasses.getFileName().toString())
                     ? fromClasses.getParent()
                     : null;
             if (target != null) {
-                Path n = target.resolve("natives");
-                if (hasLibs(n)) return n;
+                found = resolvePlatformDir(target.resolve("natives"));
+                if (found != null) return found;
             }
         }
 
-        Path cwdNatives = Path.of("target/natives").toAbsolutePath().normalize();
-        if (hasLibs(cwdNatives)) return cwdNatives;
+        Path found = resolvePlatformDir(Path.of("target/natives").toAbsolutePath().normalize());
+        if (found != null) return found;
 
-        Path indexingNatives = Path.of("java-indexing/target/natives").toAbsolutePath().normalize();
-        if (hasLibs(indexingNatives)) return indexingNatives;
+        return resolvePlatformDir(
+                Path.of("java-indexing/target/natives").toAbsolutePath().normalize());
+    }
 
-        return null;
+    /** Resolves {@code root/{hostPlatform}} when that subdirectory holds the libs. */
+    private static Path resolvePlatformDir(Path root) {
+        if (root == null || !Files.isDirectory(root)) {
+            return null;
+        }
+        Path platform = root.resolve(hostPlatformStem());
+        return hasLibs(platform) ? platform : null;
     }
 
     private static Path directoryBesideCodeSource() {

@@ -226,7 +226,7 @@
                 <resource>
                   <directory>${project.basedir}/../java-indexing/target/natives</directory>
                   <includes>
-                    <include>*</include>
+                    <include>**/*</include>
                   </includes>
                 </resource>
               </resources>

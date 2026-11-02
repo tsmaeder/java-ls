@@ -19,19 +19,20 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Build-time helper: copies or downloads {@code tree-sitter} and
- * {@code tree-sitter-kotlin} shared libraries into a natives directory.
+ * Build-time helper: copies or downloads {@code tree-sitter} /
+ * {@code tree-sitter-kotlin} shared libraries and the {@code tree_sitter_javals}
+ * executable into a natives directory, one subdirectory per platform.
  *
  * <p>By default downloads every published platform from the pinned GitHub
- * release. Pass {@code -Dtreesitter.useLocal=true} to copy host libs from
+ * release. Pass {@code -Dtreesitter.useLocal=true} to copy host artifacts from
  * sibling {@code ../tree-sitter-javals} instead.
  */
 public final class FetchTreeSitterNatives {
 
     private static final List<OsArch> PUBLISHED_PLATFORMS = List.of(
-            new OsArch("windows", "x64", "dll"),
-            new OsArch("linux", "x64", "so"),
-            new OsArch("macos", "arm64", "dylib"));
+            new OsArch("windows", "x64", "dll", ".exe"),
+            new OsArch("linux", "x64", "so", ""),
+            new OsArch("macos", "arm64", "dylib", ""));
 
     private FetchTreeSitterNatives() {}
 
@@ -43,6 +44,7 @@ public final class FetchTreeSitterNatives {
         boolean useLocal = Boolean.parseBoolean(System.getProperty("treesitter.useLocal", "false"));
 
         Files.createDirectories(outDir);
+        clearDirectory(outDir);
 
         if (useLocal) {
             copyFromLocal(outDir);
@@ -55,14 +57,22 @@ public final class FetchTreeSitterNatives {
                 .build();
 
         for (OsArch oa : PUBLISHED_PLATFORMS) {
+            Path platformDir = outDir.resolve(oa.assetStem());
+            Files.createDirectories(platformDir);
+
             String runtimeMapped = mappedLibraryName("tree-sitter", oa);
             String kotlinMapped = mappedLibraryName("tree-sitter-kotlin", oa);
+            String exeName = "tree_sitter_javals" + oa.exeExt();
+
             download(client, releaseUrl(releaseTag,
                     "tree-sitter-" + runtimeTag + "-" + oa.assetStem() + "." + oa.ext()),
-                    outDir.resolve(runtimeMapped));
+                    platformDir.resolve(runtimeMapped));
             download(client, releaseUrl(releaseTag,
                     "tree-sitter-kotlin-" + kotlinTag + "-" + oa.assetStem() + "." + oa.ext()),
-                    outDir.resolve(kotlinMapped));
+                    platformDir.resolve(kotlinMapped));
+            download(client, releaseUrl(releaseTag,
+                    "tree_sitter_javals-" + oa.assetStem() + oa.exeExt()),
+                    platformDir.resolve(exeName));
         }
         System.out.println("Downloaded tree-sitter natives for all platforms into " + outDir);
     }
@@ -75,18 +85,49 @@ public final class FetchTreeSitterNatives {
                     "treesitter.useLocal=true but sibling not found: " + sibling);
         }
 
-        String runtimeMapped = System.mapLibraryName("tree-sitter");
-        String kotlinMapped = System.mapLibraryName("tree-sitter-kotlin");
-        Path foundRuntime = findSiblingLib(sibling, runtimeMapped);
-        Path foundKotlin = findSiblingLib(sibling, kotlinMapped);
-        if (foundRuntime == null || foundKotlin == null) {
+        OsArch host = hostPlatform();
+        Path platformDir = outDir.resolve(host.assetStem());
+        Files.createDirectories(platformDir);
+
+        String runtimeMapped = mappedLibraryName("tree-sitter", host);
+        String kotlinMapped = mappedLibraryName("tree-sitter-kotlin", host);
+        String exeName = "tree_sitter_javals" + host.exeExt();
+
+        Path foundRuntime = findSiblingArtifact(sibling, runtimeMapped);
+        Path foundKotlin = findSiblingArtifact(sibling, kotlinMapped);
+        Path foundExe = findSiblingArtifact(sibling, exeName);
+        if (foundRuntime == null || foundKotlin == null || foundExe == null) {
             throw new IllegalStateException(
-                    "treesitter.useLocal=true but libs missing under " + sibling
-                            + " (need " + runtimeMapped + " and " + kotlinMapped + ")");
+                    "treesitter.useLocal=true but artifacts missing under " + sibling
+                            + " (need " + runtimeMapped + ", " + kotlinMapped
+                            + ", and " + exeName + ")");
         }
-        copy(foundRuntime, outDir.resolve(runtimeMapped));
-        copy(foundKotlin, outDir.resolve(kotlinMapped));
-        System.out.println("Copied tree-sitter natives from " + sibling);
+        copy(foundRuntime, platformDir.resolve(runtimeMapped));
+        copy(foundKotlin, platformDir.resolve(kotlinMapped));
+        copy(foundExe, platformDir.resolve(exeName));
+        System.out.println("Copied tree-sitter natives from " + sibling
+                + " into " + platformDir);
+    }
+
+    private static OsArch hostPlatform() {
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        String arch = System.getProperty("os.arch", "").toLowerCase();
+        boolean x64 = arch.equals("amd64") || arch.equals("x86_64") || arch.equals("x64");
+        boolean arm64 = arch.equals("aarch64") || arch.equals("arm64");
+
+        if (osName.contains("win") && x64) {
+            return PUBLISHED_PLATFORMS.get(0);
+        }
+        if (osName.contains("linux") && x64) {
+            return PUBLISHED_PLATFORMS.get(1);
+        }
+        if ((osName.contains("mac") || osName.contains("darwin")) && arm64) {
+            return PUBLISHED_PLATFORMS.get(2);
+        }
+        throw new IllegalStateException(
+                "Unsupported host platform for local tree-sitter copy: os.name="
+                        + System.getProperty("os.name") + " os.arch="
+                        + System.getProperty("os.arch"));
     }
 
     private static String required(String key) {
@@ -97,11 +138,11 @@ public final class FetchTreeSitterNatives {
         return v;
     }
 
-    private static Path findSiblingLib(Path siblingRoot, String mappedName) {
+    private static Path findSiblingArtifact(Path siblingRoot, String fileName) {
         Path[] candidates = {
-                siblingRoot.resolve("build/Release").resolve(mappedName),
-                siblingRoot.resolve("build/Debug").resolve(mappedName),
-                siblingRoot.resolve("build").resolve(mappedName),
+                siblingRoot.resolve("build/Release").resolve(fileName),
+                siblingRoot.resolve("build/Debug").resolve(fileName),
+                siblingRoot.resolve("build").resolve(fileName),
         };
         for (Path p : candidates) {
             if (Files.isRegularFile(p)) return p;
@@ -111,6 +152,23 @@ public final class FetchTreeSitterNatives {
 
     private static void copy(Path from, Path to) throws IOException {
         Files.copy(from, to, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static void clearDirectory(Path dir) throws IOException {
+        if (!Files.isDirectory(dir)) {
+            return;
+        }
+        try (var stream = Files.walk(dir)) {
+            stream.sorted(java.util.Comparator.reverseOrder())
+                    .filter(p -> !p.equals(dir))
+                    .forEach(p -> {
+                        try {
+                            Files.deleteIfExists(p);
+                        } catch (IOException e) {
+                            throw new RuntimeException("Failed to delete " + p, e);
+                        }
+                    });
+        }
     }
 
     private static String releaseUrl(String tag, String asset) {
@@ -142,7 +200,7 @@ public final class FetchTreeSitterNatives {
         };
     }
 
-    private record OsArch(String os, String arch, String ext) {
+    private record OsArch(String os, String arch, String ext, String exeExt) {
         String assetStem() {
             return os + "-" + arch;
         }

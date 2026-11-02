@@ -132,7 +132,7 @@
                 <resource>
                   <directory>${project.build.directory}/natives</directory>
                   <includes>
-                    <include>*</include>
+                    <include>**/*</include>
                   </includes>
                 </resource>
               </resources>
