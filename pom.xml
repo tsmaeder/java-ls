@@ -32,6 +32,7 @@
     <tree-sitter-javals.tag>v0.1.1</tree-sitter-javals.tag>
     <tree-sitter.runtime.tag>v0.27.1</tree-sitter.runtime.tag>
     <tree-sitter.kotlin.tag>0.3.8</tree-sitter.kotlin.tag>
+    <treesitter.useLocal>false</treesitter.useLocal>
     <maven-extractor.version>0.1.0-SNAPSHOT</maven-extractor.version>
     <gradle-extractor.version>0.1.0-SNAPSHOT</gradle-extractor.version>
   </properties>

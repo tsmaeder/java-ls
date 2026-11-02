@@ -16,56 +16,77 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
-import java.util.Locale;
+import java.util.List;
 
 /**
  * Build-time helper: copies or downloads {@code tree-sitter} and
  * {@code tree-sitter-kotlin} shared libraries into a natives directory.
  *
- * <p>Dev (SNAPSHOT + sibling {@code ../tree-sitter-javals}): copy from the
- * local CMake build output. Otherwise download from the pinned GitHub
- * release.
+ * <p>By default downloads every published platform from the pinned GitHub
+ * release. Pass {@code -Dtreesitter.useLocal=true} to copy host libs from
+ * sibling {@code ../tree-sitter-javals} instead.
  */
 public final class FetchTreeSitterNatives {
+
+    private static final List<OsArch> PUBLISHED_PLATFORMS = List.of(
+            new OsArch("windows", "x64", "dll"),
+            new OsArch("linux", "x64", "so"),
+            new OsArch("macos", "arm64", "dylib"));
 
     private FetchTreeSitterNatives() {}
 
     public static void main(String[] args) throws Exception {
         Path outDir = Path.of(required("treesitter.natives.dir")).toAbsolutePath().normalize();
-        Path repoRoot = Path.of(required("treesitter.repo.root")).toAbsolutePath().normalize();
-        String projectVersion = required("treesitter.project.version");
         String releaseTag = System.getProperty("treesitter.javals.tag", "v0.1.1");
         String runtimeTag = System.getProperty("treesitter.runtime.tag", "v0.27.1");
         String kotlinTag = System.getProperty("treesitter.kotlin.tag", "0.3.8");
+        boolean useLocal = Boolean.parseBoolean(System.getProperty("treesitter.useLocal", "false"));
 
         Files.createDirectories(outDir);
 
-        String runtimeMapped = System.mapLibraryName("tree-sitter");
-        String kotlinMapped = System.mapLibraryName("tree-sitter-kotlin");
-        Path runtimeOut = outDir.resolve(runtimeMapped);
-        Path kotlinOut = outDir.resolve(kotlinMapped);
-
-        // Sibling of the java-ls repo: ../tree-sitter-javals
-        Path sibling = repoRoot.resolveSibling("tree-sitter-javals");
-        boolean snapshot = projectVersion.endsWith("-SNAPSHOT");
-        if (snapshot && Files.isDirectory(sibling)) {
-            Path foundRuntime = findSiblingLib(sibling, runtimeMapped);
-            Path foundKotlin = findSiblingLib(sibling, kotlinMapped);
-            if (foundRuntime != null && foundKotlin != null) {
-                copy(foundRuntime, runtimeOut);
-                copy(foundKotlin, kotlinOut);
-                System.out.println("Copied tree-sitter natives from " + sibling);
-                return;
-            }
-            System.out.println("Sibling tree-sitter-javals present but libs missing; falling back to download");
+        if (useLocal) {
+            copyFromLocal(outDir);
+            return;
         }
 
-        OsArch oa = detectOsArch();
-        download(releaseUrl(releaseTag, "tree-sitter-" + runtimeTag + "-" + oa.assetStem() + "." + oa.ext()),
-                runtimeOut);
-        download(releaseUrl(releaseTag, "tree-sitter-kotlin-" + kotlinTag + "-" + oa.assetStem() + "." + oa.ext()),
-                kotlinOut);
-        System.out.println("Downloaded tree-sitter natives into " + outDir);
+        HttpClient client = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .connectTimeout(Duration.ofSeconds(30))
+                .build();
+
+        for (OsArch oa : PUBLISHED_PLATFORMS) {
+            String runtimeMapped = mappedLibraryName("tree-sitter", oa);
+            String kotlinMapped = mappedLibraryName("tree-sitter-kotlin", oa);
+            download(client, releaseUrl(releaseTag,
+                    "tree-sitter-" + runtimeTag + "-" + oa.assetStem() + "." + oa.ext()),
+                    outDir.resolve(runtimeMapped));
+            download(client, releaseUrl(releaseTag,
+                    "tree-sitter-kotlin-" + kotlinTag + "-" + oa.assetStem() + "." + oa.ext()),
+                    outDir.resolve(kotlinMapped));
+        }
+        System.out.println("Downloaded tree-sitter natives for all platforms into " + outDir);
+    }
+
+    private static void copyFromLocal(Path outDir) throws IOException {
+        Path repoRoot = Path.of(required("treesitter.repo.root")).toAbsolutePath().normalize();
+        Path sibling = repoRoot.resolveSibling("tree-sitter-javals");
+        if (!Files.isDirectory(sibling)) {
+            throw new IllegalStateException(
+                    "treesitter.useLocal=true but sibling not found: " + sibling);
+        }
+
+        String runtimeMapped = System.mapLibraryName("tree-sitter");
+        String kotlinMapped = System.mapLibraryName("tree-sitter-kotlin");
+        Path foundRuntime = findSiblingLib(sibling, runtimeMapped);
+        Path foundKotlin = findSiblingLib(sibling, kotlinMapped);
+        if (foundRuntime == null || foundKotlin == null) {
+            throw new IllegalStateException(
+                    "treesitter.useLocal=true but libs missing under " + sibling
+                            + " (need " + runtimeMapped + " and " + kotlinMapped + ")");
+        }
+        copy(foundRuntime, outDir.resolve(runtimeMapped));
+        copy(foundKotlin, outDir.resolve(kotlinMapped));
+        System.out.println("Copied tree-sitter natives from " + sibling);
     }
 
     private static String required(String key) {
@@ -97,11 +118,8 @@ public final class FetchTreeSitterNatives {
                 + tag + "/" + asset;
     }
 
-    private static void download(String url, Path dest) throws IOException, InterruptedException {
-        HttpClient client = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .connectTimeout(Duration.ofSeconds(30))
-                .build();
+    private static void download(HttpClient client, String url, Path dest)
+            throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(URI.create(url))
                 .timeout(Duration.ofMinutes(2))
                 .GET()
@@ -115,32 +133,13 @@ public final class FetchTreeSitterNatives {
         }
     }
 
-    private static OsArch detectOsArch() {
-        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
-        String osKey;
-        String ext;
-        if (os.contains("win")) {
-            osKey = "windows";
-            ext = "dll";
-        } else if (os.contains("mac") || os.contains("darwin")) {
-            osKey = "macos";
-            ext = "dylib";
-        } else if (os.contains("linux")) {
-            osKey = "linux";
-            ext = "so";
-        } else {
-            throw new IllegalStateException("Unsupported OS for tree-sitter natives: " + os);
-        }
-        String archKey;
-        if (arch.equals("amd64") || arch.equals("x86_64")) {
-            archKey = "x64";
-        } else if (arch.equals("aarch64") || arch.equals("arm64")) {
-            archKey = "arm64";
-        } else {
-            throw new IllegalStateException("Unsupported arch for tree-sitter natives: " + arch);
-        }
-        return new OsArch(osKey, archKey, ext);
+    /** JNI-style library filename for a target OS (not the build host). */
+    private static String mappedLibraryName(String name, OsArch oa) {
+        return switch (oa.os()) {
+            case "windows" -> name + "." + oa.ext();
+            case "linux", "macos" -> "lib" + name + "." + oa.ext();
+            default -> throw new IllegalStateException("Unsupported OS: " + oa.os());
+        };
     }
 
     private record OsArch(String os, String arch, String ext) {

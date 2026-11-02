@@ -93,8 +93,8 @@
                   <value>${maven.multiModuleProjectDirectory}</value>
                 </systemProperty>
                 <systemProperty>
-                  <key>treesitter.project.version</key>
-                  <value>${project.version}</value>
+                  <key>treesitter.useLocal</key>
+                  <value>${treesitter.useLocal}</value>
                 </systemProperty>
                 <systemProperty>
                   <key>treesitter.javals.tag</key>
