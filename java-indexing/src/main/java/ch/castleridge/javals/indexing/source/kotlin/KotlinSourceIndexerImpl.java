@@ -19,10 +19,8 @@ import java.util.Set;
 
 import org.objectweb.asm.Opcodes;
 
-import io.github.treesitter.jtreesitter.Node;
-import io.github.treesitter.jtreesitter.Tree;
-
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.treesitter.TsNode;
 import ch.castleridge.javals.indexing.model.AccessVisibility;
 import ch.castleridge.javals.indexing.model.EmptyArrays;
 import ch.castleridge.javals.indexing.model.FieldEntry;
@@ -49,21 +47,19 @@ final class KotlinSourceIndexerImpl {
         }
         String source = content.toString();
         try {
-            Optional<Tree> parsed = KotlinTreeSitter.parse(source);
+            Optional<TsNode> parsed = KotlinTreeSitter.parse(sourceUri, source);
             if (parsed.isEmpty()) {
                 System.err.println("Failed to parse Kotlin source " + resourcePath);
                 return;
             }
-            try (Tree tree = parsed.get()) {
-                Node root = tree.getRootNode();
-                indexFile(resourcePath, sourceUri, root, into);
-                try {
-                    into.registerBloom(sourceUri, resourcePath,
-                            KotlinIdentifierCollector.collectAndBuild(root));
-                } catch (RuntimeException | StackOverflowError e) {
-                    System.err.println("Failed to build identifier bloom filter for " + resourcePath
-                            + ": " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                }
+            TsNode root = parsed.get();
+            indexFile(resourcePath, sourceUri, root, into);
+            try {
+                into.registerBloom(sourceUri, resourcePath,
+                        KotlinIdentifierCollector.collectAndBuild(root));
+            } catch (RuntimeException | StackOverflowError e) {
+                System.err.println("Failed to build identifier bloom filter for " + resourcePath
+                        + ": " + e.getClass().getSimpleName() + ": " + e.getMessage());
             }
         } catch (RuntimeException | Error e) {
             System.err.println("Failed to index Kotlin source " + resourcePath
@@ -71,20 +67,20 @@ final class KotlinSourceIndexerImpl {
         }
     }
 
-    private static void indexFile(String resourcePath, String sourceUri, Node root, Index into) {
+    private static void indexFile(String resourcePath, String sourceUri, TsNode root, Index into) {
         String packageJvm = "";
         Map<String, String> singleTypeImports = new HashMap<>();
         List<String> onDemandImports = new ArrayList<>();
-        List<Node> topTypes = new ArrayList<>();
-        List<Node> topCallables = new ArrayList<>();
+        List<TsNode> topTypes = new ArrayList<>();
+        List<TsNode> topCallables = new ArrayList<>();
         String facadeFromJvmName = null;
 
-        for (Node child : namedChildren(root)) {
-            switch (child.getType()) {
+        for (TsNode child : namedChildren(root)) {
+            switch (child.type()) {
                 case "package_header" -> packageJvm = identifierToJvm(childNamed(child, "identifier"));
                 case "import_list" -> {
-                    for (Node imp : namedChildren(child)) {
-                        if ("import_header".equals(imp.getType())) {
+                    for (TsNode imp : namedChildren(child)) {
+                        if ("import_header".equals(imp.type())) {
                             collectImport(imp, singleTypeImports, onDemandImports);
                         }
                     }
@@ -102,7 +98,7 @@ final class KotlinSourceIndexerImpl {
         }
 
         Set<String> siblings = new LinkedHashSet<>();
-        for (Node typeNode : topTypes) {
+        for (TsNode typeNode : topTypes) {
             String name = typeSimpleName(typeNode);
             if (name != null && !name.isEmpty()) siblings.add(name);
         }
@@ -120,7 +116,7 @@ final class KotlinSourceIndexerImpl {
                 siblings);
 
         Deque<String> enclosing = new ArrayDeque<>();
-        for (Node typeNode : topTypes) {
+        for (TsNode typeNode : topTypes) {
             indexType(resourcePath, sourceUri, typeNode, packageJvm, enclosing,
                     new HashSet<>(), hints, into, false);
         }
@@ -130,19 +126,19 @@ final class KotlinSourceIndexerImpl {
         }
     }
 
-    private static void collectImport(Node importHeader, Map<String, String> single,
+    private static void collectImport(TsNode importHeader, Map<String, String> single,
                                       List<String> onDemand) {
-        Node id = childNamed(importHeader, "identifier");
+        TsNode id = childNamed(importHeader, "identifier");
         String jvm = identifierToJvm(id);
         if (jvm == null || jvm.isEmpty()) return;
         if (childNamed(importHeader, "wildcard_import") != null) {
             onDemand.add(jvm);
             return;
         }
-        Node alias = childNamed(importHeader, "import_alias");
+        TsNode alias = childNamed(importHeader, "import_alias");
         String simple;
         if (alias != null) {
-            Node aliasId = firstNamedOfTypes(alias, "type_identifier", "simple_identifier");
+            TsNode aliasId = firstNamedOfTypes(alias, "type_identifier", "simple_identifier");
             simple = text(aliasId);
         } else {
             int slash = jvm.lastIndexOf('/');
@@ -153,15 +149,15 @@ final class KotlinSourceIndexerImpl {
         }
     }
 
-    private static void indexFileFacade(String resourcePath, String sourceUri, List<Node> callables,
+    private static void indexFileFacade(String resourcePath, String sourceUri, List<TsNode> callables,
                                         String packageJvm, String facadeSimple,
                                         SourceResolutionHints hints, Index into) {
         String jvmOwner = packageJvm.isEmpty() ? facadeSimple : packageJvm + "/" + facadeSimple;
         List<FieldEntry> fields = new ArrayList<>();
         List<MethodEntry> methods = new ArrayList<>();
 
-        for (Node decl : callables) {
-            if ("property_declaration".equals(decl.getType())) {
+        for (TsNode decl : callables) {
+            if ("property_declaration".equals(decl.type())) {
                 FieldEntry field = toFieldEntry(decl, Set.of(), jvmOwner, true);
                 if (field != null && AccessVisibility.shouldIndexMember(field.modifiers(), field.name())) {
                     fields.add(field);
@@ -172,7 +168,7 @@ final class KotlinSourceIndexerImpl {
                     MethodEntry setter = syntheticPropertyAccessor(decl, false, true, Set.of(), jvmOwner);
                     if (setter != null) methods.add(setter);
                 }
-            } else if ("function_declaration".equals(decl.getType())) {
+            } else if ("function_declaration".equals(decl.type())) {
                 MethodEntry method = toMethodEntry(decl, Set.of(), jvmOwner, true);
                 if (method != null && AccessVisibility.shouldIndexMember(method.modifiers(), method.name())) {
                     methods.add(method);
@@ -198,13 +194,13 @@ final class KotlinSourceIndexerImpl {
                 hints));
     }
 
-    private static void indexType(String resourcePath, String sourceUri, Node typeNode,
+    private static void indexType(String resourcePath, String sourceUri, TsNode typeNode,
                                   String packageJvm, Deque<String> enclosing,
                                   Set<String> outerTypeParams, SourceResolutionHints hints,
                                   Index into, boolean nested) {
-        boolean isObject = "object_declaration".equals(typeNode.getType())
-                || "companion_object".equals(typeNode.getType());
-        boolean isCompanion = "companion_object".equals(typeNode.getType());
+        boolean isObject = "object_declaration".equals(typeNode.type())
+                || "companion_object".equals(typeNode.type());
+        boolean isCompanion = "companion_object".equals(typeNode.type());
 
         String simple = typeSimpleName(typeNode);
         if ((simple == null || simple.isEmpty()) && isCompanion) {
@@ -228,15 +224,15 @@ final class KotlinSourceIndexerImpl {
 
         Set<String> typeParams = new HashSet<>(outerTypeParams);
         List<TypeParamRef> declaredTypeParams = new ArrayList<>();
-        Node typeParamsNode = childNamed(typeNode, "type_parameters");
+        TsNode typeParamsNode = childNamed(typeNode, "type_parameters");
         if (typeParamsNode != null) {
-            for (Node tp : namedChildren(typeParamsNode)) {
-                if (!"type_parameter".equals(tp.getType())) continue;
+            for (TsNode tp : namedChildren(typeParamsNode)) {
+                if (!"type_parameter".equals(tp.type())) continue;
                 String tpName = text(childNamed(tp, "type_identifier"));
                 if (tpName != null) typeParams.add(tpName);
             }
-            for (Node tp : namedChildren(typeParamsNode)) {
-                if (!"type_parameter".equals(tp.getType())) continue;
+            for (TsNode tp : namedChildren(typeParamsNode)) {
+                if (!"type_parameter".equals(tp.type())) continue;
                 declaredTypeParams.add(toTypeParamRef(tp, typeParams, localName));
             }
         }
@@ -246,8 +242,8 @@ final class KotlinSourceIndexerImpl {
 
         Type superRef = null;
         List<Type> interfaceRefs = new ArrayList<>();
-        for (Node del : namedChildren(typeNode)) {
-            if (!"delegation_specifier".equals(del.getType())) continue;
+        for (TsNode del : namedChildren(typeNode)) {
+            if (!"delegation_specifier".equals(del.type())) continue;
             Type t = delegationType(del, typeParams, localName);
             if (t == null) continue;
             if (declKind == TypeDeclKind.INTERFACE || declKind == TypeDeclKind.ANNOTATION) {
@@ -262,16 +258,16 @@ final class KotlinSourceIndexerImpl {
         List<FieldEntry> fields = new ArrayList<>();
         List<MethodEntry> methods = new ArrayList<>();
         List<String> innerTypes = new ArrayList<>();
-        List<Node> nestedTypes = new ArrayList<>();
+        List<TsNode> nestedTypes = new ArrayList<>();
 
-        Node primary = childNamed(typeNode, "primary_constructor");
+        TsNode primary = childNamed(typeNode, "primary_constructor");
         if (primary != null) {
             MethodEntry ctor = toConstructorEntry(primary, typeParams, localName);
             if (ctor != null && AccessVisibility.shouldIndexMember(ctor.modifiers(), ctor.name())) {
                 methods.add(ctor);
             }
-            for (Node param : namedChildren(primary)) {
-                if (!"class_parameter".equals(param.getType())) continue;
+            for (TsNode param : namedChildren(primary)) {
+                if (!"class_parameter".equals(param.type())) continue;
                 if (childNamed(param, "binding_pattern_kind") == null) continue;
                 FieldEntry field = constructorPropertyField(param, typeParams, localName);
                 if (field != null && AccessVisibility.shouldIndexMember(field.modifiers(), field.name())) {
@@ -292,7 +288,7 @@ final class KotlinSourceIndexerImpl {
                     EmptyArrays.ANNOTATION_REF));
         }
 
-        Node body = firstNamedOfTypes(typeNode, "class_body", "enum_class_body");
+        TsNode body = firstNamedOfTypes(typeNode, "class_body", "enum_class_body");
         if (body != null) {
             collectBodyMembers(body, typeParams, localName, fields, methods, nestedTypes, innerTypes);
         }
@@ -316,7 +312,7 @@ final class KotlinSourceIndexerImpl {
 
         enclosing.addLast(localName);
         try {
-            for (Node child : nestedTypes) {
+            for (TsNode child : nestedTypes) {
                 indexType(resourcePath, sourceUri, child, packageJvm, enclosing,
                         typeParams, hints, into, true);
             }
@@ -325,11 +321,11 @@ final class KotlinSourceIndexerImpl {
         }
     }
 
-    private static void collectBodyMembers(Node body, Set<String> typeParams, String localName,
+    private static void collectBodyMembers(TsNode body, Set<String> typeParams, String localName,
                                            List<FieldEntry> fields, List<MethodEntry> methods,
-                                           List<Node> nestedTypes, List<String> innerTypes) {
-        for (Node member : namedChildren(body)) {
-            switch (member.getType()) {
+                                           List<TsNode> nestedTypes, List<String> innerTypes) {
+        for (TsNode member : namedChildren(body)) {
+            switch (member.type()) {
                 case "enum_entry" -> {
                     FieldEntry field = enumConstantField(member, localName);
                     if (field != null) fields.add(field);
@@ -363,7 +359,7 @@ final class KotlinSourceIndexerImpl {
                         break;
                     }
                     String nestedName = typeSimpleName(member);
-                    if ("companion_object".equals(member.getType())
+                    if ("companion_object".equals(member.type())
                             && (nestedName == null || nestedName.isEmpty())) {
                         nestedName = "Companion";
                     }
@@ -377,15 +373,16 @@ final class KotlinSourceIndexerImpl {
         }
     }
 
-    private static TypeDeclKind declKind(Node typeNode, boolean isObject) {
+    private static TypeDeclKind declKind(TsNode typeNode, boolean isObject) {
         if (isObject) return TypeDeclKind.CLASS;
-        if (hasAnonText(typeNode, "interface")) return TypeDeclKind.INTERFACE;
-        if (hasAnonText(typeNode, "enum")) return TypeDeclKind.ENUM;
+        if (childNamed(typeNode, "enum_class_body") != null) return TypeDeclKind.ENUM;
+        if (headerContainsKeyword(typeNode, "interface")) return TypeDeclKind.INTERFACE;
+        if (headerContainsKeyword(typeNode, "enum")) return TypeDeclKind.ENUM;
         if (modifierContains(typeNode, "class_modifier", "annotation")) return TypeDeclKind.ANNOTATION;
         return TypeDeclKind.CLASS;
     }
 
-    private static int typeModifiers(Node typeNode, TypeDeclKind kind, boolean isObject, boolean nested) {
+    private static int typeModifiers(TsNode typeNode, TypeDeclKind kind, boolean isObject, boolean nested) {
         int flags = visibilityFlags(typeNode);
         if (kind == TypeDeclKind.INTERFACE || kind == TypeDeclKind.ANNOTATION) {
             flags |= Opcodes.ACC_ABSTRACT | Opcodes.ACC_INTERFACE;
@@ -413,11 +410,11 @@ final class KotlinSourceIndexerImpl {
         return flags;
     }
 
-    private static int visibilityFlags(Node owner) {
-        Node modifiers = childNamed(owner, "modifiers");
+    private static int visibilityFlags(TsNode owner) {
+        TsNode modifiers = childNamed(owner, "modifiers");
         if (modifiers == null) return Opcodes.ACC_PUBLIC;
-        for (Node child : namedChildren(modifiers)) {
-            if (!"visibility_modifier".equals(child.getType())) continue;
+        for (TsNode child : namedChildren(modifiers)) {
+            if (!"visibility_modifier".equals(child.type())) continue;
             return switch (text(child)) {
                 case "private" -> Opcodes.ACC_PRIVATE;
                 case "protected" -> Opcodes.ACC_PROTECTED;
@@ -428,18 +425,18 @@ final class KotlinSourceIndexerImpl {
         return Opcodes.ACC_PUBLIC;
     }
 
-    private static boolean modifierContains(Node owner, String modifierType, String text) {
-        Node modifiers = childNamed(owner, "modifiers");
+    private static boolean modifierContains(TsNode owner, String modifierType, String text) {
+        TsNode modifiers = childNamed(owner, "modifiers");
         if (modifiers == null) return false;
-        for (Node child : namedChildren(modifiers)) {
-            if (modifierType.equals(child.getType()) && text.equals(text(child))) {
+        for (TsNode child : namedChildren(modifiers)) {
+            if (modifierType.equals(child.type()) && text.equals(text(child))) {
                 return true;
             }
         }
         return false;
     }
 
-    private static FieldEntry toFieldEntry(Node prop, Set<String> typeParams,
+    private static FieldEntry toFieldEntry(TsNode prop, Set<String> typeParams,
                                            String ownerJvm, boolean topLevel) {
         String name = propertyName(prop);
         if (name == null || name.isEmpty()) return null;
@@ -460,12 +457,12 @@ final class KotlinSourceIndexerImpl {
         return new FieldEntry(flags, name, type, EmptyArrays.ANNOTATION_REF);
     }
 
-    private static FieldEntry constructorPropertyField(Node param, Set<String> typeParams,
+    private static FieldEntry constructorPropertyField(TsNode param, Set<String> typeParams,
                                                        String ownerJvm) {
         String name = text(childNamed(param, "simple_identifier"));
         if (name == null || name.isEmpty()) return null;
         int flags = visibilityFlags(param);
-        Node binding = childNamed(param, "binding_pattern_kind");
+        TsNode binding = childNamed(param, "binding_pattern_kind");
         if (binding == null || "val".equals(text(binding))) {
             flags |= Opcodes.ACC_FINAL;
         }
@@ -474,7 +471,7 @@ final class KotlinSourceIndexerImpl {
         return new FieldEntry(flags, name, type, EmptyArrays.ANNOTATION_REF);
     }
 
-    private static FieldEntry enumConstantField(Node entry, String ownerJvm) {
+    private static FieldEntry enumConstantField(TsNode entry, String ownerJvm) {
         String name = text(childNamed(entry, "simple_identifier"));
         if (name == null || name.isEmpty()) return null;
         return new FieldEntry(
@@ -484,7 +481,7 @@ final class KotlinSourceIndexerImpl {
                 EmptyArrays.ANNOTATION_REF);
     }
 
-    private static MethodEntry syntheticPropertyAccessor(Node prop, boolean getter,
+    private static MethodEntry syntheticPropertyAccessor(TsNode prop, boolean getter,
                                                          boolean topLevel,
                                                          Set<String> typeParams, String ownerJvm) {
         String name = propertyName(prop);
@@ -517,7 +514,7 @@ final class KotlinSourceIndexerImpl {
         return false;
     }
 
-    private static MethodEntry toMethodEntry(Node fn, Set<String> typeParams,
+    private static MethodEntry toMethodEntry(TsNode fn, Set<String> typeParams,
                                              String ownerJvm, boolean topLevel) {
         String name = text(childNamed(fn, "simple_identifier"));
         if (name == null || name.isEmpty()) return null;
@@ -531,15 +528,15 @@ final class KotlinSourceIndexerImpl {
 
         Set<String> methodTypeParams = new HashSet<>(typeParams);
         List<TypeParamRef> typeParamRefs = new ArrayList<>();
-        Node typeParamsNode = childNamed(fn, "type_parameters");
+        TsNode typeParamsNode = childNamed(fn, "type_parameters");
         if (typeParamsNode != null) {
-            for (Node tp : namedChildren(typeParamsNode)) {
-                if (!"type_parameter".equals(tp.getType())) continue;
+            for (TsNode tp : namedChildren(typeParamsNode)) {
+                if (!"type_parameter".equals(tp.type())) continue;
                 String tpName = text(childNamed(tp, "type_identifier"));
                 if (tpName != null) methodTypeParams.add(tpName);
             }
-            for (Node tp : namedChildren(typeParamsNode)) {
-                if (!"type_parameter".equals(tp.getType())) continue;
+            for (TsNode tp : namedChildren(typeParamsNode)) {
+                if (!"type_parameter".equals(tp.type())) continue;
                 typeParamRefs.add(toTypeParamRef(tp, methodTypeParams, ownerJvm));
             }
         }
@@ -561,10 +558,10 @@ final class KotlinSourceIndexerImpl {
 
         List<ParameterEntry> params = new ArrayList<>();
         boolean varargs = false;
-        Node valueParams = childNamed(fn, "function_value_parameters");
+        TsNode valueParams = childNamed(fn, "function_value_parameters");
         if (valueParams != null) {
-            for (Node p : namedChildren(valueParams)) {
-                if (!"parameter".equals(p.getType())) continue;
+            for (TsNode p : namedChildren(valueParams)) {
+                if (!"parameter".equals(p.type())) continue;
                 // vararg is on parameter_modifiers sibling / parent — check preceding modifiers on parent seq
                 if (hasVarargNearby(valueParams, p)) varargs = true;
                 Type pt = toTypeNode(typeChild(p), methodTypeParams, ownerJvm);
@@ -587,39 +584,39 @@ final class KotlinSourceIndexerImpl {
                 EmptyArrays.ANNOTATION_REF);
     }
 
-    private static boolean hasVarargNearby(Node valueParams, Node parameter) {
+    private static boolean hasVarargNearby(TsNode valueParams, TsNode parameter) {
         // parameter_modifiers may be a sibling before parameter in grammar as _function_value_parameter
         // In CST, parameter_modifiers may wrap or sit as sibling; scan valueParams children textually.
-        List<Node> kids = namedChildren(valueParams);
+        List<TsNode> kids = namedChildren(valueParams);
         for (int i = 0; i < kids.size(); i++) {
             if (kids.get(i) == parameter || kids.get(i).equals(parameter)) {
                 // look at previous named sibling
-                if (i > 0 && "parameter_modifiers".equals(kids.get(i - 1).getType())) {
+                if (i > 0 && "parameter_modifiers".equals(kids.get(i - 1).type())) {
                     return text(kids.get(i - 1)).contains("vararg");
                 }
             }
         }
-        Node mods = childNamed(parameter, "parameter_modifiers");
+        TsNode mods = childNamed(parameter, "parameter_modifiers");
         return mods != null && text(mods).contains("vararg");
     }
 
-    private static MethodEntry toConstructorEntry(Node ctor, Set<String> typeParams, String ownerJvm) {
+    private static MethodEntry toConstructorEntry(TsNode ctor, Set<String> typeParams, String ownerJvm) {
         int flags = visibilityFlags(ctor);
         List<ParameterEntry> params = new ArrayList<>();
         boolean varargs = false;
-        if ("primary_constructor".equals(ctor.getType())) {
-            for (Node param : namedChildren(ctor)) {
-                if (!"class_parameter".equals(param.getType())) continue;
+        if ("primary_constructor".equals(ctor.type())) {
+            for (TsNode param : namedChildren(ctor)) {
+                if (!"class_parameter".equals(param.type())) continue;
                 Type pt = toTypeNode(typeChild(param), typeParams, ownerJvm);
                 if (pt == null) pt = TypeRef.unresolved("Any");
                 params.add(new ParameterEntry(text(childNamed(param, "simple_identifier")),
                         0, pt, EmptyArrays.ANNOTATION_REF));
             }
         } else {
-            Node valueParams = childNamed(ctor, "function_value_parameters");
+            TsNode valueParams = childNamed(ctor, "function_value_parameters");
             if (valueParams != null) {
-                for (Node p : namedChildren(valueParams)) {
-                    if (!"parameter".equals(p.getType())) continue;
+                for (TsNode p : namedChildren(valueParams)) {
+                    if (!"parameter".equals(p.type())) continue;
                     if (hasVarargNearby(valueParams, p)) varargs = true;
                     Type pt = toTypeNode(typeChild(p), typeParams, ownerJvm);
                     if (pt == null) pt = TypeRef.unresolved("Any");
@@ -641,7 +638,7 @@ final class KotlinSourceIndexerImpl {
                 EmptyArrays.ANNOTATION_REF);
     }
 
-    private static TypeParamRef toTypeParamRef(Node tp, Set<String> typeParams, String ownerJvm) {
+    private static TypeParamRef toTypeParamRef(TsNode tp, Set<String> typeParams, String ownerJvm) {
         String name = text(childNamed(tp, "type_identifier"));
         if (name == null) name = "?";
         List<Type> bounds = new ArrayList<>();
@@ -650,25 +647,25 @@ final class KotlinSourceIndexerImpl {
         return new TypeParamRef(name, EmptyArrays.toArray(bounds, EmptyArrays.TYPE));
     }
 
-    private static Type delegationType(Node del, Set<String> typeParams, String ownerJvm) {
-        Node user = childNamed(del, "user_type");
+    private static Type delegationType(TsNode del, Set<String> typeParams, String ownerJvm) {
+        TsNode user = childNamed(del, "user_type");
         if (user != null) return toUserType(user, typeParams, ownerJvm);
-        Node ctorInv = childNamed(del, "constructor_invocation");
+        TsNode ctorInv = childNamed(del, "constructor_invocation");
         if (ctorInv != null) {
-            Node ut = childNamed(ctorInv, "user_type");
+            TsNode ut = childNamed(ctorInv, "user_type");
             if (ut != null) return toUserType(ut, typeParams, ownerJvm);
         }
-        Node explicit = childNamed(del, "explicit_delegation");
+        TsNode explicit = childNamed(del, "explicit_delegation");
         if (explicit != null) {
-            Node ut = childNamed(explicit, "user_type");
+            TsNode ut = childNamed(explicit, "user_type");
             if (ut != null) return toUserType(ut, typeParams, ownerJvm);
         }
         return TypeRef.unresolved("Any");
     }
 
-    private static Type toTypeNode(Node typeNode, Set<String> typeParams, String ownerJvm) {
+    private static Type toTypeNode(TsNode typeNode, Set<String> typeParams, String ownerJvm) {
         if (typeNode == null) return null;
-        return switch (typeNode.getType()) {
+        return switch (typeNode.type()) {
             case "nullable_type" -> {
                 Type inner = toTypeNode(firstNamedOfTypes(typeNode, "user_type", "parenthesized_type"),
                         typeParams, ownerJvm);
@@ -682,10 +679,10 @@ final class KotlinSourceIndexerImpl {
         };
     }
 
-    private static Type toUserType(Node user, Set<String> typeParams, String ownerJvm) {
+    private static Type toUserType(TsNode user, Set<String> typeParams, String ownerJvm) {
         List<String> parts = new ArrayList<>();
-        for (Node child : namedChildren(user)) {
-            if ("type_identifier".equals(child.getType())) {
+        for (TsNode child : namedChildren(user)) {
+            if ("type_identifier".equals(child.type())) {
                 parts.add(text(child));
             }
         }
@@ -711,19 +708,19 @@ final class KotlinSourceIndexerImpl {
             base = TypeRef.resolved(sb.toString());
         }
 
-        Node argList = childNamed(user, "type_arguments");
+        TsNode argList = childNamed(user, "type_arguments");
         if (argList == null) {
             return base;
         }
         List<Type> args = new ArrayList<>();
-        for (Node proj : namedChildren(argList)) {
-            if (!"type_projection".equals(proj.getType()) && typeChild(proj) == null
-                    && !"user_type".equals(proj.getType())
-                    && !"nullable_type".equals(proj.getType())) {
+        for (TsNode proj : namedChildren(argList)) {
+            if (!"type_projection".equals(proj.type()) && typeChild(proj) == null
+                    && !"user_type".equals(proj.type())
+                    && !"nullable_type".equals(proj.type())) {
                 continue;
             }
             Type arg = toTypeNode(typeChild(proj) != null ? typeChild(proj) : proj, typeParams, ownerJvm);
-            if (arg == null && "user_type".equals(proj.getType())) {
+            if (arg == null && "user_type".equals(proj.type())) {
                 arg = toUserType(proj, typeParams, ownerJvm);
             }
             if (arg == null) arg = TypeRef.unresolved("Any");
@@ -750,7 +747,7 @@ final class KotlinSourceIndexerImpl {
         };
     }
 
-    private static String parseFileJvmName(Node fileAnnotation) {
+    private static String parseFileJvmName(TsNode fileAnnotation) {
         // @file:JvmName("X") — look for user_type JvmName and a string literal child somewhere.
         String text = text(fileAnnotation);
         if (text == null || !text.contains("JvmName")) return null;
@@ -775,54 +772,54 @@ final class KotlinSourceIndexerImpl {
         return base + "Kt";
     }
 
-    private static String typeSimpleName(Node typeNode) {
+    private static String typeSimpleName(TsNode typeNode) {
         return text(childNamed(typeNode, "type_identifier"));
     }
 
-    private static String propertyName(Node prop) {
-        Node varDecl = childNamed(prop, "variable_declaration");
+    private static String propertyName(TsNode prop) {
+        TsNode varDecl = childNamed(prop, "variable_declaration");
         if (varDecl != null) {
             return text(childNamed(varDecl, "simple_identifier"));
         }
-        Node multi = childNamed(prop, "multi_variable_declaration");
+        TsNode multi = childNamed(prop, "multi_variable_declaration");
         if (multi != null) {
-            Node first = childNamed(multi, "variable_declaration");
+            TsNode first = childNamed(multi, "variable_declaration");
             if (first != null) return text(childNamed(first, "simple_identifier"));
         }
         return null;
     }
 
-    private static Type propertyType(Node prop, Set<String> typeParams, String ownerJvm) {
-        Node varDecl = childNamed(prop, "variable_declaration");
+    private static Type propertyType(TsNode prop, Set<String> typeParams, String ownerJvm) {
+        TsNode varDecl = childNamed(prop, "variable_declaration");
         if (varDecl != null) {
             return toTypeNode(typeChild(varDecl), typeParams, ownerJvm);
         }
         return null;
     }
 
-    private static boolean isVarProperty(Node prop) {
-        Node binding = childNamed(prop, "binding_pattern_kind");
+    private static boolean isVarProperty(TsNode prop) {
+        TsNode binding = childNamed(prop, "binding_pattern_kind");
         return binding != null && "var".equals(text(binding));
     }
 
-    private static boolean hasBlockBody(Node fn) {
-        Node body = childNamed(fn, "function_body");
+    private static boolean hasBlockBody(TsNode fn) {
+        TsNode body = childNamed(fn, "function_body");
         if (body == null) return false;
-        return childNamed(body, "statements") != null || hasAnonText(body, "{");
+        return childNamed(body, "statements") != null;
     }
 
-    private static Node typeChild(Node parent) {
+    private static TsNode typeChild(TsNode parent) {
         if (parent == null) return null;
         return firstNamedOfTypes(parent,
                 "user_type", "nullable_type", "parenthesized_type",
                 "not_nullable_type", "function_type");
     }
 
-    private static String identifierToJvm(Node identifier) {
+    private static String identifierToJvm(TsNode identifier) {
         if (identifier == null) return "";
         List<String> parts = new ArrayList<>();
-        for (Node child : namedChildren(identifier)) {
-            if ("simple_identifier".equals(child.getType())) {
+        for (TsNode child : namedChildren(identifier)) {
+            if ("simple_identifier".equals(child.type())) {
                 parts.add(text(child));
             }
         }
@@ -834,47 +831,60 @@ final class KotlinSourceIndexerImpl {
         return String.join("/", parts);
     }
 
-    private static List<Node> namedChildren(Node node) {
+    private static List<TsNode> namedChildren(TsNode node) {
         if (node == null) return List.of();
-        return node.getNamedChildren();
+        return node.namedChildren();
     }
 
-    private static Node childNamed(Node parent, String type) {
+    private static TsNode childNamed(TsNode parent, String type) {
         if (parent == null) return null;
-        for (Node child : namedChildren(parent)) {
-            if (type.equals(child.getType())) return child;
+        for (TsNode child : namedChildren(parent)) {
+            if (type.equals(child.type())) return child;
         }
         return null;
     }
 
-    private static Node firstNamedOfTypes(Node parent, String... types) {
+    private static TsNode firstNamedOfTypes(TsNode parent, String... types) {
         if (parent == null) return null;
         Set<String> wanted = Set.of(types);
-        for (Node child : namedChildren(parent)) {
-            if (wanted.contains(child.getType())) return child;
+        for (TsNode child : namedChildren(parent)) {
+            if (wanted.contains(child.type())) return child;
         }
         return null;
     }
 
-    private static boolean hasAnonText(Node parent, String text) {
-        if (parent == null) return false;
-        for (Node child : parent.getChildren()) {
-            if (child == null) continue;
-            if (!child.isNamed() && text.equals(child.getText())) {
-                return true;
-            }
-            // Some grammars expose keyword as type == text
-            if (text.equals(child.getType())) {
-                return true;
-            }
+    /** True if {@code keyword} appears as a token in the declaration header (before the name). */
+    private static boolean headerContainsKeyword(TsNode typeNode, String keyword) {
+        if (typeNode == null || keyword == null || keyword.isEmpty()) return false;
+        TsNode name = childNamed(typeNode, "type_identifier");
+        int end = name != null ? name.startByte() : typeNode.endByte();
+        String header = typeNode.textSlice(typeNode.startByte(), end);
+        return containsKeywordToken(header, keyword);
+    }
+
+    private static boolean containsKeywordToken(String text, String keyword) {
+        if (text == null || text.isEmpty()) return false;
+        int from = 0;
+        while (from <= text.length() - keyword.length()) {
+            int idx = text.indexOf(keyword, from);
+            if (idx < 0) return false;
+            boolean startOk = idx == 0 || !isIdentChar(text.charAt(idx - 1));
+            int after = idx + keyword.length();
+            boolean endOk = after >= text.length() || !isIdentChar(text.charAt(after));
+            if (startOk && endOk) return true;
+            from = idx + 1;
         }
         return false;
     }
 
-    private static String text(Node node) {
+    private static boolean isIdentChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '_';
+    }
+
+    private static String text(TsNode node) {
         if (node == null) return null;
-        String t = node.getText();
-        return t == null ? null : t;
+        String t = node.text();
+        return t == null || t.isEmpty() ? null : t;
     }
 
     private static String simpleName(String path) {

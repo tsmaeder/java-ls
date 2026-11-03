@@ -93,7 +93,6 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <argLine>
-            --enable-native-access=ALL-UNNAMED
             --add-exports jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED
             --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED
             --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED
@@ -118,7 +117,6 @@
           <classpathScope>test</classpathScope>
           <commandlineArgs>${exec.args}</commandlineArgs>
           <jvmArguments>
-            --enable-native-access=ALL-UNNAMED
             --add-exports jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED
             --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED
             --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED

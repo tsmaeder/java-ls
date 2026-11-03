@@ -9,9 +9,8 @@ package ch.castleridge.javals.indexing.source.kotlin;
 import java.util.HashSet;
 import java.util.Set;
 
-import io.github.treesitter.jtreesitter.Node;
-
 import ch.castleridge.javals.indexing.bloom.IdentifierBloomFilter;
+import ch.castleridge.javals.indexing.treesitter.TsNode;
 
 /**
  * Collects simple identifier names from a Kotlin CST for bloom filters.
@@ -20,19 +19,19 @@ final class KotlinIdentifierCollector {
 
     private KotlinIdentifierCollector() {}
 
-    static IdentifierBloomFilter collectAndBuild(Node root) {
+    static IdentifierBloomFilter collectAndBuild(TsNode root) {
         Set<String> names = new HashSet<>();
         walk(root, names);
         return IdentifierBloomFilter.create(names);
     }
 
-    private static void walk(Node node, Set<String> names) {
+    private static void walk(TsNode node, Set<String> names) {
         if (node == null) return;
-        String type = node.getType();
+        String type = node.type();
         if ("simple_identifier".equals(type) || "type_identifier".equals(type)) {
-            add(names, node.getText());
+            add(names, node.text());
         }
-        for (Node child : node.getNamedChildren()) {
+        for (TsNode child : node.namedChildren()) {
             walk(child, names);
         }
     }

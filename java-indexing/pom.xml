@@ -40,11 +40,6 @@
       <version>1.15.0</version>
     </dependency>
     <dependency>
-      <groupId>io.github.tree-sitter</groupId>
-      <artifactId>jtreesitter</artifactId>
-      <version>${jtreesitter.version}</version>
-    </dependency>
-    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
@@ -100,14 +95,6 @@
                   <key>treesitter.javals.tag</key>
                   <value>${tree-sitter-javals.tag}</value>
                 </systemProperty>
-                <systemProperty>
-                  <key>treesitter.runtime.tag</key>
-                  <value>${tree-sitter.runtime.tag}</value>
-                </systemProperty>
-                <systemProperty>
-                  <key>treesitter.kotlin.tag</key>
-                  <value>${tree-sitter.kotlin.tag}</value>
-                </systemProperty>
               </systemProperties>
             </configuration>
           </execution>
@@ -144,7 +131,7 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <argLine>--enable-native-access=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED</argLine>
+          <argLine>--add-exports jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED</argLine>
           <systemPropertyVariables>
             <javals.treeSitter.dir>${project.build.directory}/natives</javals.treeSitter.dir>
           </systemPropertyVariables>

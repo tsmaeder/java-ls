@@ -13,12 +13,12 @@ import java.nio.file.Path;
 import java.util.Optional;
 
 /**
- * Resolves the directory that holds {@code tree-sitter} and
- * {@code tree-sitter-kotlin} shared libraries for the host platform.
+ * Resolves the directory that holds the {@code tree_sitter_javals} executable
+ * for the host platform.
  *
- * <p>Natives are laid out as {@code {root}/{os}-{arch}/} (e.g.
- * {@code natives/windows-x64/}). Property/env values and search roots point at
- * the parent; this class resolves into the host platform subdirectory.
+ * <p>Layout is {@code {root}/{os}-{arch}/} (e.g. {@code natives/windows-x64/}).
+ * Property/env values and search roots point at the parent; this class resolves
+ * into the host platform subdirectory.
  */
 public final class TreeSitterNatives {
 
@@ -29,7 +29,7 @@ public final class TreeSitterNatives {
 
     private TreeSitterNatives() {}
 
-    /** Directory containing the two shared libraries, or empty if not found. */
+    /** Directory containing the host executable, or empty if not found. */
     public static Optional<Path> directory() {
         Path cached = cachedDir;
         if (cached != null) {
@@ -50,17 +50,19 @@ public final class TreeSitterNatives {
 
     public static Path requireDirectory() {
         return directory().orElseThrow(() -> new IllegalStateException(
-                "tree-sitter natives not found. Set " + ENV_DIR
-                        + " or place libs next to the jar / in target/natives/"
+                "tree_sitter_javals not found. Set " + ENV_DIR
+                        + " or place the executable next to the jar / in target/natives/"
                         + hostPlatformStem() + "."));
     }
 
-    public static Path runtimeLibrary() {
-        return requireDirectory().resolve(System.mapLibraryName("tree-sitter"));
+    /** Absolute path to {@code tree_sitter_javals} ({@code .exe} on Windows). */
+    public static Path executable() {
+        return requireDirectory().resolve(executableFileName());
     }
 
-    public static Path kotlinLibrary() {
-        return requireDirectory().resolve(System.mapLibraryName("tree-sitter-kotlin"));
+    public static String executableFileName() {
+        String osName = System.getProperty("os.name", "").toLowerCase();
+        return osName.contains("win") ? "tree_sitter_javals.exe" : "tree_sitter_javals";
     }
 
     /** Host platform stem matching release layout ({@code windows-x64}, etc.). */
@@ -80,7 +82,7 @@ public final class TreeSitterNatives {
             return "macos-arm64";
         }
         throw new IllegalStateException(
-                "Unsupported host platform for tree-sitter natives: os.name="
+                "Unsupported host platform for tree_sitter_javals: os.name="
                         + System.getProperty("os.name") + " os.arch="
                         + System.getProperty("os.arch"));
     }
@@ -103,12 +105,10 @@ public final class TreeSitterNatives {
             if (found != null) return found;
         }
 
-        // Maven test / module target/natives relative to cwd or class location.
         Path fromClasses = directoryBesideCodeSource();
         if (fromClasses != null) {
             Path found = resolvePlatformDir(fromClasses.resolve("natives"));
             if (found != null) return found;
-            // classes -> target/classes; natives is target/natives
             Path target = fromClasses.getFileName() != null
                     && "classes".equals(fromClasses.getFileName().toString())
                     ? fromClasses.getParent()
@@ -126,13 +126,13 @@ public final class TreeSitterNatives {
                 Path.of("java-indexing/target/natives").toAbsolutePath().normalize());
     }
 
-    /** Resolves {@code root/{hostPlatform}} when that subdirectory holds the libs. */
+    /** Resolves {@code root/{hostPlatform}} when that subdirectory holds the exe. */
     private static Path resolvePlatformDir(Path root) {
         if (root == null || !Files.isDirectory(root)) {
             return null;
         }
         Path platform = root.resolve(hostPlatformStem());
-        return hasLibs(platform) ? platform : null;
+        return hasExecutable(platform) ? platform : null;
     }
 
     private static Path directoryBesideCodeSource() {
@@ -142,7 +142,6 @@ public final class TreeSitterNatives {
             URI uri = loc.toURI();
             Path path = Path.of(uri);
             if (Files.isRegularFile(path)) {
-                // Running from a jar: natives sit next to the jar.
                 return path.getParent();
             }
             if (Files.isDirectory(path)) {
@@ -154,9 +153,8 @@ public final class TreeSitterNatives {
         return null;
     }
 
-    private static boolean hasLibs(Path dir) {
+    private static boolean hasExecutable(Path dir) {
         if (dir == null || !Files.isDirectory(dir)) return false;
-        return Files.isRegularFile(dir.resolve(System.mapLibraryName("tree-sitter")))
-                && Files.isRegularFile(dir.resolve(System.mapLibraryName("tree-sitter-kotlin")));
+        return Files.isRegularFile(dir.resolve(executableFileName()));
     }
 }

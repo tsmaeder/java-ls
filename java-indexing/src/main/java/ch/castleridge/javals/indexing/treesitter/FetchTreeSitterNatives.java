@@ -19,28 +19,25 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Build-time helper: copies or downloads {@code tree-sitter} /
- * {@code tree-sitter-kotlin} shared libraries and the {@code tree_sitter_javals}
+ * Build-time helper: copies or downloads the {@code tree_sitter_javals}
  * executable into a natives directory, one subdirectory per platform.
  *
  * <p>By default downloads every published platform from the pinned GitHub
- * release. Pass {@code -Dtreesitter.useLocal=true} to copy host artifacts from
- * sibling {@code ../tree-sitter-javals} instead.
+ * release. Pass {@code -Dtreesitter.useLocal=true} to copy the host executable
+ * from sibling {@code ../tree-sitter-javals} instead.
  */
 public final class FetchTreeSitterNatives {
 
     private static final List<OsArch> PUBLISHED_PLATFORMS = List.of(
-            new OsArch("windows", "x64", "dll", ".exe"),
-            new OsArch("linux", "x64", "so", ""),
-            new OsArch("macos", "arm64", "dylib", ""));
+            new OsArch("windows", "x64", ".exe"),
+            new OsArch("linux", "x64", ""),
+            new OsArch("macos", "arm64", ""));
 
     private FetchTreeSitterNatives() {}
 
     public static void main(String[] args) throws Exception {
         Path outDir = Path.of(required("treesitter.natives.dir")).toAbsolutePath().normalize();
         String releaseTag = System.getProperty("treesitter.javals.tag", "v0.1.1");
-        String runtimeTag = System.getProperty("treesitter.runtime.tag", "v0.27.1");
-        String kotlinTag = System.getProperty("treesitter.kotlin.tag", "0.3.8");
         boolean useLocal = Boolean.parseBoolean(System.getProperty("treesitter.useLocal", "false"));
 
         Files.createDirectories(outDir);
@@ -60,21 +57,14 @@ public final class FetchTreeSitterNatives {
             Path platformDir = outDir.resolve(oa.assetStem());
             Files.createDirectories(platformDir);
 
-            String runtimeMapped = mappedLibraryName("tree-sitter", oa);
-            String kotlinMapped = mappedLibraryName("tree-sitter-kotlin", oa);
             String exeName = "tree_sitter_javals" + oa.exeExt();
-
-            download(client, releaseUrl(releaseTag,
-                    "tree-sitter-" + runtimeTag + "-" + oa.assetStem() + "." + oa.ext()),
-                    platformDir.resolve(runtimeMapped));
-            download(client, releaseUrl(releaseTag,
-                    "tree-sitter-kotlin-" + kotlinTag + "-" + oa.assetStem() + "." + oa.ext()),
-                    platformDir.resolve(kotlinMapped));
+            Path dest = platformDir.resolve(exeName);
             download(client, releaseUrl(releaseTag,
                     "tree_sitter_javals-" + oa.assetStem() + oa.exeExt()),
-                    platformDir.resolve(exeName));
+                    dest);
+            markExecutable(dest);
         }
-        System.out.println("Downloaded tree-sitter natives for all platforms into " + outDir);
+        System.out.println("Downloaded tree_sitter_javals for all platforms into " + outDir);
     }
 
     private static void copyFromLocal(Path outDir) throws IOException {
@@ -89,24 +79,23 @@ public final class FetchTreeSitterNatives {
         Path platformDir = outDir.resolve(host.assetStem());
         Files.createDirectories(platformDir);
 
-        String runtimeMapped = mappedLibraryName("tree-sitter", host);
-        String kotlinMapped = mappedLibraryName("tree-sitter-kotlin", host);
         String exeName = "tree_sitter_javals" + host.exeExt();
-
-        Path foundRuntime = findSiblingArtifact(sibling, runtimeMapped);
-        Path foundKotlin = findSiblingArtifact(sibling, kotlinMapped);
         Path foundExe = findSiblingArtifact(sibling, exeName);
-        if (foundRuntime == null || foundKotlin == null || foundExe == null) {
+        if (foundExe == null) {
             throw new IllegalStateException(
-                    "treesitter.useLocal=true but artifacts missing under " + sibling
-                            + " (need " + runtimeMapped + ", " + kotlinMapped
-                            + ", and " + exeName + ")");
+                    "treesitter.useLocal=true but executable missing under " + sibling
+                            + " (need " + exeName + ")");
         }
-        copy(foundRuntime, platformDir.resolve(runtimeMapped));
-        copy(foundKotlin, platformDir.resolve(kotlinMapped));
-        copy(foundExe, platformDir.resolve(exeName));
-        System.out.println("Copied tree-sitter natives from " + sibling
+        Path dest = platformDir.resolve(exeName);
+        copy(foundExe, dest);
+        markExecutable(dest);
+        System.out.println("Copied tree_sitter_javals from " + sibling
                 + " into " + platformDir);
+    }
+
+    private static void markExecutable(Path exe) {
+        // no-op on Windows; needed after download/copy on Unix
+        exe.toFile().setExecutable(true, false);
     }
 
     private static OsArch hostPlatform() {
@@ -125,7 +114,7 @@ public final class FetchTreeSitterNatives {
             return PUBLISHED_PLATFORMS.get(2);
         }
         throw new IllegalStateException(
-                "Unsupported host platform for local tree-sitter copy: os.name="
+                "Unsupported host platform for local tree_sitter_javals copy: os.name="
                         + System.getProperty("os.name") + " os.arch="
                         + System.getProperty("os.arch"));
     }
@@ -191,16 +180,7 @@ public final class FetchTreeSitterNatives {
         }
     }
 
-    /** JNI-style library filename for a target OS (not the build host). */
-    private static String mappedLibraryName(String name, OsArch oa) {
-        return switch (oa.os()) {
-            case "windows" -> name + "." + oa.ext();
-            case "linux", "macos" -> "lib" + name + "." + oa.ext();
-            default -> throw new IllegalStateException("Unsupported OS: " + oa.os());
-        };
-    }
-
-    private record OsArch(String os, String arch, String ext, String exeExt) {
+    private record OsArch(String os, String arch, String exeExt) {
         String assetStem() {
             return os + "-" + arch;
         }

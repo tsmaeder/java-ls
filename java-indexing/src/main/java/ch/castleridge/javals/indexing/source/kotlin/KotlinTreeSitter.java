@@ -6,55 +6,32 @@
  */
 package ch.castleridge.javals.indexing.source.kotlin;
 
-import java.lang.foreign.Arena;
-import java.lang.foreign.SymbolLookup;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
-import io.github.treesitter.jtreesitter.InputEncoding;
-import io.github.treesitter.jtreesitter.Language;
-import io.github.treesitter.jtreesitter.Parser;
-import io.github.treesitter.jtreesitter.Tree;
-
-import ch.castleridge.javals.indexing.treesitter.TreeSitterNatives;
+import ch.castleridge.javals.indexing.treesitter.TreeSitterJavalsClient;
+import ch.castleridge.javals.indexing.treesitter.TsNode;
 
 /**
- * Shared Kotlin tree-sitter {@link Language} plus per-thread {@link Parser}s.
+ * Kotlin parse facade over the per-thread {@code tree_sitter_javals} process.
  */
 final class KotlinTreeSitter {
 
-    private static final Object LOCK = new Object();
-    private static volatile Language language;
-    private static volatile Throwable initFailure;
-
-    private static final ThreadLocal<Parser> PARSERS = ThreadLocal.withInitial(() -> {
-        Language lang = language();
-        return new Parser(lang);
-    });
-
     private KotlinTreeSitter() {}
 
-    static Language language() {
-        Language lang = language;
-        if (lang != null) return lang;
-        synchronized (LOCK) {
-            if (language != null) return language;
-            if (initFailure != null) {
-                throw new IllegalStateException("Kotlin tree-sitter failed to initialize", initFailure);
-            }
-            try {
-                SymbolLookup symbols = SymbolLookup.libraryLookup(
-                        TreeSitterNatives.kotlinLibrary(), Arena.global());
-                language = Language.load(symbols, "tree_sitter_kotlin");
-                return language;
-            } catch (Throwable t) {
-                initFailure = t;
-                throw new IllegalStateException("Kotlin tree-sitter failed to initialize", t);
-            }
-        }
+    static Optional<TsNode> parse(String sourceUri, String source) {
+        if (source == null) return Optional.empty();
+        String uri = sourceUri == null ? "" : sourceUri;
+        return TreeSitterJavalsClient.current().parse("kotlin", uri, source);
     }
 
-    static Optional<Tree> parse(String source) {
-        Parser parser = PARSERS.get();
-        return parser.parse(source, InputEncoding.UTF_8);
+    static Optional<TsNode> parse(String sourceUri, byte[] sourceUtf8) {
+        if (sourceUtf8 == null) return Optional.empty();
+        String uri = sourceUri == null ? "" : sourceUri;
+        return TreeSitterJavalsClient.current().parse("kotlin", uri, sourceUtf8);
+    }
+
+    static Optional<TsNode> parse(String source) {
+        return parse("", source == null ? null : source.getBytes(StandardCharsets.UTF_8));
     }
 }
