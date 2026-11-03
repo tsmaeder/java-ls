@@ -10,11 +10,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import ch.castleridge.javals.indexing.bloom.BloomEntry;
@@ -25,10 +29,33 @@ import ch.castleridge.javals.indexing.model.MethodEntry;
 import ch.castleridge.javals.indexing.model.SourceTypeEntry;
 import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
+import ch.castleridge.javals.indexing.treesitter.TreeSitterJavalsClient;
+import ch.castleridge.javals.indexing.treesitter.TreeSitterNatives;
 
 class KotlinSourceIndexerSmokeTest {
 
     private static final String SOURCE_URI = "mem:///";
+
+    @BeforeAll
+    static void requireWorkingTreeSitterJavals() {
+        Path exe;
+        try {
+            exe = TreeSitterNatives.executable();
+        } catch (IllegalStateException e) {
+            fail("tree_sitter_javals native binary not found (set "
+                    + TreeSitterNatives.PROP_DIR + " / " + TreeSitterNatives.ENV_DIR
+                    + "): " + e.getMessage());
+            return;
+        }
+        assertTrue(Files.isRegularFile(exe),
+                "tree_sitter_javals executable missing at " + exe);
+
+        var parsed = TreeSitterJavalsClient.current()
+                .parse("kotlin", "smoke://probe.kt", "fun main() {}\n");
+        assertTrue(parsed.isPresent(),
+                "tree_sitter_javals protocol/parse failed for " + exe
+                        + " (empty response; check natives pin / release assets)");
+    }
 
     @Test
     void indexesClassInterfaceObjectAndNested() {

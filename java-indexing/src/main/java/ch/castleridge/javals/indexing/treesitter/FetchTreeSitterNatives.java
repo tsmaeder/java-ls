@@ -17,14 +17,18 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
  * Build-time helper: copies or downloads the {@code tree_sitter_javals}
  * executable into a natives directory, one subdirectory per platform.
  *
- * <p>By default downloads every published platform from the pinned GitHub
- * release. Pass {@code -Dtreesitter.useLocal=true} to copy the host executable
- * from sibling {@code ../tree-sitter-javals} instead.
+ * <p>By default downloads every published platform zip from the pinned GitHub
+ * release ({@code tree_sitter_javals-{os-arch}.zip}, each containing a
+ * {@code {os-arch}/} folder with the executable). Pass
+ * {@code -Dtreesitter.useLocal=true} to copy the host executable from sibling
+ * {@code ../tree-sitter-javals} instead.
  */
 public final class FetchTreeSitterNatives {
 
@@ -37,7 +41,7 @@ public final class FetchTreeSitterNatives {
 
     public static void main(String[] args) throws Exception {
         Path outDir = Path.of(required("treesitter.natives.dir")).toAbsolutePath().normalize();
-        String releaseTag = System.getProperty("treesitter.javals.tag", "v0.1.1");
+        String releaseTag = System.getProperty("treesitter.javals.tag", "v0.1.2");
         boolean useLocal = Boolean.parseBoolean(System.getProperty("treesitter.useLocal", "false"));
 
         Files.createDirectories(outDir);
@@ -54,15 +58,17 @@ public final class FetchTreeSitterNatives {
                 .build();
 
         for (OsArch oa : PUBLISHED_PLATFORMS) {
-            Path platformDir = outDir.resolve(oa.assetStem());
-            Files.createDirectories(platformDir);
+            String zipName = "tree_sitter_javals-" + oa.assetStem() + ".zip";
+            Path zipPath = outDir.resolve(zipName);
+            download(client, releaseUrl(releaseTag, zipName), zipPath);
+            unzip(zipPath, outDir);
+            Files.deleteIfExists(zipPath);
 
-            String exeName = "tree_sitter_javals" + oa.exeExt();
-            Path dest = platformDir.resolve(exeName);
-            download(client, releaseUrl(releaseTag,
-                    "tree_sitter_javals-" + oa.assetStem() + oa.exeExt()),
-                    dest);
-            markExecutable(dest);
+            Path exe = outDir.resolve(oa.assetStem()).resolve("tree_sitter_javals" + oa.exeExt());
+            if (!Files.isRegularFile(exe)) {
+                throw new IOException("Zip " + zipName + " did not contain " + exe);
+            }
+            markExecutable(exe);
         }
         System.out.println("Downloaded tree_sitter_javals for all platforms into " + outDir);
     }
@@ -177,6 +183,28 @@ public final class FetchTreeSitterNatives {
         }
         try (InputStream in = response.body()) {
             Files.copy(in, dest, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    /** Unzips {@code zip} into {@code destDir}, rejecting path-traversal entries. */
+    private static void unzip(Path zip, Path destDir) throws IOException {
+        Path destRoot = destDir.toAbsolutePath().normalize();
+        try (InputStream fileIn = Files.newInputStream(zip);
+                ZipInputStream zin = new ZipInputStream(fileIn)) {
+            ZipEntry entry;
+            while ((entry = zin.getNextEntry()) != null) {
+                Path out = destRoot.resolve(entry.getName()).normalize();
+                if (!out.startsWith(destRoot)) {
+                    throw new IOException("Zip entry escapes destination: " + entry.getName());
+                }
+                if (entry.isDirectory()) {
+                    Files.createDirectories(out);
+                } else {
+                    Files.createDirectories(out.getParent());
+                    Files.copy(zin, out, StandardCopyOption.REPLACE_EXISTING);
+                }
+                zin.closeEntry();
+            }
         }
     }
 
