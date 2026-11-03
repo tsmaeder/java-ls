@@ -202,7 +202,7 @@ public final class MbtService {
                 if (!sources.containsKey(dependencyModuleInfo.id)) {
                     JarInput jarInput = new JarInput(binaryJarPath, collector);
                     sources.put(dependencyModuleInfo.id, jarInput);
-                    if (sourceJar != null) {
+                    if (sourceJar != null && !sameArchive(binaryJar, sourceJar)) {
                         // Key by JarInput.sourceUri() (jar:file:…!/), matching
                         // TypeEntry#sourceUri() stamped on indexed entries.
                         sourceJarByBinaryJar.put(jarInput.sourceUri(), sourceJar);
@@ -351,9 +351,17 @@ public final class MbtService {
             Path sourceJar = pathFromUri(dm == null ? null : dm.sources);
             if (binaryJar == null || sourceJar == null) continue;
             if (!Files.isRegularFile(binaryJar) || !Files.isRegularFile(sourceJar)) continue;
+            if (sameArchive(dm.jar, dm.sources)) continue;
             out.putIfAbsent(new JarInput(binaryJar).sourceUri(), sourceJar.toUri().toString());
         }
         return out.isEmpty() ? Map.of() : Map.copyOf(out);
+    }
+
+    /** True when both URIs/paths name the same archive after normalization. */
+    private static boolean sameArchive(String binaryUri, String sourcesUri) {
+        String binary = normalizeArchiveUri(binaryUri);
+        String sources = normalizeArchiveUri(sourcesUri);
+        return binary != null && binary.equals(sources);
     }
 
     /** Invert binary→sources into normalized sources-archive URI → binary jar URI. */

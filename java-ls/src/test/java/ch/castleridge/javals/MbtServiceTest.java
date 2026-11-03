@@ -72,6 +72,22 @@ class MbtServiceTest {
     }
 
     @Test
+    void sourceJarLookupSkipsWhenSourcesUriEqualsBinaryJar(@TempDir Path tempDir) throws Exception {
+        Path binJar = tempDir.resolve("lib/gradle-api.jar");
+        Files.createDirectories(binJar.getParent());
+        Files.write(binJar, new byte[0]);
+
+        MbtDependencyModuleInfo selfAttached = new MbtDependencyModuleInfo();
+        selfAttached.jar = binJar.toUri().toString();
+        selfAttached.sources = binJar.toUri().toString();
+
+        MbtInfo info = new MbtInfo();
+        info.dependencyModules = List.of(selfAttached);
+
+        assertTrue(MbtService.sourceJarLookup(info).isEmpty());
+    }
+
+    @Test
     void classPathForUsesFirstOwningTargetNotDependent(@TempDir Path tempDir) throws Exception {
         Path libSrc = tempDir.resolve("lib/src");
         Path appSrc = tempDir.resolve("app/src");
