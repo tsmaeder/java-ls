@@ -6,8 +6,13 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased] <tbd>
 
-- Added gradle importer as default importer
+- Added Gradle importer as default importer (`gradle-extractor.jar`)
 - Extracted Maven importer to sibling repo `maven-extractor`; default jar renamed to `maven-extractor.jar`
+- Added Kotlin source indexing (`.kt` files are watched and indexed for Java type resolution)
+- Indexed compile-time constant fields with folded values so constant references resolve correctly
+- Indexed private nested types as stubs so they remain resolvable from the index
+- Preserved existing `mbt.json` when an importer run finds no fragments
+- Fixed source-jar lookup for self-attached dependencies
 
 ## 0.1.0 2026-10-01
 
