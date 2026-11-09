@@ -28,13 +28,15 @@ package ch.castleridge.javals.indexing.model;
  * against it.
  *
  * <p>Bytecode-derived entries populate this from the {@code ConstantValue}
- * classfile attribute; source-derived entries do a best-effort literal
- * extraction (typed literals and unary-minus over a numeric literal). When
- * the initializer is a field reference ({@code TypeName.FIELD} or a
- * same-file identifier) rather than a literal, {@link #constantOwner()} and
- * {@link #constantName()} record that alias so the class reader can copy
- * the referenced field's constant. A {@code null} {@link #constantValue()}
- * just means "no compile-time constant known yet".
+ * classfile attribute; source-derived entries do a best-effort constant
+ * extraction (typed literals, unary {@code +/-}, same-type {@code +}
+ * expressions, and field refs). Same-type constant expressions are folded
+ * into {@link #constantValue()} at index time. When the initializer is a
+ * cross-type field reference ({@code TypeName.FIELD}) rather than a
+ * foldable expression, {@link #constantOwner()} and {@link #constantName()}
+ * record that alias so the class reader can copy the referenced field's
+ * constant. A {@code null} {@link #constantValue()} just means "no
+ * compile-time constant known yet".
  */
 public record FieldEntry(
         int modifiers,

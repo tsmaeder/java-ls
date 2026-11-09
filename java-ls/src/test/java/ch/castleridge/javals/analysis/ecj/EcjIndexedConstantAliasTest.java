@@ -122,4 +122,33 @@ class EcjIndexedConstantAliasTest {
                 index, classpath);
         assertNoErrors(session);
     }
+
+    @Test
+    void foldsIndexedSameTypeConcatInCrossCuAnnotation() {
+        indexSource("p/Ann.java", """
+                package p;
+                public @interface Ann {
+                    String value();
+                }
+                """);
+        indexSource("p/Basic.java", """
+                package p;
+                public final class Basic {
+                    public static final String PREFIX = "test.generated";
+                    public static final String NAME = PREFIX + ".Interceptors";
+                }
+                """);
+
+        AnalysisSession session = new EcjWorkspaceCompiler().analyze(
+                "file:///workspace/q/Use.java",
+                """
+                        package q;
+                        import p.Ann;
+                        import p.Basic;
+                        @Ann(Basic.NAME + "_composite")
+                        class Use {}
+                        """,
+                index, classpath);
+        assertNoErrors(session);
+    }
 }

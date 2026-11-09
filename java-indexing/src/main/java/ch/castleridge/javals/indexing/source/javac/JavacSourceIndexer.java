@@ -31,6 +31,7 @@ import org.objectweb.asm.Opcodes;
 import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.ArrayTypeTree;
 import com.sun.source.tree.AssignmentTree;
+import com.sun.source.tree.BinaryTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.ExpressionTree;
@@ -42,6 +43,7 @@ import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.ModifiersTree;
 import com.sun.source.tree.NewArrayTree;
 import com.sun.source.tree.ParameterizedTypeTree;
+import com.sun.source.tree.ParenthesizedTree;
 import com.sun.source.tree.PrimitiveTypeTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.TypeParameterTree;
@@ -54,6 +56,7 @@ import com.sun.tools.javac.tree.JCTree;
 
 import ch.castleridge.javals.indexing.index.InMemorySource;
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.source.SameTypeConstantFolder;
 import ch.castleridge.javals.indexing.model.AccessVisibility;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
@@ -246,6 +249,7 @@ public final class JavacSourceIndexer {
         }
 
         List<FieldEntry> fields = new ArrayList<>();
+        List<ExpressionTree> fieldInitializers = new ArrayList<>();
         List<MethodEntry> methods = new ArrayList<>();
         List<String> innerTypes = new ArrayList<>();
         List<ClassTree> nested = new ArrayList<>();
@@ -254,6 +258,7 @@ public final class JavacSourceIndexer {
             if (member instanceof VariableTree vt) {
                 if (isRecordComponent(vt)) {
                     fields.add(toRecordBackingField(vt, classTypeParams, localName));
+                    fieldInitializers.add(null);
                     continue;
                 }
                 int fieldFlags = modifierFlags(vt.getModifiers());
@@ -267,6 +272,7 @@ public final class JavacSourceIndexer {
                     continue;
                 }
                 fields.add(toFieldEntry(vt, classTypeParams, localName, declKind));
+                fieldInitializers.add(vt.getInitializer());
             } else if (member instanceof MethodTree mt) {
                 String methodName = mt.getName().toString();
                 if (!AccessVisibility.shouldIndexMember(modifierFlags(mt.getModifiers()), methodName)) {
@@ -288,6 +294,8 @@ public final class JavacSourceIndexer {
                 innerTypes.add(innerName);
             }
         }
+        SameTypeConstantFolder.foldFixedPoint(fields, (index, peers) ->
+                sameTypeConstantValue(fieldInitializers.get(index), peers, localName));
 
         TypeEntry entry = new SourceTypeEntry(
                 uri,
@@ -416,6 +424,57 @@ public final class JavacSourceIndexer {
             Type owner = typeRefForExpression(ms.getExpression());
             if (owner instanceof TypeRef ownerRef) {
                 return new ConstantFieldRef(ownerRef, ms.getIdentifier().toString());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Fold a same-type constant expression: literals, unary {@code +/-},
+     * binary {@code +}, and references to peers of {@code ownerJvm}.
+     */
+    private static Object sameTypeConstantValue(
+            ExpressionTree initializer, FieldEntry[] peers, String ownerJvm) {
+        if (initializer == null) return null;
+        if (initializer instanceof ParenthesizedTree paren) {
+            return sameTypeConstantValue(paren.getExpression(), peers, ownerJvm);
+        }
+        Object literal = literalConstantValue(initializer);
+        if (literal != null) return literal;
+        if (initializer instanceof UnaryTree unary) {
+            return switch (unary.getKind()) {
+                case UNARY_MINUS -> {
+                    Object operand = sameTypeConstantValue(unary.getExpression(), peers, ownerJvm);
+                    yield operand instanceof Number n ? negateNumber(n) : null;
+                }
+                case UNARY_PLUS -> {
+                    Object operand = sameTypeConstantValue(unary.getExpression(), peers, ownerJvm);
+                    yield operand instanceof Number n ? n : null;
+                }
+                default -> null;
+            };
+        }
+        if (initializer instanceof BinaryTree binary && binary.getKind() == Tree.Kind.PLUS) {
+            Object left = sameTypeConstantValue(binary.getLeftOperand(), peers, ownerJvm);
+            Object right = sameTypeConstantValue(binary.getRightOperand(), peers, ownerJvm);
+            return SameTypeConstantFolder.plus(left, right);
+        }
+        if (initializer instanceof IdentifierTree id) {
+            return SameTypeConstantFolder.resolvePeer(id.getName().toString(), peers);
+        }
+        if (initializer instanceof MemberSelectTree ms
+                && !ms.getIdentifier().contentEquals("class")) {
+            Type owner = typeRefForExpression(ms.getExpression());
+            if (owner instanceof TypeRef.Resolved resolved
+                    && resolved.jvmBinaryName().equals(ownerJvm)) {
+                return SameTypeConstantFolder.resolvePeer(ms.getIdentifier().toString(), peers);
+            }
+            String simple = ownerJvm;
+            int slash = Math.max(ownerJvm.lastIndexOf('/'), ownerJvm.lastIndexOf('$'));
+            if (slash >= 0) simple = ownerJvm.substring(slash + 1);
+            if (ms.getExpression() instanceof IdentifierTree recv
+                    && simple.equals(recv.getName().toString())) {
+                return SameTypeConstantFolder.resolvePeer(ms.getIdentifier().toString(), peers);
             }
         }
         return null;

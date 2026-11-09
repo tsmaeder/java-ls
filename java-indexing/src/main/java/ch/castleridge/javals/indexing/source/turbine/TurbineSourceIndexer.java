@@ -46,6 +46,7 @@ import ch.castleridge.javals.indexing.model.TypeDeclKind;
 import ch.castleridge.javals.indexing.model.TypeEntry;
 import ch.castleridge.javals.indexing.model.TypeParamRef;
 import ch.castleridge.javals.indexing.model.TypeRef;
+import ch.castleridge.javals.indexing.source.SameTypeConstantFolder;
 import ch.castleridge.javals.indexing.source.SourceIndexer;
 
 /**
@@ -162,12 +163,14 @@ public final class TurbineSourceIndexer {
         }
 
         List<FieldEntry> fields = new ArrayList<>();
+        List<Tree.Expression> fieldInitializers = new ArrayList<>();
         List<MethodEntry> methods = new ArrayList<>();
         List<Tree.TyDecl> nestedTypes = new ArrayList<>();
         List<String> innerNames = new ArrayList<>();
         if (kind == TypeDeclKind.RECORD) {
             for (Tree.VarDecl component : declaration.components()) {
                 fields.add(toRecordBackingField(component, classTypeParams, localName));
+                fieldInitializers.add(null);
             }
         }
         for (Tree member : declaration.members()) {
@@ -176,6 +179,7 @@ public final class TurbineSourceIndexer {
                 int flags = fieldModifierFlags(field, declaration);
                 if (!AccessVisibility.shouldIndexMember(flags, field.name().value())) continue;
                 fields.add(toFieldEntry(field, flags, classTypeParams, localName));
+                fieldInitializers.add(field.init().orElse(null));
             } else if (member instanceof Tree.MethDecl method) {
                 String name = methodName(method, simple);
                 int flags = methodModifierFlags(method, name, declaration);
@@ -193,6 +197,8 @@ public final class TurbineSourceIndexer {
                 innerNames.add(localName + "$" + nested.name().value());
             }
         }
+        SameTypeConstantFolder.foldFixedPoint(fields, (index, peers) ->
+                sameTypeConstantValue(fieldInitializers.get(index), peers, localName));
 
         TypeEntry entry = new SourceTypeEntry(
                 resourcePath,
@@ -588,6 +594,58 @@ public final class TurbineSourceIndexer {
             return toAnnotationValue(paren.expr(), ownerJvm);
         }
         return new AnnotationValue.Unsupported("non-constant expression");
+    }
+
+    /**
+     * Fold a same-type constant expression: literals, unary {@code +/-},
+     * binary {@code +}, and references to peers of {@code ownerJvm}.
+     */
+    private static Object sameTypeConstantValue(
+            Tree.Expression expression, FieldEntry[] peers, String ownerJvm) {
+        if (expression == null) return null;
+        if (expression instanceof Tree.Paren paren) {
+            return sameTypeConstantValue(paren.expr(), peers, ownerJvm);
+        }
+        Object literal = literalConstantValue(expression);
+        if (literal != null) return literal;
+        if (expression instanceof Tree.Unary unary) {
+            Object operand = sameTypeConstantValue(unary.expr(), peers, ownerJvm);
+            if (!(operand instanceof Number number)) return null;
+            if (unary.op() == TurbineOperatorKind.NEG) return negateNumber(number);
+            if (unary.op() == TurbineOperatorKind.UNARY_PLUS) return number;
+            return null;
+        }
+        if (expression instanceof Tree.Binary binary
+                && binary.op() == TurbineOperatorKind.PLUS) {
+            // children() flattens same-operator chains (A + B + C).
+            Object folded = null;
+            for (Tree.Expression child : binary.children()) {
+                Object part = sameTypeConstantValue(child, peers, ownerJvm);
+                folded = folded == null ? part : SameTypeConstantFolder.plus(folded, part);
+                if (folded == null) return null;
+            }
+            return folded;
+        }
+        if (expression instanceof Tree.ConstVarName constant) {
+            List<String> parts = identValues(constant.name());
+            if (parts.isEmpty()) return null;
+            if (parts.size() == 1) {
+                return SameTypeConstantFolder.resolvePeer(parts.get(0), peers);
+            }
+            String fieldName = parts.get(parts.size() - 1);
+            TypeRef owner = classRef(parts.subList(0, parts.size() - 1), ownerJvm);
+            if (owner instanceof TypeRef.Resolved resolved
+                    && resolved.jvmBinaryName().equals(ownerJvm)) {
+                return SameTypeConstantFolder.resolvePeer(fieldName, peers);
+            }
+            String simple = ownerJvm;
+            int slash = Math.max(ownerJvm.lastIndexOf('/'), ownerJvm.lastIndexOf('$'));
+            if (slash >= 0) simple = ownerJvm.substring(slash + 1);
+            if (parts.size() == 2 && simple.equals(parts.get(0))) {
+                return SameTypeConstantFolder.resolvePeer(fieldName, peers);
+            }
+        }
+        return null;
     }
 
     private static Object literalConstantValue(Tree.Expression expression) {

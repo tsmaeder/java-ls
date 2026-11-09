@@ -31,6 +31,7 @@ import org.eclipse.jdt.internal.compiler.ast.Argument;
 import org.eclipse.jdt.internal.compiler.ast.ArrayInitializer;
 import org.eclipse.jdt.internal.compiler.ast.ArrayQualifiedTypeReference;
 import org.eclipse.jdt.internal.compiler.ast.ArrayTypeReference;
+import org.eclipse.jdt.internal.compiler.ast.BinaryExpression;
 import org.eclipse.jdt.internal.compiler.ast.CharLiteral;
 import org.eclipse.jdt.internal.compiler.ast.ClassLiteralAccess;
 import org.eclipse.jdt.internal.compiler.ast.CompilationUnitDeclaration;
@@ -78,6 +79,7 @@ import org.eclipse.jdt.internal.compiler.problem.ProblemReporter;
 import org.objectweb.asm.Opcodes;
 
 import ch.castleridge.javals.indexing.index.Index;
+import ch.castleridge.javals.indexing.source.SameTypeConstantFolder;
 import ch.castleridge.javals.indexing.model.AccessVisibility;
 import ch.castleridge.javals.indexing.model.AnnotationRef;
 import ch.castleridge.javals.indexing.model.AnnotationValue;
@@ -271,6 +273,7 @@ final class EcjSourceIndexerEngine {
         }
 
         List<FieldEntry> fields = new ArrayList<>();
+        List<Expression> fieldInitializers = new ArrayList<>();
         List<MethodEntry> methods = new ArrayList<>();
         List<String> innerTypes = new ArrayList<>();
         List<TypeDeclaration> nested = new ArrayList<>();
@@ -290,8 +293,11 @@ final class EcjSourceIndexerEngine {
                     continue;
                 }
                 fields.add(toFieldEntry(field, classTypeParams, localName, declKind));
+                fieldInitializers.add(field.initialization);
             }
         }
+        SameTypeConstantFolder.foldFixedPoint(fields, (index, peers) ->
+                sameTypeConstantValue(fieldInitializers.get(index), peers, localName));
 
         if (td.methods != null) {
             for (AbstractMethodDeclaration method : td.methods) {
@@ -893,6 +899,56 @@ final class EcjSourceIndexerEngine {
         Type t = toTypeRef(type, Set.of(), ownerJvm);
         if (t instanceof Type.Annotated a) t = a.unwrap();
         return t;
+    }
+
+    /**
+     * Fold a same-type constant expression: literals, unary {@code +/-},
+     * binary {@code +}, and references to peers of {@code ownerJvm}.
+     */
+    private static Object sameTypeConstantValue(
+            Expression initializer, FieldEntry[] peers, String ownerJvm) {
+        if (initializer == null) return null;
+        Object literal = literalConstantValue(initializer);
+        if (literal != null) return literal;
+        if (initializer instanceof UnaryExpression unary) {
+            int operator = (unary.bits & ASTNode.OperatorMASK) >> ASTNode.OperatorSHIFT;
+            if (operator == OperatorIds.MINUS || operator == OperatorIds.PLUS) {
+                Object operand = sameTypeConstantValue(unary.expression, peers, ownerJvm);
+                if (operand instanceof Number n) {
+                    return operator == OperatorIds.MINUS ? negateNumber(n) : n;
+                }
+            }
+            return null;
+        }
+        if (initializer instanceof BinaryExpression binary) {
+            int operator = (binary.bits & ASTNode.OperatorMASK) >> ASTNode.OperatorSHIFT;
+            if (operator != OperatorIds.PLUS) return null;
+            Object left = sameTypeConstantValue(binary.left, peers, ownerJvm);
+            Object right = sameTypeConstantValue(binary.right, peers, ownerJvm);
+            return SameTypeConstantFolder.plus(left, right);
+        }
+        if (initializer instanceof SingleNameReference snr && snr.token != null) {
+            return SameTypeConstantFolder.resolvePeer(new String(snr.token), peers);
+        }
+        if (initializer instanceof QualifiedNameReference qnr
+                && qnr.tokens != null
+                && qnr.tokens.length >= 2) {
+            String fieldName = new String(qnr.tokens[qnr.tokens.length - 1]);
+            char[][] typeTokens = new char[qnr.tokens.length - 1][];
+            System.arraycopy(qnr.tokens, 0, typeTokens, 0, qnr.tokens.length - 1);
+            Type owner = typeRefForQualifiedTokens(typeTokens, ownerJvm);
+            if (owner instanceof TypeRef.Resolved resolved
+                    && resolved.jvmBinaryName().equals(ownerJvm)) {
+                return SameTypeConstantFolder.resolvePeer(fieldName, peers);
+            }
+            String simple = ownerJvm;
+            int slash = Math.max(ownerJvm.lastIndexOf('/'), ownerJvm.lastIndexOf('$'));
+            if (slash >= 0) simple = ownerJvm.substring(slash + 1);
+            if (qnr.tokens.length == 2 && simple.equals(new String(qnr.tokens[0]))) {
+                return SameTypeConstantFolder.resolvePeer(fieldName, peers);
+            }
+        }
+        return null;
     }
 
     /**
