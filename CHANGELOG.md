@@ -13,6 +13,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Indexed private nested types as stubs so they remain resolvable from the index
 - Preserved existing `mbt.json` when an importer run finds no fragments
 - Fixed source-jar lookup for self-attached dependencies
+- Changed indexing order to JDK, then project sources, then dependency jars. This allows faster navigation in source
 
 ## 0.1.0 2026-10-01
 

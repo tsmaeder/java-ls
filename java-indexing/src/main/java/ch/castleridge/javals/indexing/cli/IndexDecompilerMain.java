@@ -71,8 +71,8 @@ public final class IndexDecompilerMain {
         System.out.println("Indexed types: " + types);
         System.out.println("Indexed entries: " + entries);
         System.out.println("Elapsed: " + scan.elapsedMs() + " ms"
-                + " (class files: " + scan.classFilesMs() + " ms, source files: "
-                + scan.sourceFilesMs() + " ms)");
+                + " (jdk: " + scan.jdkMs() + " ms, source files: "
+                + scan.sourceFilesMs() + " ms, jars: " + scan.jarFilesMs() + " ms)");
         if (!scan.indexWorkMsByExtension().isEmpty()) {
             System.out.println("Index work by extension (summed parallel task ms): "
                     + formatWorkMs(scan.indexWorkMsByExtension()));

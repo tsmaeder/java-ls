@@ -53,7 +53,9 @@ public final class MbtJson {
      * when they are not absolute. {@code javaHome} is a filesystem path
      * (optionally a {@code file:} URI).
      *
-     * <p>Order and dedup rules:
+     * <p>Order and dedup rules for the returned list (composition only;
+     * {@link ch.castleridge.javals.indexing.scan.Scanner} always scans
+     * JDK → sources → jars regardless of this order):
      * <ol>
      *   <li>Source folders of every namespace come first, deduped by
      *       absolute normalized path.</li>

@@ -341,8 +341,8 @@ public final class IndexService {
         log(MessageType.Info, "Indexed " + index.size() + " types ("
                 + index.entryCount() + " entries) from " + sources.size()
                 + " sources in " + scan.elapsedMs() + " ms"
-                + " (class files: " + scan.classFilesMs() + " ms, source files: "
-                + scan.sourceFilesMs() + " ms)"
+                + " (jdk: " + scan.jdkMs() + " ms, source files: "
+                + scan.sourceFilesMs() + " ms, jars: " + scan.jarFilesMs() + " ms)"
                 + (failures.isEmpty() ? "" : "; " + failures.size() + " failures"));
         log(MessageType.Info, "Index stats: " + stats.sourceFileCount() + " source files, "
                 + jarCount + " jars (" + HeapSizeEstimator.formatBytes(jarBytes) + "); class files "
