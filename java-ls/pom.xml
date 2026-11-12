@@ -5,7 +5,7 @@
   <parent>
     <groupId>ch.castleridge</groupId>
     <artifactId>java-ls-parent</artifactId>
-    <version>0.1.1-SNAPSHOT</version>
+    <version>0.1.1</version>
   </parent>
 
   <artifactId>java-ls</artifactId>
@@ -41,13 +41,13 @@
     <dependency>
       <groupId>ch.castleridge</groupId>
       <artifactId>maven-extractor</artifactId>
-      <version>${maven-extractor.version}</version>
+      <version>0.1.0</version>
       <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>ch.castleridge</groupId>
       <artifactId>gradle-extractor</artifactId>
-      <version>${gradle-extractor.version}</version>
+      <version>0.1.0</version>
       <scope>provided</scope>
     </dependency>
     <dependency>
@@ -144,7 +144,7 @@
                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                   <mainClass>ch.castleridge.javals.App</mainClass>
                 </transformer>
-                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer" />
               </transformers>
               <finalName>${project.artifactId}</finalName>
               <filters>
