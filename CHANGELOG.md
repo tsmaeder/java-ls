@@ -6,6 +6,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased] <tbd>
 
+## 0.1.0 2026-11-02
+
 - Added Gradle importer as default importer (`gradle-extractor.jar`)
 - Extracted Maven importer to sibling repo `maven-extractor`; default jar renamed to `maven-extractor.jar`
 - Added Kotlin source indexing (`.kt` files are watched and indexed for Java type resolution)
